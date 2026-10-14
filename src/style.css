@@ -215,6 +215,11 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .check { display: inline-flex; align-items: center; gap: 7px; font-size: 0.92rem; cursor: pointer; padding-inline: 4px; }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }
 .session-actions { align-items: center; }
+.how { border-top: 1px solid var(--line); padding-top: 8px; font-size: 0.88rem; }
+.how summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.how-body { display: grid; gap: 10px; margin-top: 8px; }
+.how-title { font-weight: 600; }
+.how ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; }
 .foot { color: var(--muted); font-size: 0.85rem; max-width: 80ch; }
 
 @media (max-width: 860px) {
