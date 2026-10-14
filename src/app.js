@@ -545,6 +545,7 @@
         <p class="eyebrow"><span>Live coach</span><span id="coach-trend"></span></p>
         <p class="coach-cue" id="coach-cue"></p>
         <p class="coach-why" id="coach-why"></p>
+        <details class="how" id="coach-how" hidden><summary>How do I do that?</summary><div class="how-body"></div></details>
         <div class="gauges" id="coach-gauges"></div>
       </div>
       <div id="drill-result"></div>
@@ -575,7 +576,7 @@
     },
     masc: {
       '0:1': ['Open your jaw a little more.', 'F1 is low for this vowel, so the mouth may be too closed.'],
-      '0:-1': ['Add space in your throat, like the start of a yawn, without opening the mouth wider.', 'F1 is high for this vowel. A bigger throat lowers it.'],
+      '0:-1': ['Open your throat: start a yawn with your mouth closed and speak through that space.', 'F1 is high for this vowel. A bigger throat lowers it.'],
       '1:1': ['Bring your tongue slightly forward.', 'F2 is below the target for this vowel.'],
       '1:-1': ['Let your tongue sit a little further back and relax any smile.', 'F2 follows the tongue. Moving it back lowers F2 and darkens the vowel.'],
       '2:1': ['Relax the lip rounding slightly.', 'F3 is below the target for this vowel.'],
@@ -589,6 +590,61 @@
     '-1': ['Pull your tongue tip back a little and round your lips to lower the hiss.', 'A bigger space in front of the tongue makes a lower, darker hiss.'],
   };
   const FORMANT_ROLE = ['jaw opening', 'tongue front / back', 'lips and larynx'];
+  // Step-by-step "how do I do that?" for each physical adjustment the coach can ask for.
+  const HOWTO = {
+    larynxUp: { title: 'Raising the larynx (a smaller, lighter throat)', steps: [
+      'Find your larynx: put a finger lightly on your Adam\'s apple (the bump at the front of your neck). Everyone has one, even if it is small.',
+      'Swallow once and feel it jump up. That upward movement is what you want, just much smaller and held.',
+      'Now whisper a light, high "hee" or make a small "kitten mew". You should feel the bump rise a little and stay up.',
+      'Keep it there while you say the vowel quietly. Your neck should not squeeze; if it feels tight or strained, let it down a little and try again more gently.',
+      'Check the gauges: F2 and F3 should move up together when this works.'] },
+    larynxDown: { title: 'Opening the throat (a lower larynx)', steps: [
+      'An "open throat" just means more space between the back of your tongue and the back of your throat, with the larynx sitting lower.',
+      'Start a yawn with your mouth closed and stop halfway. Notice the cool, wide feeling at the back of the mouth and the bump in your neck moving down. That is the open throat.',
+      'Keep that feeling and speak the vowel through it, without actually yawning or opening the mouth wider.',
+      'Another way: say "uh" like a sleepy, low "duh". The larynx drops and the throat widens on its own.',
+      'Check the gauges: F1, F2 and F3 should all move down a little.'] },
+    throatLight: { title: 'Keeping the throat light', steps: [
+      'Light means not opening up the back of the throat. Avoid the "yawn" feeling.',
+      'Think of the sound sitting just behind your front teeth rather than deep in your chest or throat.',
+      'A small smile and a raised larynx (see the swallow trick) both help keep the space small.'] },
+    tongueForward: { title: 'Moving the tongue forward', steps: [
+      'Rest the tip of your tongue against the back of your bottom front teeth.',
+      'Let the middle of your tongue arch up and forward toward the ridge behind your top teeth, as if getting ready to say "ee" or "y".',
+      'Hold the vowel and slide the tongue body a few millimetres further forward. Small moves count: watch F2 rise.'] },
+    tongueBack: { title: 'Moving the tongue back', steps: [
+      'Let the tip of your tongue drop away from your teeth.',
+      'Feel the back of the tongue settle toward your throat, as in "oo" or "aw".',
+      'Hold the vowel and pull the tongue body back slightly. Watch F2 fall.'] },
+    smile: { title: 'Spreading the lips (a slight smile)', steps: [
+      'Pull the corners of your mouth back a little, as if politely smiling. Keep the teeth visible but relaxed.',
+      'Avoid pushing the lips forward or rounding them. Rounded lips make the tube longer and darker.'] },
+    round: { title: 'Rounding the lips', steps: [
+      'Push your lips slightly forward into a soft circle, as for "oo", without closing the mouth more.',
+      'A little goes a long way: rounding lengthens the vocal tract and lowers F2 and F3.'] },
+    jawOpen: { title: 'Opening the jaw', steps: [
+      'Let your bottom jaw drop by about a finger\'s width, keeping the tongue where it is.',
+      'Keep the jaw loose, not pushed down. F1 rises as the mouth opens.'] },
+    jawClose: { title: 'Closing the jaw slightly', steps: [
+      'Bring your teeth a little closer together without clenching.',
+      'Keep the tongue position the same. F1 falls as the mouth closes.'] },
+  };
+  const CUE_HOWTO = {
+    fem: { '0:1': ['jawOpen', 'throatLight'], '0:-1': ['jawClose'], '1:1': ['tongueForward', 'smile'], '1:-1': ['tongueBack'], '2:1': ['smile', 'larynxUp'], '2:-1': ['smile'], 'all:1': ['larynxUp', 'smile'], 'all:-1': ['larynxDown'] },
+    masc: { '0:1': ['jawOpen'], '0:-1': ['larynxDown'], '1:1': ['tongueForward'], '1:-1': ['tongueBack'], '2:1': ['round'], '2:-1': ['round', 'larynxDown'], 'all:1': ['larynxUp'], 'all:-1': ['larynxDown', 'round'] },
+  };
+  function renderHowto(key) {
+    const box = $('coach-how');
+    if (!box) return;
+    const ids = (CUE_HOWTO[state.goal] || {})[key] || [];
+    if (box.dataset.key === key + state.goal) return; // keep it open while the tip is the same
+    box.dataset.key = key + state.goal;
+    box.hidden = !ids.length;
+    box.querySelector('.how-body').innerHTML = ids.map(id => {
+      const h = HOWTO[id];
+      return `<div class="how-item"><p class="how-title">${h.title}</p><ol>${h.steps.map(s => `<li>${s}</li>`).join('')}</ol></div>`;
+    }).join('');
+  }
   function coachFrame(fr) {
     const co = state.coach, d = state.drill;
     if (!co || !d) return;
@@ -642,6 +698,7 @@
     cueEl.textContent = cue;
     cueEl.classList.toggle('ok', k === 'ok');
     $('coach-why').textContent = why;
+    renderHowto(k);
     $('coach-gauges').innerHTML = rows;
     // closer / further, compared with about half a second ago
     const tr = $('coach-trend');
