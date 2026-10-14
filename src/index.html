@@ -165,8 +165,10 @@
         <button type="button" role="radio" id="rmode-tap" aria-checked="false">Tap to advance</button>
       </div>
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
+      <label class="reader-field" id="reader-voice-wrap" hidden><span>Demo voice</span><select id="reader-voice"></select></label>
       <div class="btn-row reader-actions">
         <button type="button" class="btn primary" id="reader-mic">Start microphone</button>
+        <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
         <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
         <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>

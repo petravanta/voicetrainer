@@ -392,7 +392,7 @@
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0);
     if (pitchBuf.length > 360) pitchBuf.shift();
     // While a reference example plays (and briefly after), show it but don't score it as the user.
-    const gated = !!exSrc || performance.now() - exampleEnd < 400;
+    const gated = !!exSrc || !!Reader.tts || performance.now() - exampleEnd < 400;
     const d = !gated && state.drill && !state.drill.result ? state.drill : null;
 
     if (fr.kind === 'voiced') {
@@ -1297,7 +1297,7 @@
           stage.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
         }
       }
-      $('rh-hint').textContent = this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
+      $('rh-hint').textContent = this.tts ? 'Listening to the demo voice. Your meters ignore it; press Stop reading to take over.' : this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
     },
     render(text) {
       this.current = text;
@@ -1322,7 +1322,104 @@
       this.cum.push(syl);
       this.restart();
     },
-    restart() { this.tracker.reset(); this.base = 0; this.idx = 0; this.paceLast = performance.now(); this.paceT = 0; $('reader-stage').scrollTop = 0; this.paint(); },
+    // read the passage aloud with the browser's own speech voice, one sentence per utterance
+    // (Chrome cuts long utterances short); the highlight follows word boundary events,
+    // or an estimated pace when the voice does not report them
+    voices() {
+      const S = window.speechSynthesis;
+      return S ? S.getVoices().filter(v => /^en/i.test(v.lang)) : [];
+    },
+    fillVoices() {
+      const sel = $('reader-voice'), list = this.voices();
+      $('reader-voice-wrap').hidden = list.length < 2;
+      if (!list.length) return;
+      const keep = sel.value;
+      sel.innerHTML = '';
+      const auto = document.createElement('option'); auto.value = ''; auto.textContent = 'Automatic'; sel.appendChild(auto);
+      for (const v of list) { const o = document.createElement('option'); o.value = v.voiceURI; o.textContent = v.name + (v.lang ? ' (' + v.lang + ')' : ''); sel.appendChild(o); }
+      if (list.some(v => v.voiceURI === keep)) sel.value = keep;
+    },
+    pickVoice() {
+      const list = this.voices(), want = $('reader-voice').value;
+      const chosen = list.find(v => v.voiceURI === want);
+      if (chosen) return chosen;
+      const fem = /female|woman|samantha|victoria|karen|moira|tessa|fiona|zira|susan|hazel|serena|allison|ava|kate|libby|sonia|aria|jenny|emma|joanna|salli|kimberly|amy|natasha/i;
+      const masc = /\bmale|man\b|daniel|alex\b|fred|david|mark|george|ryan|guy|thomas|oliver|arthur|matthew|joey|justin|brian|william/i;
+      const isFem = v => fem.test(v.name), isMasc = v => !isFem(v) && masc.test(v.name);
+      const match = list.filter(state.goal === 'fem' ? isFem : isMasc);
+      return match.find(v => v.localService) || match[0] || list.find(v => v.default) || list[0] || null;
+    },
+    listen() {
+      const S = window.speechSynthesis;
+      if (this.tts) return this.stopListen();
+      if (!S || !window.SpeechSynthesisUtterance) { $('rh-hint').textContent = 'This browser has no speech voice to read the text aloud.'; return; }
+      if (state.running === 'mic') stop();
+      S.cancel();
+      // group words from the current one into sentences
+      const start = this.idx >= this.words.length - 1 ? 0 : this.idx;
+      const groups = [];
+      let g = null;
+      for (let i = start; i < this.words.length; i++) {
+        if (!g) { g = { first: i, text: '', offs: [] }; groups.push(g); }
+        g.offs.push(g.text.length);
+        g.text += this.words[i].text + ' ';
+        if (/[.!?]["')\]]*$/.test(this.words[i].text) || g.offs.length >= 40) g = null;
+      }
+      const tts = this.tts = { boundary: false, gi: 0, t0: 0, wordAt: 0 };
+      const voice = this.pickVoice();
+      const rate = 0.95;
+      this.go(start, false);
+      const speakNext = () => {
+        if (this.tts !== tts) return;
+        const grp = groups[tts.gi];
+        if (!grp) return this.stopListen(true);
+        const u = new SpeechSynthesisUtterance(grp.text.trim());
+        if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'en-US';
+        u.rate = rate;
+        u.onstart = () => { tts.t0 = performance.now(); tts.wordAt = tts.t0; this.go(grp.first, false); };
+        u.onboundary = (e) => {
+          if (this.tts !== tts || (e.name && e.name !== 'word')) return;
+          tts.boundary = true;
+          let j = 0;
+          while (j + 1 < grp.offs.length && grp.offs[j + 1] <= e.charIndex) j++;
+          this.go(grp.first + j, false);
+        };
+        u.onend = () => { if (this.tts === tts) { tts.gi++; speakNext(); } };
+        u.onerror = (e) => { if (this.tts === tts && e.error !== 'interrupted' && e.error !== 'canceled') this.stopListen(true); };
+        tts.grp = grp;
+        try { S.speak(u); } catch (e) { this.stopListen(); $('rh-hint').textContent = 'The speech voice could not start in this browser.'; }
+      };
+      // fallback pacing for voices that never send word boundaries
+      const pace = () => {
+        if (this.tts !== tts) return;
+        requestAnimationFrame(pace);
+        if (tts.boundary || !tts.t0 || !tts.grp) return;
+        const now = performance.now(), w = this.words[this.idx];
+        const need = 60000 / (165 * rate) * (0.6 + 0.4 * Math.max(1, D.countSyllables(w.text)));
+        const last = tts.grp.first + tts.grp.offs.length - 1;
+        if (now - tts.wordAt >= need && this.idx < last) { tts.wordAt = now; this.go(this.idx + 1, false); }
+      };
+      this.setListenButton(true);
+      speakNext();
+      pace();
+      this.paint();
+    },
+    stopListen(finished) {
+      if (!this.tts) return;
+      this.tts = null;
+      exampleEnd = performance.now();
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+      this.setListenButton(false);
+      if (finished) this.go(this.words.length - 1, false);
+      this.tracker.reset(); this.base = this.cum[this.idx] || 0;
+      this.paint();
+    },
+    setListenButton(on) {
+      const b = $('reader-listen');
+      b.textContent = on ? 'Stop reading' : 'Hear it read';
+      b.setAttribute('aria-pressed', String(on));
+    },
+    restart() { this.stopListen(); this.tracker.reset(); this.base = 0; this.idx = 0; this.paceLast = performance.now(); this.paceT = 0; $('reader-stage').scrollTop = 0; this.paint(); },
     tick() {
       if (!this.open) return;
       requestAnimationFrame(() => this.tick());
@@ -1364,6 +1461,7 @@
       $('reader-edit').hidden = !id.startsWith('u-');
     },
     editForm(existing, preset) {
+      this.stopListen();
       $('reader-text').hidden = true; $('reader-form').hidden = false; $('reader-edit').hidden = true;
       $('rf-title').value = existing ? existing.title : (preset && preset.title) || '';
       $('rf-body').value = existing ? existing.body : '';
@@ -1397,6 +1495,7 @@
       $('reader-close').focus();
     },
     hide() {
+      this.stopListen();
       this.open = false;
       $('reader').hidden = true;
       document.body.style.overflow = '';
@@ -1407,7 +1506,12 @@
       try { m = localStorage.getItem('voicetrainer.readmode') || 'voice'; } catch (e) {}
       $('btn-read').addEventListener('click', () => this.show());
       $('reader-close').addEventListener('click', () => this.hide());
-      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic().then(() => { this.restart(); })));
+      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.stopListen(), startMic().then(() => { this.restart(); }))));
+      $('reader-listen').addEventListener('click', () => this.listen());
+      if (window.speechSynthesis) {
+        this.fillVoices();
+        window.speechSynthesis.addEventListener('voiceschanged', () => this.fillVoices());
+      } else $('reader-listen').hidden = true;
       $('reader-restart').addEventListener('click', () => this.restart());
       $('reader-pick').addEventListener('change', (e) => this.pick(e.target.value));
       for (const k of ['voice', 'pace', 'tap']) $('rmode-' + k).addEventListener('click', () => this.setMode(k));
