@@ -298,13 +298,52 @@
       setStatus('That file could not be decoded. Try WAV, MP3, M4A or OGG.');
     }
   }
-  function playDemo() {
+  function playDemo(sweep) {
     ensureCtx();
-    const x = Synth.demo(ctx.sampleRate, D.VOWELS);
+    const v = DemoVoice.get();
+    const x = sweep ? Synth.demo(ctx.sampleRate, D.VOWELS) : Synth.demoVoice(ctx.sampleRate, D.VOWELS, v);
     const ab = ctx.createBuffer(1, x.length, ctx.sampleRate);
     ab.copyToChannel(x, 0);
-    playBuffer(ab, 'demo', 'Demo voice: sibilant and vowels, moving from masculine to feminine resonance');
+    playBuffer(ab, 'demo', sweep ? 'Demo voice: sibilant and vowels, moving from masculine to feminine resonance'
+      : `Demo voice: s and four vowels at ${v.pitch} Hz, resonance ${v.res}, brightness ${v.bright}`);
   }
+
+  // Demo voice settings, shared by the synthetic demo and the reading voice.
+  const DEMO_PRESETS = { fem: { pitch: 205, res: 100, bright: 65 }, masc: { pitch: 115, res: 0, bright: 40 } };
+  const DemoVoice = {
+    KEY: 'voicetrainer.demovoice', v: null,
+    get() {
+      if (!this.v) {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) {}
+        const type = saved && (saved.type === 'masc' || saved.type === 'fem') ? saved.type : state.goal;
+        this.v = Object.assign({ type, rate: 0.95 }, DEMO_PRESETS[type], saved || {});
+      }
+      return this.v;
+    },
+    save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) {} },
+    setType(t) { Object.assign(this.get(), { type: t }, DEMO_PRESETS[t]); this.save(); this.paint(); },
+    paint() {
+      const v = this.get();
+      for (const t of ['fem', 'masc']) $('vd-' + t).setAttribute('aria-checked', String(v.type === t));
+      $('vd-pitch').value = v.pitch; $('vd-pitch-out').textContent = v.pitch + ' Hz';
+      $('vd-res').value = v.res; $('vd-res-out').textContent = v.res;
+      $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
+      $('vd-rate').value = v.rate; $('vd-rate-out').textContent = (+v.rate).toFixed(2) + '×';
+    },
+    open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
+    init() {
+      for (const t of ['fem', 'masc']) $('vd-' + t).addEventListener('click', () => this.setType(t));
+      for (const k of ['pitch', 'res', 'bright', 'rate']) {
+        $('vd-' + k).addEventListener('input', (e) => { this.get()[k] = +e.target.value; this.save(); this.paint(); });
+      }
+      $('btn-demo-set').addEventListener('click', () => this.open());
+      $('reader-voice-set').addEventListener('click', () => this.open());
+      $('vd-play').addEventListener('click', () => { Reader.stopListen(); playDemo(false); });
+      $('vd-sweep').addEventListener('click', () => { Reader.stopListen(); playDemo(true); });
+      $('reader-voice').addEventListener('change', (e) => { this.get().voice = e.target.value; this.save(); });
+    },
+  };
   function playExample(def, mode) {
     ensureCtx();
     stopExample();
@@ -557,7 +596,7 @@
     $('ex-play').addEventListener('click', () => (exSrc && $('ex-play').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'play')));
     $('ex-compare').addEventListener('click', () => (exSrc && $('ex-compare').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'compare')));
     renderExampleNote();
-    state.coach = { vf: [], vt: -1e9, sf: [], st: -1e9, hist: [], key: null, pendingKey: null, pendingN: 0 };
+    state.coach = { vf: [], vt: -1e9, sf: [], st: -1e9, hist: [], key: null, pendingKey: null, pendingAt: 0, shownAt: 0, eased: {}, trendAt: 0 };
     renderCoach();
   }
 
@@ -649,8 +688,8 @@
     const co = state.coach, d = state.drill;
     if (!co || !d) return;
     const now = performance.now();
-    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { co.vf.push(fr.formants); if (co.vf.length > 8) co.vf.shift(); co.vt = now; }
-    if (d.def.sib && fr.kind === 'fricative') { co.sf.push(fr.cog); if (co.sf.length > 8) co.sf.shift(); co.st = now; }
+    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { co.vf.push(fr.formants); if (co.vf.length > 16) co.vf.shift(); co.vt = now; }
+    if (d.def.sib && fr.kind === 'fricative') { co.sf.push(fr.cog); if (co.sf.length > 16) co.sf.shift(); co.st = now; }
   }
   function gaugeRow(label, sub, pos, need, slack = 0) {
     const lo = D.COACH_BAND[state.goal][0] - slack, hi = D.COACH_BAND[state.goal][1] + slack;
@@ -660,30 +699,40 @@
       <span class="g-track"><span class="g-band" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="g-mark ${need ? 'off' : 'ok'}" style="left:${x(pos)}%"></span></span>
       <span class="g-need ${need ? 'off' : 'ok'}">${mark}</span></div>`;
   }
+  const COACH_HOLD_MS = 3500, COACH_MIN_SHOW_MS = 2500;
+  // smooth a gauge position so the marker glides instead of jumping
+  function ease(co, k, v) {
+    const p = co.eased[k];
+    return (co.eased[k] = p == null || !isFinite(p) ? v : p + 0.35 * (v - p));
+  }
   function renderCoach() {
     const co = state.coach, d = state.drill, cueEl = $('coach-cue');
     if (!co || !d || !cueEl) return;
     const now = performance.now(), def = d.def;
-    const vRecent = def.vowel && co.vf.length && now - co.vt < 1200;
-    const sRecent = def.sib && co.sf.length && now - co.st < 1200;
+    // keep the last reading on screen for a few seconds after the sound stops
+    const vRecent = def.vowel && co.vf.length && now - co.vt < COACH_HOLD_MS;
+    const sRecent = def.sib && co.sf.length && now - co.st < COACH_HOLD_MS;
     let key = 'idle', cue, why = '', dist = null, rows = '';
     if (vRecent) {
       const v = D.VOWEL_BY_KEY[def.vowel];
       const F = [0, 1, 2].map(i => D.median(co.vf.map(f => f[i])));
       const c = D.coachVowel(F, v, state.goal);
-      rows += c.pos.map((p, i) => gaugeRow('F' + (i + 1), FORMANT_ROLE[i], p, c.need[i], i === 0 ? 20 : 0)).join('');
+      rows += c.pos.map((p, i) => gaugeRow('F' + (i + 1), FORMANT_ROLE[i], ease(co, 'f' + i, p), c.need[i], i === 0 ? 20 : 0)).join('');
       dist = c.distance;
       key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
     }
     if (sRecent) {
       const cog = D.median(co.sf), c = D.coachSibilant(cog, D.SIBILANTS[def.sib], state.goal);
-      rows += gaugeRow(def.sib === 's' ? '/s/' : '/ʃ/', `hiss ${(cog / 1000).toFixed(1)} kHz`, c.pos, c.dir);
+      rows += gaugeRow(def.sib === 's' ? '/s/' : '/ʃ/', `hiss ${(cog / 1000).toFixed(1)} kHz`, ease(co, 'sib', c.pos), c.dir);
       if (!vRecent || co.st > co.vt) { key = c.onTarget ? 'ok' : 'sib:' + c.dir; dist = c.distance; }
     }
-    // only switch the spoken cue once it has held for a few updates, so it doesn't flicker
+    // switch the tip only when the new one has held steadily, and leave each tip up long
+    // enough to read and try; reaching the target is shown sooner than leaving it
+    if (key !== co.pendingKey) { co.pendingKey = key; co.pendingAt = now; }
     if (key !== co.key) {
-      if (key === co.pendingKey) co.pendingN++; else { co.pendingKey = key; co.pendingN = 1; }
-      if (co.pendingN >= 3 || co.key === null || key === 'idle') co.key = key;
+      const steady = now - co.pendingAt, shown = now - co.shownAt;
+      const need = co.key === null ? 0 : key === 'ok' ? 600 : co.key === 'ok' ? 1500 : 1000;
+      if (co.key === null || key === 'idle' || (steady >= need && shown >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS))) { co.key = key; co.shownAt = now; }
     }
     const k = co.key;
     if (k === 'idle' || k === null) {
@@ -707,6 +756,8 @@
       while (co.hist.length && now - co.hist[0][0] > 2000) co.hist.shift();
       const past = co.hist.find(h => now - h[0] <= 700);
       const delta = past ? dist - past[1] : 0;
+      if (now - co.trendAt < 700 && tr.textContent) return;
+      co.trendAt = now;
       tr.textContent = dist === 0 ? 'in the target zone' : delta < -3 ? 'getting closer' : delta > 3 ? 'moving away' : `${Math.round(dist)} point${Math.round(dist) === 1 ? '' : 's'} away`;
       tr.className = dist === 0 || delta < -3 ? 'trend good' : delta > 3 ? 'trend warn' : 'trend';
     } else { tr.textContent = ''; tr.className = 'trend'; }
@@ -1175,6 +1226,7 @@
     const [lo, hi] = pitchBand();
     $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz`;
     try { localStorage.setItem('voicetrainer.goal', goal); } catch (e) {}
+    try { if (!localStorage.getItem(DemoVoice.KEY)) DemoVoice.v = null; } catch (e) {}
     renderMeter(); drawPitch(); drawHistory(); renderSpecGoalHelp(); renderExampleNote(); if (state.coach) { state.coach.key = null; renderCoach(); } if (C.ink) drawSpecAxis();
     if (state.drill && state.drill.result) renderDrillResult(state.drill.result);
   }
@@ -1337,16 +1389,17 @@
       sel.innerHTML = '';
       const auto = document.createElement('option'); auto.value = ''; auto.textContent = 'Automatic'; sel.appendChild(auto);
       for (const v of list) { const o = document.createElement('option'); o.value = v.voiceURI; o.textContent = v.name + (v.lang ? ' (' + v.lang + ')' : ''); sel.appendChild(o); }
-      if (list.some(v => v.voiceURI === keep)) sel.value = keep;
+      const want = DemoVoice.get().voice || keep;
+      if (list.some(v => v.voiceURI === want)) sel.value = want;
     },
     pickVoice() {
-      const list = this.voices(), want = $('reader-voice').value;
+      const list = this.voices(), want = DemoVoice.get().voice;
       const chosen = list.find(v => v.voiceURI === want);
       if (chosen) return chosen;
       const fem = /female|woman|samantha|victoria|karen|moira|tessa|fiona|zira|susan|hazel|serena|allison|ava|kate|libby|sonia|aria|jenny|emma|joanna|salli|kimberly|amy|natasha/i;
       const masc = /\bmale|man\b|daniel|alex\b|fred|david|mark|george|ryan|guy|thomas|oliver|arthur|matthew|joey|justin|brian|william/i;
       const isFem = v => fem.test(v.name), isMasc = v => !isFem(v) && masc.test(v.name);
-      const match = list.filter(state.goal === 'fem' ? isFem : isMasc);
+      const match = list.filter(DemoVoice.get().type === 'fem' ? isFem : isMasc);
       return match.find(v => v.localService) || match[0] || list.find(v => v.default) || list[0] || null;
     },
     listen() {
@@ -1367,7 +1420,9 @@
       }
       const tts = this.tts = { boundary: false, gi: 0, t0: 0, wordAt: 0 };
       const voice = this.pickVoice();
-      const rate = 0.95;
+      const dv = DemoVoice.get(), rate = dv.rate;
+      // speech pitch is relative to the voice's own; typical voices sit near 200 Hz and 115 Hz
+      const pitch = clamp(dv.pitch / (dv.type === 'fem' ? 205 : 115), 0.3, 2);
       this.go(start, false);
       const speakNext = () => {
         if (this.tts !== tts) return;
@@ -1375,7 +1430,7 @@
         if (!grp) return this.stopListen(true);
         const u = new SpeechSynthesisUtterance(grp.text.trim());
         if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'en-US';
-        u.rate = rate;
+        u.rate = rate; u.pitch = pitch;
         u.onstart = () => { tts.t0 = performance.now(); tts.wordAt = tts.t0; this.go(grp.first, false); };
         u.onboundary = (e) => {
           if (this.tts !== tts || (e.name && e.name !== 'word')) return;
@@ -1547,7 +1602,8 @@
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
     $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic()));
-    $('btn-demo').addEventListener('click', playDemo);
+    $('btn-demo').addEventListener('click', () => playDemo(false));
+    DemoVoice.init();
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-save').addEventListener('click', saveSession);

@@ -23,6 +23,7 @@
     <label class="btn" for="file-in" id="btn-file">Analyze a recording</label>
     <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
     <button type="button" id="btn-demo" class="btn">Play demo voice</button>
+    <button type="button" id="btn-demo-set" class="btn">Demo voice settings</button>
     <button type="button" id="btn-read" class="btn">Reading practice</button>
     <button type="button" id="btn-stop" class="btn" hidden>Stop</button>
     <span id="src-status" class="status" role="status">Not listening</span>
@@ -165,10 +166,10 @@
         <button type="button" role="radio" id="rmode-tap" aria-checked="false">Tap to advance</button>
       </div>
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
-      <label class="reader-field" id="reader-voice-wrap" hidden><span>Demo voice</span><select id="reader-voice"></select></label>
       <div class="btn-row reader-actions">
         <button type="button" class="btn primary" id="reader-mic">Start microphone</button>
         <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
+        <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
         <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
         <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>
@@ -201,6 +202,30 @@
     <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
   </footer>
 </div>
+  <dialog id="voice-dlg" class="voice-dlg" aria-labelledby="voice-dlg-h">
+    <form method="dialog">
+      <h2 id="voice-dlg-h">Demo voice</h2>
+      <div class="vd-type" role="radiogroup" aria-label="Voice type">
+        <button type="button" id="vd-fem" role="radio" aria-checked="true">Feminine</button>
+        <button type="button" id="vd-masc" role="radio" aria-checked="false">Masculine</button>
+      </div>
+      <p class="vd-note">Picking a type sets typical values; adjust them below.</p>
+      <label class="vd-row"><span>Pitch <output id="vd-pitch-out"></output></span><input type="range" id="vd-pitch" min="70" max="300" step="5"></label>
+      <label class="vd-row"><span>Resonance <output id="vd-res-out"></output></span><input type="range" id="vd-res" min="-20" max="120" step="5"></label>
+      <p class="vd-scale"><span>darker, masculine</span><span>brighter, feminine</span></p>
+      <label class="vd-row"><span>Brightness <output id="vd-bright-out"></output></span><input type="range" id="vd-bright" min="0" max="100" step="5"></label>
+      <p class="vd-scale"><span>soft, breathy tone</span><span>crisp, buzzy tone</span></p>
+      <h3>Reading voice</h3>
+      <label class="vd-row" id="reader-voice-wrap" hidden><span>Speech voice</span><select id="reader-voice"></select></label>
+      <label class="vd-row"><span>Speed <output id="vd-rate-out"></output></span><input type="range" id="vd-rate" min="0.6" max="1.5" step="0.05"></label>
+      <p class="vd-note">The reading voice is your browser's own speech voice. It follows the voice type, pitch and speed, but it cannot change resonance or brightness; those apply to the synthetic demo voice.</p>
+      <div class="btn-row">
+        <button type="button" class="btn primary" id="vd-play">Play demo</button>
+        <button type="button" class="btn" id="vd-sweep">Play masculine to feminine</button>
+        <button type="submit" class="btn" id="vd-done">Done</button>
+      </div>
+    </form>
+  </dialog>
 <script>
 /*DSP*/
 </script>

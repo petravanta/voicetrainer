@@ -87,6 +87,20 @@
     return concat(parts);
   }
 
+  // Demo at chosen settings: o = {pitch (Hz), res (0 = typical masculine, 100 = typical
+  // feminine, may go past either end), bright (0..100)}. An s, then four vowels.
+  function demoVoice(fs, VOWELS, o) {
+    const t = o.res / 100, b = clamp01(o.bright / 100);
+    const mix = (v) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
+    const parts = [silence(fs, 0.1), sibilant(fs, 0.45, 6200 + 1600 * Math.max(-0.3, Math.min(1.3, t)), { seed: 3 }), silence(fs, 0.15)];
+    ['i', 'a', 'u', 'E'].forEach((k, j) => {
+      const v = VOWELS.find(q => q.key === k);
+      parts.push(voiced(fs, 0.75, o.pitch * 1.06, o.pitch * 0.92, mix(v), { bright: b, seed: 5 + j, ramp: 0.05 }), silence(fs, 0.18));
+    });
+    return concat(parts);
+  }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
   // ---------- reference examples ----------
   // Voiced segment with gliding pitch and formant transitions: formants move from Fa to F over
   // the first `trans` seconds and from F to Fb over the last `trans` seconds (coarticulation).
@@ -98,7 +112,8 @@
       const t = i / fs, u = t / dur;
       const f = (f0a + (f0b - f0a) * u) * (1 + 0.01 * Math.sin(2 * Math.PI * 5.2 * t)) * (1 + 0.003 * (rand() - 0.5));
       phase += f / fs; if (phase >= 1) phase -= 1;
-      const op = 0.42, cl = 0.15;
+      // brightness (0..1) shortens the closing phase, which lifts the upper harmonics
+      const op = 0.42, cl = opts.bright == null ? 0.15 : 0.27 - 0.2 * opts.bright;
       let g = 0;
       if (phase < op) g = 0.5 * (1 - Math.cos(Math.PI * phase / op));
       else if (phase < op + cl) g = Math.cos(0.5 * Math.PI * (phase - op) / cl);
@@ -113,7 +128,8 @@
     };
     const F4 = F[2] * 1.22 + 250, F5 = F[2] * 1.38 + 500;
     const tracks = [(t) => at(0, t), (t) => at(1, t), (t) => at(2, t), () => F4, () => F5];
-    const bws = opts.bws || [70, 100, 140, 200, 250];
+    const bwScale = opts.bright == null ? 1 : 1.35 - 0.6 * opts.bright; // darker voices damp formants more
+    const bws = (opts.bws || [70, 100, 140, 200, 250]).map(b => b * bwScale);
     tracks.forEach((tr, k) => { if (tr(0) < fs / 2 - 100) trackResonate(x, fs, tr, bws[k]); });
     return normalize(x, opts.level || 0.3, fs, opts.ramp);
   }
@@ -172,7 +188,7 @@
     return concat([example(fs, def, 'masc', VOWELS, SIBILANTS), silence(fs, 0.35), example(fs, def, 'fem', VOWELS, SIBILANTS)]);
   }
 
-  const api = { vowel, sibilant, silence, concat, demo, voiced, example, comparison };
+  const api = { vowel, sibilant, silence, concat, demo, demoVoice, voiced, example, comparison };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
