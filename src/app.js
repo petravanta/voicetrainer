@@ -126,6 +126,27 @@
       g.beginPath(); g.arc(x, y, (i === n - 1 ? 6.5 : 3) * dpr, 0, 7); g.fill();
     });
     g.globalAlpha = 1;
+    // dashed path from your latest position to the typical value of your goal for this vowel
+    const gv = goalVowel(), last = state.trail[n - 1];
+    if (gv && last) {
+      const T = state.goal === 'fem' ? gv.W : gv.M, col = state.goal === 'fem' ? C.fem : C.masc;
+      const [ux, uy] = vowelXY(cv, last[0], last[1]), [tx, ty] = vowelXY(cv, T[0], T[1]);
+      const len = Math.hypot(tx - ux, ty - uy), r = 10 * dpr;
+      g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2 * dpr;
+      g.beginPath(); g.arc(tx, ty, r, 0, 7); g.stroke();
+      if (len > r + 8 * dpr) {
+        const ex = tx - (tx - ux) / len * r, ey = ty - (ty - uy) / len * r, ang = Math.atan2(ty - uy, tx - ux);
+        g.setLineDash([5 * dpr, 4 * dpr]);
+        g.beginPath(); g.moveTo(ux, uy); g.lineTo(ex, ey); g.stroke();
+        g.setLineDash([]);
+        g.beginPath(); g.moveTo(ex, ey);
+        g.lineTo(ex - 9 * dpr * Math.cos(ang - 0.45), ey - 9 * dpr * Math.sin(ang - 0.45));
+        g.lineTo(ex - 9 * dpr * Math.cos(ang + 0.45), ey - 9 * dpr * Math.sin(ang + 0.45));
+        g.closePath(); g.fill();
+      }
+      g.font = `${11 * dpr}px ${C.font}`; g.textAlign = 'left';
+      g.fillText(`target ${gv.cue.split(' ')[0]}`, tx + r + 4 * dpr, ty + 14 * dpr);
+    }
   }
 
   // ---- spectrogram ----
@@ -324,7 +345,8 @@
     state.running = kind;
     take = newSession(); take.kind = kind;
     setStatus(label, true);
-    $('btn-stop').hidden = false;
+    $('btn-stop').hidden = kind === 'mic'; // the mic button itself becomes Stop
+    setMicButton(kind === 'mic');
     an.reset();
     ensureLoop();
   }
@@ -334,10 +356,17 @@
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     state.running = null;
     $('btn-stop').hidden = true;
+    setMicButton(false);
     setStatus('Not listening');
   }
+  function setMicButton(on) {
+    const b = $('btn-mic');
+    b.textContent = on ? 'Stop microphone' : 'Start microphone';
+    b.setAttribute('aria-pressed', String(on));
+    b.classList.toggle('listening', on);
+  }
   function setStatus(text, live) {
-    const s = $('src-status'); s.textContent = text; s.classList.toggle('live', !!live);
+    const s = $('src-status'); s.textContent = text; s.classList.toggle('on-air', !!live);
   }
 
   function ensureLoop() { if (!loopOn) { loopOn = true; lastT = 0; raf = requestAnimationFrame(loop); } }
@@ -501,7 +530,7 @@
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
       <div id="drill-result"></div>
-      <div><button type="button" class="btn" id="drill-again">Start over</button></div>`;
+      <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
     p.querySelector('.drill-title').textContent = d.def.title;
     p.querySelector('.drill-help').textContent = drillInstruction(d.def);
     $('drill-msg').textContent = state.running ? 'Listening...' : 'Start the microphone (or analyze a recording) to begin.';
@@ -560,7 +589,8 @@
     renderDrillGrid();
     renderSession();
     const bar = $('drill-prog'); if (bar) bar.style.width = '100%';
-    $('drill-msg').textContent = 'Done. Press Start over to try again, or pick another sound.';
+    $('drill-msg').textContent = 'Done. Try this sound again to beat your score, or pick another sound.';
+    $('drill-again').hidden = false;
     planDrillFinished(def, res);
   }
 
@@ -939,6 +969,7 @@
   // ---------------- wiring ----------------
   function setGoal(goal) {
     state.goal = goal;
+    document.body.dataset.goal = goal;
     $('goal-fem').setAttribute('aria-checked', String(goal === 'fem'));
     $('goal-masc').setAttribute('aria-checked', String(goal === 'masc'));
     const [lo, hi] = pitchBand();
@@ -990,7 +1021,7 @@
     try { g = localStorage.getItem('voicetrainer.goal') || 'fem'; } catch (e) {}
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
-    $('btn-mic').addEventListener('click', startMic);
+    $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic()));
     $('btn-demo').addEventListener('click', playDemo);
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });

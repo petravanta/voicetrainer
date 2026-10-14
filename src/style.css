@@ -64,9 +64,9 @@ small { color: var(--muted); font-weight: 400; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .status { color: var(--muted); font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px; }
-.status.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fem); animation: pulse 1.2s infinite; }
+.status.on-air::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fem); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
-@media (prefers-reduced-motion: reduce) { .status.live::before { animation: none; } .needle { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .status.on-air::before { animation: none; } .needle { transition: none !important; } }
 .note { border: 1px solid var(--warn); color: var(--ink); background: var(--panel); padding: 10px 14px; border-radius: var(--radius); max-width: 70ch; }
 
 .live { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -168,6 +168,10 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .tri { display: inline-block; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--muted); margin-right: 5px; vertical-align: middle; }
 .example-box { display: grid; gap: 6px; }
 .ex-note { font-size: 0.8rem; color: var(--muted); max-width: 62ch; }
+.btn.primary.listening { background: var(--fem); border-color: var(--fem); color: var(--panel); }
+.btn.primary.listening::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.dash { display: inline-block; width: 18px; border-top: 2px dashed var(--fem); margin-right: 5px; vertical-align: middle; }
+[data-goal="masc"] .dash { border-top-color: var(--masc); }
 .foot { color: var(--muted); font-size: 0.85rem; max-width: 80ch; }
 
 @media (max-width: 860px) {
