@@ -212,6 +212,9 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .reader-form { display: grid; gap: 12px; padding-block: 16px; }
 @media (max-width: 600px) { .reader-text { --rsize: 1.5rem; padding-block: 20vh; } .rh-hint { margin-left: 0; } }
 @media (prefers-reduced-motion: reduce) { .reader-text .w { transition: none; } }
+.check { display: inline-flex; align-items: center; gap: 7px; font-size: 0.92rem; cursor: pointer; padding-inline: 4px; }
+.check input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }
+.session-actions { align-items: center; }
 .foot { color: var(--muted); font-size: 0.85rem; max-width: 80ch; }
 
 @media (max-width: 860px) {

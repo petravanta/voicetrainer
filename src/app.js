@@ -351,6 +351,7 @@
     ensureLoop();
   }
   function stop() {
+    const hadRun = !!state.running;
     if (take) { offerPlanFrom(take); take = null; }
     if (node) { try { node.onended = null; node.stop && node.stop(); } catch (e) {} try { node.disconnect(); } catch (e) {} node = null; }
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -358,6 +359,7 @@
     $('btn-stop').hidden = true;
     setMicButton(false);
     setStatus('Not listening');
+    if (hadRun) autoSave('stopped listening');
   }
   function setMicButton(on) {
     for (const b of [$('btn-mic'), $('reader-mic')]) {
@@ -705,6 +707,7 @@
     $('drill-msg').textContent = 'Done. Try this sound again to beat your score, or pick another sound.';
     $('drill-again').hidden = false;
     planDrillFinished(def, res);
+    autoSave('drill finished');
   }
 
   // ---------------- guided exercise ----------------
@@ -798,6 +801,7 @@
     session.exercises = session.exercises || [];
     session.exercises.push({ at: pl.started, steps: pl.steps.map(s => ({ id: s.def.id, label: s.def.cue, before: s.before == null ? null : Math.round(s.before), after: s.after == null ? null : Math.round(s.after) })) });
     renderPlan(); renderSession();
+    autoSave('exercise finished');
   }
   function stepLabel(def) {
     return def.type === 'vowel' ? `"${def.cue}" (${D.VOWEL_BY_KEY[def.vowel].word})` : def.type === 'sib' ? `"${def.cue}"` : `word "${def.cue}"`;
@@ -942,6 +946,7 @@
     ];
     sum.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     $('btn-save').disabled = !(Number.isFinite(st.resonance) || session.drills.length || Object.keys(st.sib).length);
+    $('btn-save').textContent = autoOn() ? 'Save and start new session' : 'Save to progress';
   }
 
   // ---------------- progress storage ----------------
@@ -969,14 +974,11 @@
       try { this.items = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) { this.items = []; }
     },
     async save(rec) {
-      if (this.col) {
-        const ref = this.col.doc(rec.id);
-        await ref.set(rec);
-      } else {
-        const next = this.items.concat([rec]);
-        localStorage.setItem(LS_KEY, JSON.stringify(next));
-      }
-      this.items.push(rec);
+      // upsert: auto-save rewrites the same session record as it grows
+      const next = this.items.filter(r => r.id !== rec.id).concat([rec]);
+      if (this.col) await this.col.doc(rec.id).set(rec);
+      else localStorage.setItem(LS_KEY, JSON.stringify(next));
+      this.items = next;
     },
     async remove(id) {
       if (this.col) await this.col.doc(id).delete();
@@ -985,11 +987,13 @@
     },
   };
 
-  async function saveSession() {
+  const hasData = () => { const st = sessionStats(); return Number.isFinite(st.resonance) || session.drills.length > 0 || Object.keys(st.sib).length > 0; };
+  function sessionRecord() {
     const st = sessionStats();
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
-    const rec = {
-      id: 's' + session.start.toString(36) + Math.random().toString(36).slice(2, 6),
+    if (!session.id) session.id = 's' + session.start.toString(36) + Math.random().toString(36).slice(2, 6);
+    return {
+      id: session.id,
       at: new Date(session.start).toISOString(),
       goal: state.goal,
       resonance: round(st.resonance),
@@ -1002,6 +1006,28 @@
       drills: session.drills.slice(-60),
       exercises: (session.exercises || []).slice(-10),
     };
+  }
+  // ---- auto-save: keeps this session's record up to date at natural checkpoints ----
+  let autoBusy = false, autoAgain = false;
+  const autoOn = () => $('auto-save').checked;
+  async function autoSave(why) {
+    if (!autoOn() || session.noAuto || !hasData()) return;
+    if (autoBusy) { autoAgain = true; return; }
+    autoBusy = true;
+    try {
+      await Store.save(sessionRecord());
+      const t = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      $('save-status').textContent = `Auto-saved at ${t}${why ? ' (' + why + ')' : ''}.`;
+      renderHistory();
+    } catch (e) {
+      $('save-status').textContent = e && e.code === 'quota_exceeded' ? 'Auto-save failed: progress storage is full. Delete a few old sessions.' : 'Auto-save failed. It will try again at the next checkpoint.';
+    } finally {
+      autoBusy = false;
+      if (autoAgain) { autoAgain = false; autoSave(why); }
+    }
+  }
+  async function saveSession() {
+    const rec = sessionRecord();
     const s = $('save-status');
     try {
       await Store.save(rec);
@@ -1043,7 +1069,11 @@
       const del = document.createElement('button');
       del.type = 'button'; del.textContent = 'Delete';
       del.addEventListener('click', async () => {
-        if (del.dataset.confirm) { await Store.remove(r.id); renderHistory(); }
+        if (del.dataset.confirm) {
+          await Store.remove(r.id);
+          if (r.id === session.id) { session.noAuto = true; $('save-status').textContent = 'Deleted. Auto-save will start again with your next session.'; }
+          renderHistory();
+        }
         else { del.dataset.confirm = '1'; del.textContent = 'Confirm delete'; }
       });
       td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
@@ -1360,6 +1390,14 @@
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-save').addEventListener('click', saveSession);
+    try { $('auto-save').checked = localStorage.getItem('voicetrainer.autosave') === '1'; } catch (e) {}
+    $('auto-save').addEventListener('change', (e) => {
+      try { localStorage.setItem('voicetrainer.autosave', e.target.checked ? '1' : '0'); } catch (err) {}
+      $('save-status').textContent = e.target.checked ? 'Auto-save is on. This session is saved whenever you stop listening, finish a drill or leave the page.' : 'Auto-save is off.';
+      renderSession();
+      if (e.target.checked) autoSave();
+    });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
     $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
     for (const t of ['vowels', 'sibilants', 'words']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp();
