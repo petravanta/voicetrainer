@@ -1,0 +1,167 @@
+<title>VoiceTrainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/*STYLE*/
+</style>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>VoiceTrainer</h1>
+      <p>Live resonance, vowel, sibilant and pitch feedback for voice training.</p>
+    </div>
+    <div class="goal" role="radiogroup" aria-label="Training goal">
+      <span class="goal-label">Goal</span>
+      <button type="button" id="goal-fem" role="radio" aria-checked="true">Feminine</button>
+      <button type="button" id="goal-masc" role="radio" aria-checked="false">Masculine</button>
+    </div>
+  </header>
+
+  <section class="sourcebar" aria-label="Audio source">
+    <button type="button" id="btn-mic" class="btn primary">Start microphone</button>
+    <label class="btn" for="file-in" id="btn-file">Analyze a recording</label>
+    <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
+    <button type="button" id="btn-demo" class="btn">Play demo voice</button>
+    <button type="button" id="btn-stop" class="btn" hidden>Stop</button>
+    <span id="src-status" class="status" role="status">Not listening</span>
+  </section>
+  <p id="mic-note" class="note" hidden></p>
+
+  <section class="live">
+    <div class="meter-card">
+      <div class="eyebrow"><span>Resonance</span><span id="res-context">all vowels</span></div>
+      <div class="meter-row">
+        <output id="res-num" class="big">--</output>
+        <p class="meter-desc" id="res-desc">Hold a vowel or speak a sentence. The score compares your formants with typical adult values for the same vowel.</p>
+      </div>
+      <div class="meter" aria-hidden="true">
+        <div class="meter-target" id="meter-target"></div>
+        <div class="needle" id="meter-needle" hidden></div>
+      </div>
+      <div class="meter-scale"><span>0 masculine avg</span><span class="mid">50</span><span>100 feminine avg</span></div>
+      <dl class="readouts">
+        <div><dt>Vowel heard</dt><dd id="ro-vowel">--</dd></div>
+        <div><dt>F1 · F2 · F3</dt><dd id="ro-formants">--</dd></div>
+        <div><dt>Pitch</dt><dd id="ro-pitch">--</dd></div>
+        <div><dt>Sibilant</dt><dd id="ro-sib">--</dd></div>
+      </dl>
+    </div>
+
+    <figure class="chart chart-vowel">
+      <figcaption>Vowel space <small>F2 across, F1 down, Hz</small></figcaption>
+      <canvas id="cv-vowel" height="300"></canvas>
+      <div class="legend">
+        <span><i class="dot masc"></i>typical masculine</span>
+        <span><i class="dot fem"></i>typical feminine</span>
+        <span><i class="dot you"></i>you</span>
+      </div>
+    </figure>
+
+    <figure class="chart spec-fig">
+      <figcaption>Spectrogram <small>0 to 5 kHz, formant tracks</small>
+        <button type="button" class="info-btn" id="spec-info" aria-expanded="false" aria-controls="spec-help" aria-label="How to read the spectrogram">?</button>
+      </figcaption>
+      <div id="spec-help" class="spec-help" role="note" hidden>
+        <p class="eyebrow"><span>How to read this</span></p>
+        <ul>
+          <li><b>The newest sound appears at the right edge</b> and scrolls left over time. Height is frequency, from 0 at the bottom to 5 kHz at the top. Darker means louder.</li>
+          <li><b>The coloured dashes are your formants</b>, the resonances of your mouth and throat: <span class="k f1">F1</span> lowest, then <span class="k f2">F2</span>, then <span class="k f3">F3</span>. They move when you change your mouth, tongue, lips or larynx height.</li>
+          <li id="spec-help-goal"></li>
+          <li><b>The evenly stacked wavy stripes are harmonics of your pitch.</b> They move with pitch, not resonance, so don't chase them.</li>
+          <li><b>Grainy patches without stripes are hissing sounds.</b> An /s/ puts most of its energy above about 4 kHz (higher reads brighter); /ʃ/ starts lower, around 2 to 3 kHz.</li>
+          <li>Hover over the spectrogram, or tap it on a phone, to read the frequency at that point.</li>
+        </ul>
+      </div>
+      <canvas id="cv-spec" height="200"></canvas>
+      <div id="spec-tip" class="spec-tip" role="status" hidden></div>
+      <div class="legend">
+        <span><i class="dot f1"></i>F1</span><span><i class="dot f2"></i>F2</span><span><i class="dot f3"></i>F3</span><span><i class="tri"></i>goal for the current vowel</span>
+      </div>
+    </figure>
+
+    <figure class="chart">
+      <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small></figcaption>
+      <canvas id="cv-pitch" height="200"></canvas>
+    </figure>
+  </section>
+
+  <section class="practice" aria-labelledby="h-practice">
+    <div class="section-head">
+      <h2 id="h-practice">Practice</h2>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-vowels" aria-selected="true">Vowels</button>
+        <button type="button" role="tab" id="tab-sibilants" aria-selected="false">Sibilants</button>
+        <button type="button" role="tab" id="tab-words" aria-selected="false">Words</button>
+      </div>
+    </div>
+    <div id="plan" class="plan" hidden></div>
+    <div class="practice-body">
+      <div id="drill-grid" class="drill-grid" role="tabpanel"></div>
+      <div id="drill-panel" class="drill-panel">
+        <p class="eyebrow">How drills work</p>
+        <p class="drill-help">Pick a sound, start the microphone, then hold the sound steadily (or say the word a few times). The drill collects about a second of clean audio, scores it against typical values for that exact sound, and tells you which part of the sound to adjust.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="session" aria-labelledby="h-session">
+    <div class="section-head">
+      <h2 id="h-session">This session</h2>
+      <div class="session-actions">
+        <button type="button" id="btn-save" class="btn primary" disabled>Save to progress</button>
+        <button type="button" id="btn-reset" class="btn">Clear session</button>
+      </div>
+    </div>
+    <p id="save-status" class="status" role="status"></p>
+    <div class="session-grid">
+      <div>
+        <h3>Resonance by vowel</h3>
+        <div id="sess-vowels" class="bars"><p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p></div>
+      </div>
+      <div>
+        <h3>Sibilants</h3>
+        <div id="sess-sibs" class="bars"><p class="empty">Hold an "sss" or "shh" to measure how bright your sibilants are.</p></div>
+        <h3>Summary</h3>
+        <dl id="sess-summary" class="summary"></dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="history" aria-labelledby="h-history">
+    <div class="section-head">
+      <h2 id="h-history">Progress</h2>
+      <span id="store-kind" class="status"></span>
+    </div>
+    <div id="hist-empty" class="empty-state">
+      <p><strong>No saved sessions yet.</strong> Practise for a few minutes, then press <em>Save to progress</em>. Each saved session adds a point to the trend for resonance, /s/ brightness and pitch.</p>
+    </div>
+    <figure class="chart" id="hist-chart-wrap" hidden>
+      <figcaption>Trend <small>scores 0 to 100</small></figcaption>
+      <canvas id="cv-hist" height="220"></canvas>
+      <div class="legend">
+        <span><i class="dot res"></i>resonance</span>
+        <span><i class="dot sib"></i>/s/ brightness</span>
+      </div>
+    </figure>
+    <div class="table-wrap" id="hist-table-wrap" hidden>
+      <table id="hist-table">
+        <thead><tr><th>Date</th><th>Goal</th><th class="num">Resonance</th><th class="num">/s/</th><th class="num">Pitch</th><th>Lowest vowel</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
+  </footer>
+</div>
+<script>
+/*DSP*/
+</script>
+<script>
+/*SYNTH*/
+</script>
+<script>
+/*APP*/
+</script>
