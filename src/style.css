@@ -231,3 +231,20 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
   .bar { grid-template-columns: 6em minmax(0, 1fr) 2.8em; }
   .meter-scale .mid { display: none; }
 }
+
+/* demo voice settings */
+.voice-dlg { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); padding: 20px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.voice-dlg::backdrop { background: rgba(0, 0, 0, 0.35); }
+.voice-dlg h2 { margin: 0 0 12px; font-family: var(--font-display); font-size: 1.2rem; }
+.voice-dlg h3 { margin: 18px 0 8px; font-size: 0.95rem; }
+.vd-type { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.vd-type button { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 500; padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+.vd-type button[aria-checked="true"]#vd-fem { background: var(--fem); color: var(--panel); }
+.vd-type button[aria-checked="true"]#vd-masc { background: var(--masc); color: var(--panel); }
+.vd-row { display: grid; gap: 4px; margin-top: 12px; font-size: 0.88rem; }
+.vd-row output { font-family: var(--font-mono); color: var(--muted); margin-left: 6px; }
+.vd-row input[type=range] { width: 100%; }
+.vd-row select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+.vd-scale { display: flex; justify-content: space-between; margin: 2px 0 0; font-size: 0.75rem; color: var(--muted); }
+.vd-note { font-size: 0.8rem; color: var(--muted); margin: 8px 0 0; }
+.voice-dlg .btn-row { margin-top: 18px; }

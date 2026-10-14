@@ -38,5 +38,13 @@ for (const goal of ['fem', 'masc']) {
     check(ok, `${goal} ${def.type} "${def.cue}": ${out.join(', ')}  ${(x.length / fs).toFixed(2)} s`);
   }
 }
+// The configurable demo voice should land near the resonance it was set to, at any pitch or brightness.
+const four = D.VOWELS.filter(v => ['i', 'a', 'u', 'E'].includes(v.key));
+for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50], [120, 100, 20], [210, 0, 90], [180, 60, 100]]) {
+  const fr = run(S.demoVoice(fs, D.VOWELS, { pitch, res, bright }), fs);
+  const sc = fr.filter(f => f.formants && f.stable).map(f => D.classifyVowel(f.formants, four).alpha * 100);
+  const m = D.median(sc);
+  check(sc.length > 20 && Math.abs(m - res) < 25, `demo voice pitch ${pitch} res ${res} bright ${bright}: measured ${Math.round(m)} (${sc.length} fr)`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall examples on target');
 process.exit(fails ? 1 : 0);
