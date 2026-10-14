@@ -360,10 +360,12 @@
     setStatus('Not listening');
   }
   function setMicButton(on) {
-    const b = $('btn-mic');
-    b.textContent = on ? 'Stop microphone' : 'Start microphone';
-    b.setAttribute('aria-pressed', String(on));
-    b.classList.toggle('listening', on);
+    for (const b of [$('btn-mic'), $('reader-mic')]) {
+      if (!b) continue;
+      b.textContent = on ? 'Stop microphone' : 'Start microphone';
+      b.setAttribute('aria-pressed', String(on));
+      b.classList.toggle('listening', on);
+    }
   }
   function setStatus(text, live) {
     const s = $('src-status'); s.textContent = text; s.classList.toggle('on-air', !!live);
@@ -443,6 +445,7 @@
 
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
     if (!gated) coachFrame(fr);
+    if (!gated) Reader.frame(fr);
     if (frameCount % 6 === 0) renderCoach();
     if (d) updateDrill(d);
     if (frameCount % 30 === 0) renderSession();
@@ -463,6 +466,11 @@
 
   function renderMeter() {
     const v = state.meter;
+    if (Reader.open) {
+      $('rh-res').textContent = Number.isFinite(v) ? Math.round(v) : '--';
+      $('rh-vowel').textContent = $('ro-vowel').textContent;
+      $('rh-pitch').textContent = $('ro-pitch').textContent;
+    }
     $('res-num').textContent = Number.isFinite(v) ? Math.round(v) : '--';
     const nd = $('meter-needle');
     nd.hidden = !Number.isFinite(v);
@@ -954,7 +962,7 @@
       if (this.col) {
         try {
           const snap = await this.col.orderBy('at', 'asc').limit(500).get();
-          this.items = snap.docs.map(s => Object.assign({ id: s.id }, s.data()));
+          this.items = snap.docs.filter(s => !s.id.startsWith('_')).map(s => Object.assign({ id: s.id }, s.data()));
           return;
         } catch (e) { this.col = null; this.kind = 'local'; }
       }
@@ -1121,6 +1129,227 @@
     cv.addEventListener('pointerdown', show);
     cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') tip.hidden = true; });
   }
+
+  // ---------------- reading practice ----------------
+  // Built-in texts are original or traditional. The Rainbow and Grandfather passages come from
+  // 1960s textbooks whose copyright status is unclear, so the app asks you to paste your own copy.
+  const BUILTIN_TEXTS = [
+    { id: 'b-northwind', title: 'The North Wind and the Sun (Aesop, retold)', body: 'The North Wind and the Sun were arguing about which of them was stronger, when a traveller came along wrapped in a warm cloak. They agreed that whoever first made the traveller take off the cloak would be called the stronger.\n\nThe North Wind blew as hard as it could, but the harder it blew, the more tightly the traveller held the cloak around their shoulders, and at last the North Wind gave up. Then the Sun came out and shone warmly, and straight away the traveller took off the cloak. So the North Wind had to admit that the Sun was the stronger of the two.' },
+    { id: 'b-bright', title: 'Bright vowels (ee, ay, eh)', body: 'Please keep the green seeds in the tea tin. Lisa sees three bees in the tall trees.\n\nKate baked a cake on a rainy day. They stayed late to paint the gate grey.\n\nTen red pens fell under the bed. Every evening, Eve feels the sea breeze.' },
+    { id: 'b-sibilants', title: 'Sibilants (s and sh)', body: 'She sees six silver ships sailing south. Sam\'s sister sewed a soft silk scarf.\n\nSally sells sea shells by the seashore. Fresh fish is served on Sunday.\n\nSunshine sparkles on the shallow stream, and she sits by the shore to rest.' },
+    { id: 'b-everyday', title: 'Everyday phrases', body: 'Hi, it\'s so nice to see you again. How have you been?\n\nCould I get a small coffee with oat milk, please? Thanks so much.\n\nSorry, could you say that again? I\'ll be there in about ten minutes.\n\nHave a lovely evening, and see you next week!' },
+  ];
+  const ADD_PRESETS = [
+    { id: 'add-rainbow', title: 'Rainbow Passage', note: 'The Rainbow Passage (Fairbanks, 1960) is widely shared, but its copyright status is unclear, so it is not built in. Paste your copy here and the app will keep it for you.' },
+    { id: 'add-grandfather', title: 'Grandfather Passage', note: 'The Grandfather Passage (Van Riper, 1963) is widely shared, but its copyright status is unclear, so it is not built in. Paste your copy here and the app will keep it for you.' },
+    { id: 'add-own', title: '', note: 'Paste or type anything you want to practise: a script for a phone call, a poem, a paragraph from a book. Blank lines start new paragraphs.' },
+  ];
+  const TEXTS_KEY = 'voicetrainer.texts.v1';
+  const Texts = {
+    user: [],
+    async load() {
+      try { this.user = JSON.parse(localStorage.getItem(TEXTS_KEY) || '[]'); } catch (e) { this.user = []; }
+      if (Store.col) {
+        try { const s = await Store.col.doc('_texts').get(); if (s.exists) this.user = (s.data().items || []); } catch (e) {}
+      }
+    },
+    async save() {
+      try { localStorage.setItem(TEXTS_KEY, JSON.stringify(this.user)); } catch (e) {}
+      if (Store.col) { try { await Store.col.doc('_texts').set({ items: this.user }); } catch (e) {} }
+    },
+    all() { return [...this.user, ...BUILTIN_TEXTS]; },
+  };
+
+  const Reader = {
+    open: false, mode: 'voice', words: [], cum: [], idx: 0, tracker: new D.NucleusTracker(),
+    paceT: 0, paceLast: 0, base: 0, size: 2, current: null, wasPause: false,
+    frame(fr) {
+      if (!this.open || this.mode !== 'voice' || !this.words.length) return;
+      const now = performance.now();
+      const hit = this.tracker.push(fr, now);
+      if (hit) {
+        // a new syllable: move to the word that owns it, never more than one word per syllable
+        const n = this.base + this.tracker.count;
+        let i = this.idx;
+        while (i + 1 < this.words.length && this.cum[i + 1] < n && i < this.idx + 1) i++;
+        if (i !== this.idx) this.go(i, true);
+      }
+      // a pause: snap to the start of the next sentence or clause if we are close to it
+      const pause = this.tracker.silentMs > 450;
+      if (pause && !this.wasPause) this.resync();
+      this.wasPause = pause;
+    },
+    resync() {
+      const w = this.words;
+      for (let d = 0; d <= 3; d++) {
+        for (const j of [this.idx + d, this.idx - d]) {
+          if (j >= 0 && j < w.length - 1 && /[.!?;:,]$/.test(w[j].text) && j >= this.idx - 2) {
+            this.go(j + 1, false); return;
+          }
+        }
+      }
+    },
+    go(i, fromVoice) {
+      i = clamp(i, 0, this.words.length - 1);
+      this.idx = i;
+      if (!fromVoice) { this.base = this.cum[i] - this.tracker.count; }
+      this.paint();
+    },
+    paint() {
+      const els = this.words;
+      els.forEach((w, j) => {
+        w.el.classList.toggle('past', j < this.idx);
+        w.el.classList.toggle('cur', j === this.idx);
+        w.el.classList.toggle('next', j === this.idx + 1);
+      });
+      const cur = els[this.idx] && els[this.idx].el;
+      if (cur) {
+        const stage = $('reader-stage');
+        const target = stage.scrollTop + cur.getBoundingClientRect().top - stage.getBoundingClientRect().top - stage.clientHeight * 0.38;
+        if (Math.abs(stage.scrollTop - target) > cur.offsetHeight * 0.8) {
+          stage.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        }
+      }
+      $('rh-hint').textContent = this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
+    },
+    render(text) {
+      this.current = text;
+      const box = $('reader-text');
+      box.innerHTML = '';
+      this.words = []; this.cum = [];
+      let syl = 0;
+      for (const para of text.body.split(/\n\s*\n/)) {
+        const p = document.createElement('p');
+        for (const tok of para.trim().split(/\s+/).filter(Boolean)) {
+          const span = document.createElement('span');
+          span.className = 'w'; span.textContent = tok;
+          const i = this.words.length;
+          span.addEventListener('click', (e) => { e.stopPropagation(); this.go(i, false); });
+          p.append(span, ' ');
+          this.cum.push(syl);
+          syl += D.countSyllables(tok);
+          this.words.push({ text: tok, el: span });
+        }
+        box.appendChild(p);
+      }
+      this.cum.push(syl);
+      this.restart();
+    },
+    restart() { this.tracker.reset(); this.base = 0; this.idx = 0; this.paceLast = performance.now(); this.paceT = 0; $('reader-stage').scrollTop = 0; this.paint(); },
+    tick() {
+      if (!this.open) return;
+      requestAnimationFrame(() => this.tick());
+      if (this.mode !== 'pace' || !this.words.length) { this.paceLast = performance.now(); return; }
+      const now = performance.now(), dt = now - this.paceLast; this.paceLast = now;
+      this.paceT += dt;
+      const w = this.words[this.idx];
+      const wpm = +$('reader-wpm').value;
+      // longer words and punctuation take longer
+      const need = 60000 / wpm * (0.6 + 0.4 * Math.max(1, D.countSyllables(w.text))) + (/[.!?]$/.test(w.text) ? 450 : /[,;:]$/.test(w.text) ? 200 : 0);
+      if (this.paceT >= need && this.idx < this.words.length - 1) { this.paceT = 0; this.go(this.idx + 1, false); }
+    },
+    setMode(m) {
+      this.mode = m;
+      for (const k of ['voice', 'pace', 'tap']) $('rmode-' + k).setAttribute('aria-checked', String(k === m));
+      $('reader-wpm-wrap').hidden = m !== 'pace';
+      this.tracker.reset(); this.base = this.cum[this.idx] || 0; this.paceT = 0;
+      try { localStorage.setItem('voicetrainer.readmode', m); } catch (e) {}
+      this.paint();
+    },
+    fillPicker(selectId) {
+      const sel = $('reader-pick');
+      sel.innerHTML = '';
+      const og = (label, items) => { const g = document.createElement('optgroup'); g.label = label; for (const [v, t] of items) { const o = document.createElement('option'); o.value = v; o.textContent = t; g.appendChild(o); } sel.appendChild(g); };
+      if (Texts.user.length) og('Your texts', Texts.user.map(t => [t.id, t.title]));
+      og('Built in', BUILTIN_TEXTS.map(t => [t.id, t.title]));
+      og('Add a text', [['add-rainbow', 'Add the Rainbow Passage...'], ['add-grandfather', 'Add the Grandfather Passage...'], ['add-own', 'Add your own text...']]);
+      sel.value = selectId || (this.current && this.current.id) || BUILTIN_TEXTS[0].id;
+    },
+    pick(id) {
+      const preset = ADD_PRESETS.find(p => p.id === id);
+      if (preset) return this.editForm(null, preset);
+      const t = Texts.all().find(x => x.id === id);
+      if (!t) return;
+      try { localStorage.setItem('voicetrainer.readtext', id); } catch (e) {}
+      $('reader-form').hidden = true; $('reader-text').hidden = false;
+      this.render(t);
+      this.fillPicker(id);
+      $('reader-edit').hidden = !id.startsWith('u-');
+    },
+    editForm(existing, preset) {
+      $('reader-text').hidden = true; $('reader-form').hidden = false; $('reader-edit').hidden = true;
+      $('rf-title').value = existing ? existing.title : (preset && preset.title) || '';
+      $('rf-body').value = existing ? existing.body : '';
+      $('rf-note').textContent = existing ? 'Edit your text, or delete it.' : preset ? preset.note : '';
+      $('rf-delete').hidden = !existing;
+      this.editing = existing;
+      ($('rf-title').value ? $('rf-body') : $('rf-title')).focus();
+    },
+    async saveForm() {
+      const title = $('rf-title').value.trim(), body = $('rf-body').value.trim();
+      if (!title || !body) return;
+      if (this.editing) { this.editing.title = title; this.editing.body = body; }
+      else Texts.user.unshift({ id: 'u-' + Date.now().toString(36), title, body });
+      const id = this.editing ? this.editing.id : Texts.user[0].id;
+      this.editing = null;
+      await Texts.save();
+      this.fillPicker(id);
+      this.pick(id);
+    },
+    show() {
+      this.open = true;
+      $('reader').hidden = false;
+      document.body.style.overflow = 'hidden';
+      let id = BUILTIN_TEXTS[0].id;
+      try { id = localStorage.getItem('voicetrainer.readtext') || id; } catch (e) {}
+      if (!Texts.all().some(t => t.id === id)) id = BUILTIN_TEXTS[0].id;
+      this.fillPicker(id);
+      this.pick(id);
+      setMicButton(state.running === 'mic');
+      this.tick();
+      $('reader-close').focus();
+    },
+    hide() {
+      this.open = false;
+      $('reader').hidden = true;
+      document.body.style.overflow = '';
+      $('btn-read').focus();
+    },
+    init() {
+      let m = 'voice';
+      try { m = localStorage.getItem('voicetrainer.readmode') || 'voice'; } catch (e) {}
+      $('btn-read').addEventListener('click', () => this.show());
+      $('reader-close').addEventListener('click', () => this.hide());
+      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic().then(() => { this.restart(); })));
+      $('reader-restart').addEventListener('click', () => this.restart());
+      $('reader-pick').addEventListener('change', (e) => this.pick(e.target.value));
+      for (const k of ['voice', 'pace', 'tap']) $('rmode-' + k).addEventListener('click', () => this.setMode(k));
+      $('reader-wpm').addEventListener('input', (e) => { $('reader-wpm-out').textContent = e.target.value; });
+      const size = (d) => { this.size = clamp(this.size + d, 1.2, 3.6); $('reader-text').style.setProperty('--rsize', this.size + 'rem'); };
+      $('reader-smaller').addEventListener('click', () => size(-0.25));
+      $('reader-bigger').addEventListener('click', () => size(0.25));
+      $('reader-text').addEventListener('click', () => { if (this.mode === 'tap') this.go(this.idx + 1, false); });
+      $('reader-form').addEventListener('submit', (e) => { e.preventDefault(); this.saveForm(); });
+      $('rf-cancel').addEventListener('click', () => { this.editing = null; this.pick((this.current && this.current.id) || BUILTIN_TEXTS[0].id); });
+      $('rf-delete').addEventListener('click', async () => {
+        const b = $('rf-delete');
+        if (!b.dataset.confirm) { b.dataset.confirm = '1'; b.textContent = 'Confirm delete'; return; }
+        delete b.dataset.confirm; b.textContent = 'Delete this text';
+        Texts.user = Texts.user.filter(t => t !== this.editing); this.editing = null;
+        await Texts.save(); this.fillPicker(BUILTIN_TEXTS[0].id); this.pick(BUILTIN_TEXTS[0].id);
+      });
+      $('reader-edit').addEventListener('click', () => { if (this.current && this.current.id.startsWith('u-')) this.editForm(Texts.user.find(t => t.id === this.current.id)); });
+      document.addEventListener('keydown', (e) => {
+        if (!this.open) return;
+        if (e.key === 'Escape') { if ($('reader-form').hidden) this.hide(); else $('rf-cancel').click(); return; }
+        if (e.target.closest('input, textarea, select')) return;
+        if (e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); this.go(this.idx + 1, false); }
+        else if (e.key === 'Backspace' || e.key === 'ArrowLeft') { e.preventDefault(); this.go(this.idx - 1, false); }
+      });
+      this.setMode(m === 'pace' || m === 'tap' ? m : 'voice');
+    },
+  };
+
   function init() {
     let g = 'fem';
     try { g = localStorage.getItem('voicetrainer.goal') || 'fem'; } catch (e) {}
@@ -1143,7 +1372,8 @@
     let rt = 0;
     window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
-    Store.init().then(renderHistory);
+    Store.init().then(() => { renderHistory(); return Texts.load(); });
+    Reader.init();
   }
   init();
 

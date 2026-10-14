@@ -23,6 +23,7 @@
     <label class="btn" for="file-in" id="btn-file">Analyze a recording</label>
     <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
     <button type="button" id="btn-demo" class="btn">Play demo voice</button>
+    <button type="button" id="btn-read" class="btn">Reading practice</button>
     <button type="button" id="btn-stop" class="btn" hidden>Stop</button>
     <span id="src-status" class="status" role="status">Not listening</span>
   </section>
@@ -152,6 +153,46 @@
       </table>
     </div>
   </section>
+
+  <div id="reader" class="reader" role="dialog" aria-modal="true" aria-labelledby="reader-title" hidden>
+    <div class="reader-bar">
+      <h2 id="reader-title" class="reader-h">Reading practice</h2>
+      <label class="reader-field"><span>Passage</span><select id="reader-pick"></select></label>
+      <div class="seg" role="radiogroup" aria-label="How the highlight moves">
+        <button type="button" role="radio" id="rmode-voice" aria-checked="true">Follow my voice</button>
+        <button type="button" role="radio" id="rmode-pace" aria-checked="false">Steady pace</button>
+        <button type="button" role="radio" id="rmode-tap" aria-checked="false">Tap to advance</button>
+      </div>
+      <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
+      <div class="btn-row reader-actions">
+        <button type="button" class="btn primary" id="reader-mic">Start microphone</button>
+        <button type="button" class="btn" id="reader-restart">Back to start</button>
+        <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
+        <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>
+        <button type="button" class="btn" id="reader-bigger" aria-label="Larger text">A+</button>
+        <button type="button" class="btn" id="reader-close">Close</button>
+      </div>
+    </div>
+    <div class="reader-hud" aria-live="off">
+      <span>Resonance <b id="rh-res">--</b></span>
+      <span>Vowel <b id="rh-vowel">--</b></span>
+      <span>Pitch <b id="rh-pitch">--</b></span>
+      <span id="rh-hint" class="rh-hint"></span>
+    </div>
+    <div class="reader-stage" id="reader-stage">
+      <div id="reader-text" class="reader-text"></div>
+      <form id="reader-form" class="reader-form" hidden>
+        <label class="reader-field"><span>Title</span><input type="text" id="rf-title" maxlength="80" required></label>
+        <label class="reader-field"><span>Text</span><textarea id="rf-body" rows="10" required></textarea></label>
+        <p class="ex-note" id="rf-note"></p>
+        <div class="btn-row">
+          <button type="submit" class="btn primary">Save text</button>
+          <button type="button" class="btn" id="rf-cancel">Cancel</button>
+          <button type="button" class="btn" id="rf-delete" hidden>Delete this text</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <footer class="foot">
     <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>

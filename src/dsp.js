@@ -325,6 +325,43 @@
     return { pos, dir, distance: pos < lo ? lo - pos : pos > hi ? pos - hi : 0, onTarget: dir === 0 };
   }
 
+  // ---------- reading-along helpers ----------
+  // Rough English syllable count for a written word (vowel groups, silent final e).
+  function countSyllables(word) {
+    const w = String(word).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!w) return 0;
+    if (/^[0-9]+$/.test(w)) return Math.max(1, w.length);
+    if (w.length <= 3) return 1;
+    let t = w.replace(/(?:[^laeiouy]es|[^laeiouy]ed|[^laeiouy]e)$/, '').replace(/^y/, '');
+    const groups = t.match(/[aeiouy]+/g);
+    return Math.max(1, groups ? groups.length : 1);
+  }
+  // Counts syllable nuclei in a stream of analyzer frames: every voiced onset, plus
+  // energy peaks inside a voiced stretch separated by a dip of at least `dipDb`.
+  class NucleusTracker {
+    constructor(dipDb = 3, minGapMs = 110) { this.dip = dipDb; this.gap = minGapMs; this.reset(); }
+    reset() { this.count = 0; this.inNuc = false; this.peak = -200; this.valley = -200; this.lastT = -1e9; this.silentMs = 0; this.lastFrameT = null; }
+    push(fr, tMs) {
+      const dt = this.lastFrameT == null ? 16 : Math.min(100, tMs - this.lastFrameT);
+      this.lastFrameT = tMs;
+      const e = 20 * Math.log10(fr.rms + 1e-9);
+      if (fr.kind === 'voiced') {
+        this.silentMs = 0;
+        if (!this.inNuc) {
+          if (e > this.valley + this.dip && tMs - this.lastT > this.gap) { this.count++; this.inNuc = true; this.peak = e; this.lastT = tMs; return true; }
+          this.valley = Math.min(this.valley, e);
+        } else {
+          this.peak = Math.max(this.peak, e);
+          if (e < this.peak - this.dip) { this.inNuc = false; this.valley = e; }
+        }
+      } else {
+        this.inNuc = false; this.valley = -200;
+        if (fr.kind === 'silence') this.silentMs += dt; else this.silentMs = 0;
+      }
+      return false;
+    }
+  }
+
   function sibilantAlpha(cog, sib) {
     return Math.log(cog / sib.M) / Math.log(sib.W / sib.M);
   }
@@ -437,7 +474,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, countSyllables, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

@@ -9,6 +9,8 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 - **Pitch tracking** (YIN).
 - **Guided exercises** built from your weakest vowels and sibilants, with synthesized reference examples and before/after scores.
 - **Live spectrogram** with goal markers for the current vowel.
+- **Live drill coach**: one concrete adjustment at a time (jaw, tongue, lips/larynx) with per-formant gauges.
+- **Reading practice**: large-text reading view with karaoke-style highlighting that follows your syllables (or a steady pace, or tap to advance). Built-in practice texts plus your own; the Rainbow and Grandfather passages can be pasted in (their copyright status is unclear, so they aren't bundled).
 - **Progress history** stored locally.
 
 Everything runs in the browser; no audio leaves your machine.
@@ -28,6 +30,8 @@ Open `dist/VoiceTrainer.html` in a browser and allow microphone access, or use t
 ```sh
 node test/dsp.test.js       # pitch/formant/scoring checks on synthetic voices
 node test/examples.test.js  # every reference example scores on target
+node test/coach.test.js     # live coaching cues point the right way
+node test/reading.test.js   # syllable counting and tracking for reading along
 ```
 
 ## Layout

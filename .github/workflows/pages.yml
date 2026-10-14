@@ -28,6 +28,7 @@ jobs:
       - run: node test/dsp.test.js
       - run: node test/examples.test.js
       - run: node test/coach.test.js
+      - run: node test/reading.test.js
       - run: node build.js
       - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html
       - uses: actions/configure-pages@v5
