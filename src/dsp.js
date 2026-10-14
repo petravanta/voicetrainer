@@ -294,6 +294,37 @@
     return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res[1].cost - best.cost };
   }
 
+  // Live coaching for a held vowel. Positions use the same 0 (male avg) .. 100 (female avg) scale
+  // per formant. A formant is fine inside the goal band; outside it, `need` says which way it must
+  // move. `focus` is the single most useful change: one formant, or 'all' when every formant is off
+  // the same way (a whole-tract change such as larynx height).
+  const COACH_BAND = { fem: [75, 135], masc: [-35, 25] };
+  const COACH_WEIGHT = [0.6, 1, 0.8]; // F1 swings with jaw opening and is the noisiest
+  function coachVowel(F, v, goal) {
+    const [lo0, hi0] = COACH_BAND[goal];
+    const pos = fitVowel(F, v).per.map(x => x * 100);
+    // F1 gets extra slack: it is the least reliable estimate, especially at higher pitch
+    const band = (i) => (i === 0 ? [lo0 - 20, hi0 + 20] : [lo0, hi0]);
+    const need = pos.map((p, i) => (p < band(i)[0] ? 1 : p > band(i)[1] ? -1 : 0));
+    const miss = pos.map((p, i) => (p < band(i)[0] ? band(i)[0] - p : p > band(i)[1] ? p - band(i)[1] : 0) * COACH_WEIGHT[i]);
+    const distance = (miss[0] + miss[1] + miss[2]) / (COACH_WEIGHT[0] + COACH_WEIGHT[1] + COACH_WEIGHT[2]);
+    let focus = null;
+    const worst = miss.indexOf(Math.max(...miss));
+    if (miss[worst] > 0) {
+      // F2 and F3 off together (and F1 not pulling the other way) means a whole-tract change
+      const same = need[1] === need[2] && need[1] !== 0 && need[0] !== -need[1] &&
+        Math.min(miss[1], miss[2]) > 0.45 * Math.max(miss[1], miss[2]);
+      focus = same ? { formant: 'all', dir: need[1] } : { formant: worst, dir: need[worst] };
+    }
+    return { pos, need, miss, distance, focus, onTarget: !focus };
+  }
+  function coachSibilant(cog, sib, goal) {
+    const [lo, hi] = COACH_BAND[goal];
+    const pos = sibilantAlpha(cog, sib) * 100;
+    const dir = pos < lo ? 1 : pos > hi ? -1 : 0;
+    return { pos, dir, distance: pos < lo ? lo - pos : pos > hi ? pos - hi : 0, onTarget: dir === 0 };
+  }
+
   function sibilantAlpha(cog, sib) {
     return Math.log(cog / sib.M) / Math.log(sib.W / sib.M);
   }
@@ -406,7 +437,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

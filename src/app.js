@@ -442,6 +442,8 @@
     if (frameCount - sibShown > 120) $('ro-sib').textContent = '--';
 
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
+    if (!gated) coachFrame(fr);
+    if (frameCount % 6 === 0) renderCoach();
     if (d) updateDrill(d);
     if (frameCount % 30 === 0) renderSession();
   }
@@ -529,6 +531,12 @@
       </div>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
+      <div id="coach" class="coach" aria-live="polite">
+        <p class="eyebrow"><span>Live coach</span><span id="coach-trend"></span></p>
+        <p class="coach-cue" id="coach-cue"></p>
+        <p class="coach-why" id="coach-why"></p>
+        <div class="gauges" id="coach-gauges"></div>
+      </div>
       <div id="drill-result"></div>
       <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
     p.querySelector('.drill-title').textContent = d.def.title;
@@ -538,6 +546,103 @@
     $('ex-play').addEventListener('click', () => (exSrc && $('ex-play').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'play')));
     $('ex-compare').addEventListener('click', () => (exSrc && $('ex-compare').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'compare')));
     renderExampleNote();
+    state.coach = { vf: [], vt: -1e9, sf: [], st: -1e9, hist: [], key: null, pendingKey: null, pendingN: 0 };
+    renderCoach();
+  }
+
+  // ---------------- live coach ----------------
+  // Turns the last few frames into one concrete adjustment, plus a gauge per formant.
+  const COACH_CUES = {
+    fem: {
+      '0:1': ['Open your jaw a little more and keep your throat light.', 'F1 is low for this vowel. It rises with a more open mouth and a smaller throat.'],
+      '0:-1': ['Close your jaw slightly.', 'F1 is above the target, which usually means the mouth is too open for this vowel.'],
+      '1:1': ['Slide your tongue forward, toward your top teeth, and spread your lips a little.', 'F2 follows the tongue. Moving it forward raises F2 and brightens the vowel.'],
+      '1:-1': ['Let your tongue sit a little further back.', 'F2 is above the target for this vowel, so the tongue is further forward than it needs to be.'],
+      '2:1': ['Pull your lips into a slight smile and keep your larynx up.', 'F3 rises with less lip rounding and a shorter throat.'],
+      '2:-1': ['Relax the smile slightly.', 'F3 is above the target for this vowel.'],
+      'all:1': ['Make the whole space smaller: raise your larynx (like a light, high "hee" or the start of a swallow) and smile slightly.', 'All three formants are low by a similar amount. That is a whole-throat change, not the tongue or lips alone.'],
+      'all:-1': ['Ease off a little: let the larynx drop slightly.', 'All three formants are above the target together.'],
+    },
+    masc: {
+      '0:1': ['Open your jaw a little more.', 'F1 is low for this vowel, so the mouth may be too closed.'],
+      '0:-1': ['Add space in your throat, like the start of a yawn, without opening the mouth wider.', 'F1 is high for this vowel. A bigger throat lowers it.'],
+      '1:1': ['Bring your tongue slightly forward.', 'F2 is below the target for this vowel.'],
+      '1:-1': ['Let your tongue sit a little further back and relax any smile.', 'F2 follows the tongue. Moving it back lowers F2 and darkens the vowel.'],
+      '2:1': ['Relax the lip rounding slightly.', 'F3 is below the target for this vowel.'],
+      '2:-1': ['Round your lips slightly and let your larynx settle lower.', 'F3 drops with rounded lips and a longer throat.'],
+      'all:1': ['Ease off a little: let the larynx rise slightly.', 'All three formants are below the target together.'],
+      'all:-1': ['Make the whole space bigger: lower your larynx (the start of a yawn) and round your lips a little.', 'All three formants are high by a similar amount. That is a whole-throat change, not the tongue or lips alone.'],
+    },
+  };
+  const SIB_CUES = {
+    '1': ['Bring your tongue tip closer to your top teeth and smile slightly to raise the hiss.', 'A smaller space in front of the tongue makes a higher, brighter hiss.'],
+    '-1': ['Pull your tongue tip back a little and round your lips to lower the hiss.', 'A bigger space in front of the tongue makes a lower, darker hiss.'],
+  };
+  const FORMANT_ROLE = ['jaw opening', 'tongue front / back', 'lips and larynx'];
+  function coachFrame(fr) {
+    const co = state.coach, d = state.drill;
+    if (!co || !d) return;
+    const now = performance.now();
+    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { co.vf.push(fr.formants); if (co.vf.length > 8) co.vf.shift(); co.vt = now; }
+    if (d.def.sib && fr.kind === 'fricative') { co.sf.push(fr.cog); if (co.sf.length > 8) co.sf.shift(); co.st = now; }
+  }
+  function gaugeRow(label, sub, pos, need, slack = 0) {
+    const lo = D.COACH_BAND[state.goal][0] - slack, hi = D.COACH_BAND[state.goal][1] + slack;
+    const x = (v) => clamp((v + 40) / 180 * 100, 0, 100);
+    const mark = need === 1 ? '↑ raise' : need === -1 ? '↓ lower' : '✓';
+    return `<div class="gauge"><span class="g-label">${label} <small>${sub}</small></span>
+      <span class="g-track"><span class="g-band" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="g-mark ${need ? 'off' : 'ok'}" style="left:${x(pos)}%"></span></span>
+      <span class="g-need ${need ? 'off' : 'ok'}">${mark}</span></div>`;
+  }
+  function renderCoach() {
+    const co = state.coach, d = state.drill, cueEl = $('coach-cue');
+    if (!co || !d || !cueEl) return;
+    const now = performance.now(), def = d.def;
+    const vRecent = def.vowel && co.vf.length && now - co.vt < 1200;
+    const sRecent = def.sib && co.sf.length && now - co.st < 1200;
+    let key = 'idle', cue, why = '', dist = null, rows = '';
+    if (vRecent) {
+      const v = D.VOWEL_BY_KEY[def.vowel];
+      const F = [0, 1, 2].map(i => D.median(co.vf.map(f => f[i])));
+      const c = D.coachVowel(F, v, state.goal);
+      rows += c.pos.map((p, i) => gaugeRow('F' + (i + 1), FORMANT_ROLE[i], p, c.need[i], i === 0 ? 20 : 0)).join('');
+      dist = c.distance;
+      key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
+    }
+    if (sRecent) {
+      const cog = D.median(co.sf), c = D.coachSibilant(cog, D.SIBILANTS[def.sib], state.goal);
+      rows += gaugeRow(def.sib === 's' ? '/s/' : '/ʃ/', `hiss ${(cog / 1000).toFixed(1)} kHz`, c.pos, c.dir);
+      if (!vRecent || co.st > co.vt) { key = c.onTarget ? 'ok' : 'sib:' + c.dir; dist = c.distance; }
+    }
+    // only switch the spoken cue once it has held for a few updates, so it doesn't flicker
+    if (key !== co.key) {
+      if (key === co.pendingKey) co.pendingN++; else { co.pendingKey = key; co.pendingN = 1; }
+      if (co.pendingN >= 3 || co.key === null || key === 'idle') co.key = key;
+    }
+    const k = co.key;
+    if (k === 'idle' || k === null) {
+      cue = state.running ? `Hold ${def.type === 'sib' ? 'the hiss' : def.type === 'word' ? 'the word' : 'the vowel'} and you will get a live tip here.` : 'Start the microphone to get live tips while you practise.';
+    } else if (k === 'ok') {
+      cue = 'On target. Hold this shape and notice how it feels.';
+    } else if (k.startsWith('sib:')) {
+      [cue, why] = SIB_CUES[k.slice(4)];
+    } else {
+      [cue, why] = COACH_CUES[state.goal][k] || ['', ''];
+    }
+    cueEl.textContent = cue;
+    cueEl.classList.toggle('ok', k === 'ok');
+    $('coach-why').textContent = why;
+    $('coach-gauges').innerHTML = rows;
+    // closer / further, compared with about half a second ago
+    const tr = $('coach-trend');
+    if (dist != null) {
+      co.hist.push([now, dist]);
+      while (co.hist.length && now - co.hist[0][0] > 2000) co.hist.shift();
+      const past = co.hist.find(h => now - h[0] <= 700);
+      const delta = past ? dist - past[1] : 0;
+      tr.textContent = dist === 0 ? 'in the target zone' : delta < -3 ? 'getting closer' : delta > 3 ? 'moving away' : `${Math.round(dist)} point${Math.round(dist) === 1 ? '' : 's'} away`;
+      tr.className = dist === 0 || delta < -3 ? 'trend good' : delta > 3 ? 'trend warn' : 'trend';
+    } else { tr.textContent = ''; tr.className = 'trend'; }
   }
   function renderExampleNote() {
     const n = $('ex-note'), d = state.drill; if (!n || !d) return;
@@ -975,7 +1080,7 @@
     const [lo, hi] = pitchBand();
     $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz`;
     try { localStorage.setItem('voicetrainer.goal', goal); } catch (e) {}
-    renderMeter(); drawPitch(); drawHistory(); renderSpecGoalHelp(); renderExampleNote(); if (C.ink) drawSpecAxis();
+    renderMeter(); drawPitch(); drawHistory(); renderSpecGoalHelp(); renderExampleNote(); if (state.coach) { state.coach.key = null; renderCoach(); } if (C.ink) drawSpecAxis();
     if (state.drill && state.drill.result) renderDrillResult(state.drill.result);
   }
   function renderSpecGoalHelp() {
