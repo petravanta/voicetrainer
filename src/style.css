@@ -252,3 +252,14 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 /* breath exercises */
 .breath-steps { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; font-size: 0.92rem; }
 .breath-gauge .g-track { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 22%, transparent), color-mix(in srgb, var(--muted) 22%, transparent)); }
+
+/* vocal tract sketch */
+.pitch-fig { grid-column: 1 / -1; }
+.tract-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.78rem; color: var(--muted); }
+.tract-key .ln { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--ink); vertical-align: middle; margin-right: 6px; }
+.tract-key .ln.goal { border: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--fem) 0 5px, transparent 5px 9px); }
+body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg, var(--masc) 0 5px, transparent 5px 9px); }
+.tract-key .ln.arrow { border-top-color: var(--warn); border-top-width: 3px; }
+.tract-note { margin: 0; font-size: 0.78rem; color: var(--muted); }
+.tract-coach { margin: 4px 0 0; display: grid; gap: 4px; }
+.tract-coach canvas { width: 100%; max-width: 360px; justify-self: center; display: block; }

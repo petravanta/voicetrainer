@@ -318,6 +318,34 @@
     }
     return { pos, need, miss, distance, focus, onTarget: !focus };
   }
+  // ---------- vocal tract sketch ----------
+  // A rough articulatory reading of the formants, for a picture only. Each vowel starts from its
+  // textbook tongue height, backness and lip rounding (0..1); the formants then nudge it the way the
+  // live coach reads them: a shift shared by all formants = tract length (larynx height), and what
+  // is left over = F1 jaw opening, F2 tongue front/back, F3 lips (spread vs rounded).
+  // Many shapes make the same formants, so this is one plausible shape, not a measurement.
+  const VOWEL_ART = {
+    i: [1, 0, 0], I: [0.82, 0.12, 0], e: [0.72, 0.06, 0], E: [0.5, 0.1, 0], ae: [0.18, 0.12, 0], a: [0, 0.85, 0],
+    c: [0.22, 0.95, 0.55], V: [0.35, 0.6, 0], o: [0.6, 1, 0.7], U: [0.8, 0.85, 0.45], u: [1, 1, 0.9], r: [0.5, 0.45, 0.25],
+  };
+  function tractShape(F, v, goal) {
+    const G = goal === 'fem' ? v.W : v.M;
+    // positions in "masculine to feminine average" units, relative to the goal for this vowel
+    const u = [0, 1, 2].map(i => Math.log(F[i] / G[i]) / Math.log(v.W[i] / v.M[i]));
+    const a = (0.5 * u[0] + u[1] + u[2]) / 2.5;
+    const q = u.map(x => x - a);
+    const [h, b, r] = VOWEL_ART[v.key] || [0.5, 0.5, 0];
+    const lim = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+    return {
+      vowel: v.key,
+      height: lim(h - 0.3 * q[0], -0.2, 1.2),  // F1 up = lower tongue, more open jaw
+      back: lim(b - 0.3 * q[1], -0.2, 1.2),    // F2 up = tongue further forward
+      round: lim(r - 0.35 * q[2], -0.5, 1.2),  // F3 down = more rounding; negative = spread (smile)
+      larynx: lim((goal === 'fem' ? 1 : 0) + a, -0.8, 1.8), // 0 = typical masculine height, 1 = typical feminine
+      shift: a, resid: q,
+    };
+  }
+
   function coachSibilant(cog, sib, goal) {
     const [lo, hi] = COACH_BAND[goal];
     const pos = sibilantAlpha(cog, sib) * 100;
@@ -519,7 +547,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, tractShape, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
