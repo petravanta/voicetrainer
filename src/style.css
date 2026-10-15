@@ -271,3 +271,11 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 .iso-row.main .g-label { font-weight: 600; }
 .tract-key .ln.start { border: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--muted) 0 5px, transparent 5px 9px); }
 .iso-row:not(.main) .g-mark { background: var(--muted); }
+
+.tract-lead { margin: 0; font-size: 0.86rem; }
+.tract-read { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; font-size: 0.84rem; }
+.tract-read li::before { content: "● "; }
+.tract-read li.ok::before { color: var(--good); }
+.tract-read li.off::before { color: var(--warn); }
+.tract-read b { font-weight: 600; margin-right: 4px; }
+@media (max-width: 480px) { .tract-read { grid-template-columns: minmax(0, 1fr); } }
