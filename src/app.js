@@ -1813,6 +1813,7 @@
         w.el.classList.toggle('cur', j === this.idx);
         w.el.classList.toggle('next', j === this.idx + 1);
       });
+      this.paintTrack();
       const cur = els[this.idx] && els[this.idx].el;
       if (cur) {
         const stage = $('reader-stage');
@@ -1823,10 +1824,29 @@
       }
       $('rh-hint').textContent = this.tts ? 'Listening to the demo voice. Your meters ignore it; press Stop reading to take over.' : this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
     },
+    // the single focus line: words left to right, the current one centred and highlighted
+    paintTrack() {
+      if (!this.focusLine) return;
+      const els = this.words, track = $('reader-track'), inner = $('track-inner');
+      els.forEach((w, j) => {
+        w.tw.classList.toggle('cur', j === this.idx);
+        w.tw.classList.toggle('next', j === this.idx + 1);
+        w.tw.classList.toggle('ahead', j > this.idx + 1);
+      });
+      const cur = els[this.idx] && els[this.idx].tw;
+      if (cur) inner.style.transform = `translateX(${track.clientWidth / 2 - cur.offsetLeft - cur.offsetWidth / 2}px)`;
+    },
+    setFocusLine(on) {
+      this.focusLine = on;
+      $('reader').classList.toggle('no-track', !on);
+      const b = $('reader-focus'); b.textContent = on ? 'Focus line on' : 'Focus line off'; b.setAttribute('aria-pressed', String(on));
+      try { localStorage.setItem('voicetrainer.focusline', on ? '1' : '0'); } catch (e) {}
+      if (on) requestAnimationFrame(() => this.paintTrack());
+    },
     render(text) {
       this.current = text;
-      const box = $('reader-text');
-      box.innerHTML = '';
+      const box = $('reader-text'), track = $('track-inner');
+      box.innerHTML = ''; track.innerHTML = '';
       this.words = []; this.cum = [];
       let syl = 0;
       for (const para of text.body.split(/\n\s*\n/)) {
@@ -1837,9 +1857,13 @@
           const i = this.words.length;
           span.addEventListener('click', (e) => { e.stopPropagation(); this.go(i, false); });
           p.append(span, ' ');
+          const tw = document.createElement('span');
+          tw.className = 'tw'; tw.textContent = tok;
+          tw.addEventListener('click', () => this.go(i, false));
+          track.append(tw, ' ');
           this.cum.push(syl);
           syl += D.countSyllables(tok);
-          this.words.push({ text: tok, el: span });
+          this.words.push({ text: tok, el: span, tw });
         }
         box.appendChild(p);
       }
@@ -2018,6 +2042,7 @@
       this.fillPicker(id);
       this.pick(id);
       setMicButton(state.running === 'mic');
+      requestAnimationFrame(() => this.paintTrack());
       this.tick();
       $('reader-close').focus();
     },
@@ -2032,6 +2057,11 @@
       let m = 'voice';
       try { m = localStorage.getItem('voicetrainer.readmode') || 'voice'; } catch (e) {}
       $('btn-read').addEventListener('click', () => this.show());
+      let fl = true;
+      try { fl = localStorage.getItem('voicetrainer.focusline') !== '0'; } catch (e) {}
+      this.setFocusLine(fl);
+      $('reader-focus').addEventListener('click', () => this.setFocusLine(!this.focusLine));
+      window.addEventListener('resize', () => { if (this.open) this.paintTrack(); });
       $('reader-close').addEventListener('click', () => this.hide());
       $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.stopListen(), startMic().then(() => { this.restart(); }))));
       $('reader-listen').addEventListener('click', () => this.listen());
