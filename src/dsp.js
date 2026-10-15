@@ -332,7 +332,7 @@
     const G = goal === 'fem' ? v.W : v.M;
     // positions in "masculine to feminine average" units, relative to the goal for this vowel
     const u = [0, 1, 2].map(i => Math.log(F[i] / G[i]) / Math.log(v.W[i] / v.M[i]));
-    const a = (0.5 * u[0] + u[1] + u[2]) / 2.5;
+    const a = (u[1] + u[2]) / 2; // the shared shift, read from F2 and F3 (F1 mostly follows the jaw)
     const q = u.map(x => x - a);
     const [h, b, r] = VOWEL_ART[v.key] || [0.5, 0.5, 0];
     const lim = (x, lo, hi) => Math.max(lo, Math.min(hi, x));

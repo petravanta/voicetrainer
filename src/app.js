@@ -701,7 +701,7 @@
         <p class="coach-why" id="coach-why"></p>
         <details class="how" id="coach-how" hidden><summary>How do I do that?</summary><div class="how-body"></div></details>
         <div class="gauges" id="coach-gauges"></div>
-        <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas>
+        <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas><ul class="tract-read" id="tract-read-coach"></ul>
           <figcaption class="tract-key"><span><i class="ln you"></i>your shape (estimated)</span><span><i class="ln goal"></i>goal shape</span><span><i class="ln arrow"></i>what to change</span></figcaption></figure>
       </div>
       <div id="drill-result"></div>
@@ -829,23 +829,33 @@
     masc: { '0:1': 'Open the jaw a little', '0:-1': 'Open the throat (start of a yawn)', '1:1': 'Tongue slightly forward', '1:-1': 'Tongue back, relax the smile',
       '2:1': 'Relax the lip rounding', '2:-1': 'Round the lips, larynx lower', 'all:1': 'Let the larynx rise slightly', 'all:-1': 'Larynx down: a bigger throat' },
   };
+  // The lower jaw (teeth, lower lip, chin, jawbone, and the front of the tongue resting on it)
+  // rotates open around the jaw joint in front of the ear.
+  const JAW_PIVOT = [190, 92];
+  function jawRot(J) {
+    const a = -J * 0.0085, c = Math.cos(a), sn = Math.sin(a), [cx, cy] = JAW_PIVOT;
+    return ([x, y]) => [cx + (x - cx) * c - (y - cy) * sn, cy + (x - cx) * sn + (y - cy) * c];
+  }
   function tractGeom(t) {
-    const J = 6 + 26 * clamp(1 - t.height, -0.2, 1.2);
-    const Ly = 236 - 34 * t.larynx;
+    const J = 5 + 20 * clamp(1 - t.height, -0.2, 1.4);
+    const Ly = 236 - 34 * clamp(t.larynx, -1, 2);
     const pro = 12 * Math.max(t.round, 0), spr = 7 * Math.max(-t.round, 0);
+    const rot = jawRot(J);
     const palY = (x) => { const u = clamp((x - 78) / 100, 0, 1); return 102 - 46 * u + 26 * u * u + (x > 178 ? (x - 178) * 0.9 : 0); };
-    const px = 108 + 76 * clamp(t.back, -0.2, 1.2);
-    const py = Math.max(palY(px) + 6, 98 + (1 - t.height) * 34 + J * 0.35);
     const back = clamp(t.back, -0.2, 1.2);
-    const tongue = [[84, 112 + J * 0.75], [96, py + 4 - (px - 108) * 0.05], [px, py], [182 + 20 * back, (py + Ly) / 2 - 6],
-      [188 + 12 * back, Ly - 14], [150, Ly - 10], [104, 146 + J * 0.8]];
+    const px = 108 + 76 * back;
+    const py = Math.max(palY(px) + 6, 98 + (1 - t.height) * 34 + J * 0.35);
+    const tip = rot([84, 110]), floor = rot([104, 144]);
+    const tongue = [tip, rot([100, 104]), [px, py], [182 + 20 * back, (py + Ly) / 2 - 6],
+      [188 + 12 * back, Ly - 14], [150, Ly - 10], floor];
+    // lower lip, chin and under the jaw rotate with the jaw; the neck stays put
+    const lower = [[68, 107], [54 - pro + spr, 110 + spr * 0.2], [55 - pro * 0.6 + spr, 118], [62, 127], [60, 145], [72, 157], [112, 165]].map(rot);
     return {
       J, Ly, tongue, peak: [px, py],
-      upLip: [52 - pro + spr, 101], loLip: [54 - pro + spr, 115 + J * 0.9], lipPro: pro, lipSpr: spr,
-      // upper lip (from under the nose), then lower lip, chin, under the jaw and down the neck
+      upLip: [52 - pro + spr, 101], loLip: lower[1], lipPro: pro, lipSpr: spr,
       upper: [[57, 88], [52 - pro + spr, 96], [53 - pro + spr, 102 - spr * 0.2], [68, 106]],
-      lower: [[68, 108 + J * 0.85], [54 - pro + spr, 111 + J * 0.9 + spr * 0.2], [55 - pro * 0.6 + spr, 119 + J * 0.9],
-        [62, 128 + J * 0.85], [60, 146 + J * 0.8], [72, 158 + J * 0.7], [112, 166 + J * 0.4], [128, 200], [132, 282]],
+      lower: [...lower, [132, 282]],
+      teeth: [[70, 111], [77, 111], [77, 121], [70, 121]].map(rot),
       larynx: [209, Ly + 10],
     };
   }
@@ -872,7 +882,7 @@
     g.beginPath(); tractPath(g, G.upper, k, false); g.stroke();
     g.beginPath(); tractPath(g, G.lower, k, false); g.stroke();
     // lower teeth
-    g.strokeRect(70 * k, (112 + G.J * 0.9) * k, 7 * k, 10 * k);
+    g.beginPath(); G.teeth.forEach(([x, y], i) => (i ? g.lineTo(x * k, y * k) : g.moveTo(x * k, y * k))); g.closePath(); g.stroke();
     // larynx: epiglottis, the box and the vocal folds
     const Ly = G.Ly;
     g.beginPath(); g.moveTo(194 * k, (Ly - 22) * k); g.quadraticCurveTo(192 * k, (Ly - 6) * k, 200 * k, Ly * k); g.stroke();
@@ -888,8 +898,25 @@
     g.fillStyle = C.panel; g.fillRect(x - w / 2, y - 14 * dpr, w, 20 * dpr);
     g.fillStyle = col; g.fillText(text, x, y);
   }
+  // Plain-language comparison of the two shapes, one row per part.
+  function tractReadout(y, t, fromStart) {
+    const vs = fromStart ? 'than at the start' : 'than the goal';
+    const row = (part, d, eps, more, less) => ({ part, ok: Math.abs(d) <= eps, text: Math.abs(d) <= eps ? (fromStart ? 'unchanged' : 'about right') : `${d > 0 ? more : less} ${vs}` });
+    return [
+      row('Jaw', t.height - y.height, 0.06, 'more open', 'more closed'),
+      row('Tongue', y.back - t.back, 0.05, 'further back', 'further forward'),
+      row('Lips', y.round - t.round, 0.07, 'more rounded', 'more spread'),
+      row('Larynx', y.larynx - t.larynx, fromStart ? 0.15 : 0.25, 'higher (shorter throat)', 'lower (longer throat)'),
+    ];
+  }
+  function renderTractRead(el, rows) {
+    if (!el) return;
+    if (!rows) { el.innerHTML = ''; return; }
+    el.innerHTML = rows.map(r => `<li class="${r.ok ? 'ok' : 'off'}"><b>${r.part}</b> ${r.text}</li>`).join('');
+  }
   function drawTract(cv, F, v, key, refF) {
-    if (!cv || !C.ink) return;
+    let readout = null;
+    if (!cv || !C.ink) return readout;
     fitCanvas(cv);
     const g = cv.getContext('2d'), dpr = dprOf();
     g.clearRect(0, 0, cv.width, cv.height);
@@ -910,11 +937,16 @@
     if (!F || !v) {
       g.fillStyle = C.muted; g.font = `${12 * dpr}px ${C.font}`; g.textAlign = 'center';
       g.fillText('Hold a vowel to see a sketch', 150 * k, 270 * k);
-      g.restore(); return;
+      g.restore(); return readout;
     }
     // dashed: the goal shape, or (in control exercises) the shape you started from
     const goalF = refF || (state.goal === 'fem' ? v.W : v.M);
-    const you = tractGeom(D.tractShape(F, v, state.goal)), tgt = tractGeom(D.tractShape(goalF, v, state.goal));
+    const sy = D.tractShape(F, v, state.goal), st = D.tractShape(goalF, v, state.goal);
+    // differences are drawn twice as large (larynx 1.5x) so small changes are visible
+    const amp = (key2, m) => st[key2] + m * (sy[key2] - st[key2]);
+    const shown = { height: amp('height', 2), back: amp('back', 2), round: amp('round', 2), larynx: amp('larynx', 1.5) };
+    const you = tractGeom(shown), tgt = tractGeom(st);
+    readout = tractReadout(sy, st, !!refF);
     drawTractLayer(g, k, you, { stroke: C.ink, width: 1.8 * dpr, fill: C.ink });
     drawTractLayer(g, k, tgt, { stroke: refF ? C.muted : goalCol, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
     g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`;
@@ -937,6 +969,7 @@
       tractLabel(g, k, dpr, TRACT_REC[state.goal][key] || '', C.ink);
     } else if (key === 'ok') tractLabel(g, k, dpr, 'Close to the goal shape', C.good);
     g.restore();
+    return readout;
   }
   // live sketch outside drills: steadied the same way as the coach's tips
   const tractLive = { F: null, v: null, at: -1e9, key: null, shownAt: 0, pending: null, pendingAt: 0 };
@@ -947,7 +980,7 @@
     if (fresh) { const c = D.coachVowel(t.F, t.v, state.goal); key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok'; }
     if (key !== t.pending) { t.pending = key; t.pendingAt = now; }
     if (key !== t.key && (t.key === null || key === 'idle' || (now - t.pendingAt >= (key === 'ok' ? 600 : 1000) && now - t.shownAt >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS)))) { t.key = key; t.shownAt = now; }
-    drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key);
+    renderTractRead($('tract-read'), drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key));
     const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `vowel "${t.v.cue}" as in ${t.v.word}` : '';
   }
   // smooth a gauge position so the marker glides instead of jumping
@@ -1002,7 +1035,7 @@
     const ct = $('cv-tract-coach');
     if (ct) {
       ct.parentElement.hidden = !def.vowel;
-      if (def.vowel) drawTract(ct, vRecent ? [0, 1, 2].map(i => D.median(co.vf.map(f => f[i]))) : null, D.VOWEL_BY_KEY[def.vowel], k);
+      if (def.vowel) renderTractRead($('tract-read-coach'), drawTract(ct, vRecent ? [0, 1, 2].map(i => D.median(co.vf.map(f => f[i]))) : null, D.VOWEL_BY_KEY[def.vowel], k));
     }
     // closer / further, compared with about half a second ago
     const tr = $('coach-trend');
@@ -1144,7 +1177,7 @@
           <span class="g-label">${l} <small>${sub}</small></span>
           <span class="g-track iso-track"><span class="iso-zero"></span><span class="g-mark" id="iso-m${i}" hidden></span></span>
           <span class="g-need" id="iso-v${i}"></span></div>`).join('')}</div>
-        <figure class="tract-coach"><canvas id="cv-tract-iso" height="230"></canvas>
+        <figure class="tract-coach"><canvas id="cv-tract-iso" height="230"></canvas><ul class="tract-read" id="tract-read-iso"></ul>
           <figcaption class="tract-key"><span><i class="ln you"></i>your shape now (estimated)</span><span><i class="ln start"></i>where you started</span></figcaption></figure>
       </div>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
@@ -1192,7 +1225,7 @@
       m.classList.toggle('ok', ISO_MAIN[def.kind].includes(i) && r.moved);
       $('iso-v' + i).textContent = i === 3 ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}` : `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
     });
-    drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, d.base.F);
+    renderTractRead($('tract-read-iso'), drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, d.base.F));
     const main = ISO_MAIN[def.kind];
     if (main[0] < 3) d.best = Math.max(d.best, ...main.map(i => Math.abs(r.dev[i])));
     else d.best = Math.max(d.best, Math.abs(r.semis));
