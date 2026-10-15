@@ -17,8 +17,64 @@
       ['she', 'sh', 'i'], ['shed', 'sh', 'E'], ['shop', 'sh', 'a'], ['shoe', 'sh', 'u'], ['shirt', 'sh', 'r'], ['sun', 's', 'V'],
     ].map(([w, sib, v]) => ({ id: 'w-' + w, type: 'word', sib, vowel: v, cue: w, sub: `/${sib === 's' ? 's' : 'ʃ'}/ + ${D.VOWEL_BY_KEY[v].cue}`, title: `Say "${w}" a few times` })),
   };
+  // Breath exercises: guided steps plus a live breathiness gauge. aim 'band' completes after a few
+  // seconds inside the goal zone; 'explore' is free practice.
+  DRILLS.breath = [
+    { id: 'b-dog', type: 'breath', aim: 'explore', cue: 'Big dog, little dog', sub: 'larynx height and airflow', title: 'Big dog, little dog',
+      why: 'A panting game for feeling your larynx move and noticing your airflow. A big dog pants low and slow with a lowered larynx and an open throat; a little dog pants high and quick with a raised larynx and a small throat. It mainly trains larynx height (resonance); because it starts as pure breath, it also makes airflow easy to feel.',
+      steps: (fem) => [
+        'Rest a finger lightly on your larynx, the bump at the front of your neck.',
+        'Big dog: pant slowly through an open mouth with a deep, hollow, dark sound. Feel the larynx drop.',
+        'Little dog: pant quickly and lightly with a small, bright, high sound. Feel the larynx rise.',
+        'Switch between the two a few times, slowly, with no strain in the neck.',
+        fem ? 'Settle in the little-dog position and add gentle voice: a soft, light "hee".' : 'Settle in the big-dog position and add gentle voice: a soft, relaxed "huh".',
+        'Watch the resonance meter move, and keep the breathiness gauge in the zone once you add voice. Panting alone is unvoiced, so the gauge only reads when there is tone.',
+      ] },
+    { id: 'b-sigh', type: 'breath', aim: 'band', cue: 'Sigh to clear tone', sub: 'find where breathy ends', title: 'Sigh to clear tone',
+      why: 'You start very airy and let the tone clear, so you feel exactly where breathy turns into clear. Good for learning control in both directions.',
+      steps: () => [
+        'Take an easy breath with relaxed shoulders.',
+        'Sigh out on "haaa" with lots of air and only a little tone. The gauge should sit high.',
+        'Over about three seconds, let the tone become clearer while the throat stays relaxed.',
+        'Stop changing when the gauge enters the zone, and hold "ah" there.',
+        'Repeat until you can land in the zone straight away.',
+      ] },
+    { id: 'b-whisper', type: 'breath', aim: 'band', cue: 'Whisper to voice', sub: 'add light airflow', title: 'Whisper to voice',
+      why: 'For a voice that feels pressed or heavy. A little airflow is part of a lighter vocal weight, which many people pair with feminine resonance. Too much air tires the voice, so the zone stops short of breathy.',
+      steps: () => [
+        'Whisper "hee" a few times, quietly.',
+        'Whisper it again and slowly blend in voice, like turning up a dimmer switch.',
+        'Stop when the gauge reaches the zone: a clear pitch with a hint of air.',
+        'Keep the volume low. This is about the quality of the sound, not loudness.',
+      ] },
+    { id: 'b-onset', type: 'breath', aim: 'band', cue: 'Clean onset "uh-oh"', sub: 'less air leaking', title: 'Clean, gentle onset',
+      why: 'For a voice that leaks too much air, which makes it quieter and tires it faster. A clean, gentle start brings the vocal folds together without pushing.',
+      steps: () => [
+        'Say "uh-oh" gently, like noticing a small mistake. Feel the tiny catch before each syllable.',
+        'Start an "ee" with that same tiny catch, and hold it.',
+        'Keep it soft: a light catch, never a cough or a hard click.',
+        'If the gauge is above the zone, use slightly less air and slightly more tone; if below, ease off the effort.',
+      ] },
+    { id: 'b-hum', type: 'breath', aim: 'band', cue: 'Hum into a vowel', sub: 'balanced closure', title: 'Hum into a vowel',
+      why: 'Humming, and humming through a straw, help the vocal folds close efficiently without pushing: the balanced point between breathy and pressed.',
+      steps: () => [
+        'Hum "mmm" at a comfortable pitch until you feel a buzz on your lips and nose.',
+        'Optional: hum through a drinking straw for about 20 seconds, then take it away.',
+        'Open the hum into "mmm-ah" and keep the same easy buzz in the "ah".',
+        'Hold the "ah" with the gauge in the zone.',
+      ] },
+    { id: 'b-scale', type: 'breath', aim: 'band', cue: 'Breathy, clear, pressed', sub: 'know your range', title: 'Breathy, clear, pressed',
+      why: 'Making each quality on purpose shows you the whole range, so you can choose where to sit instead of drifting.',
+      steps: () => [
+        'Hold "ah" very breathy: the gauge goes high.',
+        'Now clear: the gauge moves to the middle.',
+        'Now slightly pressed, like lifting something light: the gauge goes low. Never strain.',
+        'Move slowly between the three a few times.',
+        'Finish in the zone and hold it there.',
+      ] },
+  ];
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
-  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10 }; // frames at ~60 per second
+  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180 }; // frames at ~60 per second
 
   // ---------------- state ----------------
   const state = {
@@ -33,7 +89,7 @@
   let session = newSession();
   let take = null; // what the current recording or listening run contained, for the guided exercise
   function newSession() {
-    return { start: Date.now(), vowels: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], drills: [] };
+    return { start: Date.now(), vowels: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], breath: [], drills: [] };
   }
   const target = () => (state.goal === 'fem' ? [75, 110] : [-10, 25]);
 
@@ -424,7 +480,7 @@
   }
 
   // ---------------- per-frame logic ----------------
-  let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9;
+  let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9, breathBuf = [], breathShown = -1e9;
   function onFrame(fr) {
     frameCount++;
     drawSpecColumn(fr, an.fsd);
@@ -483,6 +539,20 @@
       $('ro-sib').textContent = `/${type === 's' ? 's' : 'ʃ'}/ ${fmt(score)} · ${(fr.cog / 1000).toFixed(1)} kHz`;
     }
     if (frameCount - sibShown > 120) $('ro-sib').textContent = '--';
+
+    if (fr.breath != null) {
+      breathBuf.push(fr.breath); if (breathBuf.length > 15) breathBuf.shift();
+      breathShown = frameCount;
+      const b = D.median(breathBuf);
+      $('ro-breath').textContent = `${Math.round(b)} · ${breathWord(b)}`;
+      if (!gated) {
+        session.breath.push(Math.round(fr.breath));
+        if (session.breath.length > 30000) session.breath.splice(0, 10000);
+      }
+      if (d && d.def.type === 'breath') d.breathFr.push(fr.breath);
+    }
+    if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
+    if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
     if (!gated) coachFrame(fr);
@@ -544,13 +614,13 @@
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of ['vowels', 'sibilants', 'words', 'breath']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
       state.plan.status = 'paused'; renderPlan();
     }
-    state.drill = { def, vowelFr: [], sibFr: [], offTarget: null, result: null };
+    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
     renderDrillGrid();
     renderDrillPanel();
@@ -567,6 +637,7 @@
   function renderDrillPanel() {
     const p = $('drill-panel'), d = state.drill;
     if (!d) return;
+    if (d.def.type === 'breath') return renderBreathPanel(d);
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
       <p class="drill-title"></p>
@@ -772,6 +843,7 @@
   }
   function updateDrill(d) {
     const def = d.def;
+    if (def.type === 'breath') return updateBreath(d);
     let prog;
     if (def.type === 'vowel') prog = d.vowelFr.length / NEED.vowel;
     else if (def.type === 'sib') prog = d.sibFr.length / NEED.sib;
@@ -788,6 +860,86 @@
       } else msg.textContent = prog > 0 ? 'Good, keep holding...' : 'Listening...';
     }
     if (prog >= 1) finishDrill(d);
+  }
+
+  // ---------------- breath exercises ----------------
+  function breathWord(b) { return b < 15 ? 'firm' : b < 35 ? 'clear' : b < 55 ? 'light, airy' : b < 75 ? 'breathy' : 'mostly air'; }
+  const breathBand = () => D.BREATH_BAND[state.goal];
+  function renderBreathPanel(d) {
+    const p = $('drill-panel'), def = d.def, [lo, hi] = breathBand();
+    p.innerHTML = `
+      <p class="eyebrow"><span>Breath exercise</span><span>${def.aim === 'explore' ? 'free practice' : 'hold in the zone'}</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      <ol class="breath-steps"></ol>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>Breathiness</span><span id="br-num" class="trend"></span></p>
+        <p class="coach-cue" id="br-cue"></p>
+        <div class="gauge breath-gauge">
+          <span class="g-label">clear <small>to airy</small></span>
+          <span class="g-track"><span class="g-band" style="left:${lo}%;width:${hi - lo}%"></span><span class="g-mark" id="br-mark" hidden></span></span>
+          <span class="g-need" id="br-need"></span>
+        </div>
+        <p class="coach-why">Zone ${lo}-${hi} for a ${state.goal === 'fem' ? 'feminine' : 'masculine'} goal: clear tone with ${state.goal === 'fem' ? 'a little' : 'little or no'} audible air. The number is an estimate from how clear the harmonics are; room noise and the mic shift it, so compare within one setup.</p>
+      </div>
+      ${def.aim === 'band' ? '<div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>' : ''}
+      <p class="drill-msg" id="drill-msg"></p>
+      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    p.querySelector('.drill-help').textContent = def.why;
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    $('drill-again').addEventListener('click', () => selectDrill(def));
+    $('drill-msg').textContent = state.running ? 'Listening...' : 'Start the microphone to see your breathiness live.';
+    d.cue = { key: null, at: 0, pending: null, pendingAt: 0, eased: {} };
+    updateBreath(d, true);
+  }
+  const BREATH_CUES = {
+    idle: 'Make a sustained, voiced sound and the gauge will show how breathy it is.',
+    ok: 'In the zone. Keep it easy and notice how it feels.',
+    high: 'Airier than the zone. Use a little less air and let more tone through, without pushing.',
+    low: 'Clearer and firmer than the zone. Ease off the effort and let a little air flow with the tone.',
+  };
+  function updateBreath(d, force) {
+    if (!force && frameCount % 6) return;
+    const def = d.def, [lo, hi] = breathBand(), now = performance.now();
+    const recent = d.breathFr.slice(-15);
+    const fresh = recent.length >= 5 && frameCount - breathShown < 90;
+    const b = fresh ? D.median(recent) : NaN;
+    const key = !fresh ? 'idle' : b > hi ? 'high' : b < lo ? 'low' : 'ok';
+    // the same steadiness rules as the live coach: no flicker between tips
+    const c = d.cue || (d.cue = { key: null, at: 0, pending: null, pendingAt: 0, eased: {} });
+    if (key !== c.pending) { c.pending = key; c.pendingAt = now; }
+    if (key !== c.key && (c.key === null || (key === 'idle' && now - c.pendingAt > COACH_HOLD_MS - 1200) ||
+      (key !== 'idle' && now - c.pendingAt >= (key === 'ok' ? 600 : 1000) && now - c.at >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS)))) { c.key = key; c.at = now; }
+    const cue = $('br-cue'); if (!cue) return;
+    cue.textContent = c.key === 'idle' && !state.running ? 'Start the microphone to see your breathiness live.' : BREATH_CUES[c.key || 'idle'];
+    cue.classList.toggle('ok', c.key === 'ok');
+    const mark = $('br-mark');
+    if (fresh) {
+      const x = ease(c, 'b', b);
+      mark.hidden = false; mark.style.left = clamp(x, 0, 100) + '%';
+      mark.classList.toggle('ok', key === 'ok');
+      $('br-num').textContent = `${Math.round(b)} · ${breathWord(b)}`;
+      $('br-need').textContent = key === 'ok' ? '✓' : key === 'high' ? '← clearer' : 'airier →';
+      $('br-need').className = 'g-need ' + (key === 'ok' ? 'ok' : 'off');
+    } else if (c.eased.b == null) { mark.hidden = true; $('br-need').textContent = ''; }
+    if (def.aim !== 'band' || d.result) return;
+    if (fresh && key === 'ok') d.inZone += 6;
+    const prog = d.inZone / NEED.breathIn;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
+    $('drill-msg').textContent = prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.breathIn / 60).toFixed(1)} seconds.` : state.running ? 'Listening...' : '';
+    if (prog >= 1) finishBreath(d);
+  }
+  function finishBreath(d) {
+    const def = d.def, score = D.median(d.breathFr);
+    d.result = { id: def.id, score, at: Date.now() };
+    state.lastScores[def.id] = score;
+    session.drills.push({ id: def.id, label: def.cue, score: Math.round(score), at: d.result.at, kind: 'breath' });
+    renderDrillGrid(); renderSession();
+    $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Do it again, or try another exercise.`;
+    $('drill-again').hidden = false;
+    autoSave('drill finished');
   }
 
   function finishDrill(d) {
@@ -1029,6 +1181,7 @@
       vowels, sib,
       resonance: s.all.length >= 20 ? D.median(s.all) : NaN,
       pitch: p.length >= 30 ? { median: D.median(p), p10: D.quantile(p, 0.1), p90: D.quantile(p, 0.9) } : null,
+      breath: s.breath && s.breath.length >= 30 ? D.median(s.breath) : NaN,
       seconds: Math.round((s.all.length + s.sibs.s.length + s.sibs.sh.length) / 60),
     };
   }
@@ -1050,6 +1203,7 @@
       ['Overall resonance', Number.isFinite(st.resonance) ? Math.round(st.resonance) : '--'],
       ['Median pitch', st.pitch ? `${Math.round(st.pitch.median)} Hz` : '--'],
       ['Pitch range (10-90%)', st.pitch ? `${Math.round(st.pitch.p10)}-${Math.round(st.pitch.p90)} Hz` : '--'],
+      ['Median breathiness', Number.isFinite(st.breath) ? `${Math.round(st.breath)} (${breathWord(st.breath)})` : '--'],
       ['Drills completed', session.drills.length],
     ];
     sum.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -1111,6 +1265,7 @@
       pitchMedian: st.pitch ? Math.round(st.pitch.median) : null,
       pitchP10: st.pitch ? Math.round(st.pitch.p10) : null,
       pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
+      breath: round(st.breath),
       drills: session.drills.slice(-60),
       exercises: (session.exercises || []).slice(-10),
     };
@@ -1171,8 +1326,8 @@
         r.goal === 'masc' ? 'Masculine' : 'Feminine',
         r.resonance != null ? Math.round(r.resonance) : '--',
         r.sibS != null ? Math.round(r.sibS) : '--',
-        r.pitchMedian != null ? r.pitchMedian + ' Hz' : '--', lowTxt];
-      cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i >= 2 && i <= 4) td.className = 'num'; tr.appendChild(td); });
+        r.pitchMedian != null ? r.pitchMedian + ' Hz' : '--', r.breath != null ? Math.round(r.breath) : '--', lowTxt];
+      cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i >= 2 && i <= 5) td.className = 'num'; tr.appendChild(td); });
       const td = document.createElement('td');
       const del = document.createElement('button');
       del.type = 'button'; del.textContent = 'Delete';
@@ -1616,7 +1771,7 @@
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
     $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
-    for (const t of ['vowels', 'sibilants', 'words']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of ['vowels', 'sibilants', 'words', 'breath']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem');
