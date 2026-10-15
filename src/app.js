@@ -101,7 +101,7 @@
     C.font = cs.getPropertyValue('--font-mono').trim();
     buildLut();
     clearSpec();
-    drawVowelChart(); drawPitch(); drawHistory();
+    drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
   }
   function parseColor(s) {
     const c = document.createElement('canvas').getContext('2d');
@@ -522,6 +522,12 @@
           pushMeter(score);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
+          if (!gated || exSrc) {
+            if (tractLive.v !== vowel) tractLive.hist = [];
+            tractLive.hist = (tractLive.hist || []).concat([F]).slice(-12);
+            tractLive.F = [0, 1, 2].map(i => D.median(tractLive.hist.map(f => f[i])));
+            tractLive.v = vowel; tractLive.at = performance.now();
+          }
           $('res-context').textContent = gated ? 'example ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue;
         }
       }
@@ -557,7 +563,7 @@
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
     if (!gated) coachFrame(fr);
     if (!gated) Reader.frame(fr);
-    if (frameCount % 6 === 0) renderCoach();
+    if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     if (frameCount % 30 === 0) renderSession();
   }
@@ -657,6 +663,8 @@
         <p class="coach-why" id="coach-why"></p>
         <details class="how" id="coach-how" hidden><summary>How do I do that?</summary><div class="how-body"></div></details>
         <div class="gauges" id="coach-gauges"></div>
+        <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas>
+          <figcaption class="tract-key"><span><i class="ln you"></i>your shape (estimated)</span><span><i class="ln goal"></i>goal shape</span><span><i class="ln arrow"></i>what to change</span></figcaption></figure>
       </div>
       <div id="drill-result"></div>
       <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
@@ -771,6 +779,136 @@
       <span class="g-need ${need ? 'off' : 'ok'}">${mark}</span></div>`;
   }
   const COACH_HOLD_MS = 3500, COACH_MIN_SHOW_MS = 2500;
+
+  // ---------------- vocal tract sketch ----------------
+  // Side view (facing left) of one plausible tract shape for the measured formants, with the goal
+  // shape for the same vowel dashed on top and an arrow for the change the coach is asking for.
+  const TRACT_REC = {
+    fem: { '0:1': 'Open the jaw a little', '0:-1': 'Close the jaw slightly', '1:1': 'Tongue forward', '1:-1': 'Tongue a little back',
+      '2:1': 'Slight smile, larynx up', '2:-1': 'Relax the smile', 'all:1': 'Larynx up: a smaller throat', 'all:-1': 'Let the larynx drop slightly' },
+    masc: { '0:1': 'Open the jaw a little', '0:-1': 'Open the throat (start of a yawn)', '1:1': 'Tongue slightly forward', '1:-1': 'Tongue back, relax the smile',
+      '2:1': 'Relax the lip rounding', '2:-1': 'Round the lips, larynx lower', 'all:1': 'Let the larynx rise slightly', 'all:-1': 'Larynx down: a bigger throat' },
+  };
+  function tractGeom(t) {
+    const J = 6 + 26 * clamp(1 - t.height, -0.2, 1.2);
+    const Ly = 236 - 34 * t.larynx;
+    const pro = 12 * Math.max(t.round, 0), spr = 7 * Math.max(-t.round, 0);
+    const palY = (x) => { const u = clamp((x - 78) / 100, 0, 1); return 102 - 46 * u + 26 * u * u + (x > 178 ? (x - 178) * 0.9 : 0); };
+    const px = 108 + 76 * clamp(t.back, -0.2, 1.2);
+    const py = Math.max(palY(px) + 6, 98 + (1 - t.height) * 34 + J * 0.35);
+    const back = clamp(t.back, -0.2, 1.2);
+    const tongue = [[84, 112 + J * 0.75], [96, py + 4 - (px - 108) * 0.05], [px, py], [182 + 20 * back, (py + Ly) / 2 - 6],
+      [188 + 12 * back, Ly - 14], [150, Ly - 10], [104, 146 + J * 0.8]];
+    return {
+      J, Ly, tongue, peak: [px, py],
+      upLip: [52 - pro + spr, 101], loLip: [54 - pro + spr, 115 + J * 0.9], lipPro: pro, lipSpr: spr,
+      // upper lip (from under the nose), then lower lip, chin, under the jaw and down the neck
+      upper: [[57, 88], [52 - pro + spr, 96], [53 - pro + spr, 102 - spr * 0.2], [68, 106]],
+      lower: [[68, 108 + J * 0.85], [54 - pro + spr, 111 + J * 0.9 + spr * 0.2], [55 - pro * 0.6 + spr, 119 + J * 0.9],
+        [62, 128 + J * 0.85], [60, 146 + J * 0.8], [72, 158 + J * 0.7], [112, 166 + J * 0.4], [128, 200], [132, 282]],
+      larynx: [209, Ly + 10],
+    };
+  }
+  function tractPath(g, pts, k, closed) {
+    // Catmull-Rom through the points
+    const P = (i) => pts[closed ? (i + pts.length) % pts.length : clamp(i, 0, pts.length - 1)];
+    g.moveTo(...pts[0].map((v) => v * k));
+    const n = closed ? pts.length : pts.length - 1;
+    for (let i = 0; i < n; i++) {
+      const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+      g.bezierCurveTo((p1[0] + (p2[0] - p0[0]) / 6) * k, (p1[1] + (p2[1] - p0[1]) / 6) * k,
+        (p2[0] - (p3[0] - p1[0]) / 6) * k, (p2[1] - (p3[1] - p1[1]) / 6) * k, p2[0] * k, p2[1] * k);
+    }
+  }
+  function drawTractLayer(g, k, G, style) {
+    g.save();
+    g.strokeStyle = style.stroke; g.lineWidth = style.width; g.setLineDash(style.dash || []);
+    // tongue
+    g.beginPath(); tractPath(g, G.tongue, k, true); g.closePath();
+    const fill = () => { if (style.fill) { g.save(); g.globalAlpha = 0.1; g.fillStyle = style.fill; g.fill(); g.restore(); } };
+    fill();
+    g.stroke();
+    // lips, chin and jaw
+    g.beginPath(); tractPath(g, G.upper, k, false); g.stroke();
+    g.beginPath(); tractPath(g, G.lower, k, false); g.stroke();
+    // lower teeth
+    g.strokeRect(70 * k, (112 + G.J * 0.9) * k, 7 * k, 10 * k);
+    // larynx: epiglottis, the box and the vocal folds
+    const Ly = G.Ly;
+    g.beginPath(); g.moveTo(194 * k, (Ly - 22) * k); g.quadraticCurveTo(192 * k, (Ly - 6) * k, 200 * k, Ly * k); g.stroke();
+    g.beginPath(); g.roundRect ? g.roundRect(198 * k, Ly * k, 22 * k, 22 * k, 5 * k) : g.rect(198 * k, Ly * k, 22 * k, 22 * k);
+    fill();
+    g.stroke();
+    g.beginPath(); g.moveTo(201 * k, (Ly + 10) * k); g.lineTo(217 * k, (Ly + 10) * k); g.stroke();
+    g.restore();
+  }
+  function tractLabel(g, k, dpr, text, col) {
+    g.font = `600 ${12 * dpr}px ${C.font}`; g.textAlign = 'center';
+    const w = g.measureText(text).width + 14 * dpr, x = 150 * k, y = 268 * k;
+    g.fillStyle = C.panel; g.fillRect(x - w / 2, y - 14 * dpr, w, 20 * dpr);
+    g.fillStyle = col; g.fillText(text, x, y);
+  }
+  function drawTract(cv, F, v, key) {
+    if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf();
+    g.clearRect(0, 0, cv.width, cv.height);
+    const k = Math.min(cv.width / 300, cv.height / 282);
+    g.save();
+    g.translate((cv.width - 300 * k) / 2 + 8 * k, 0);
+    // fixed parts: face profile, back of the head and neck, palate and velum, upper teeth, back of the throat
+    g.strokeStyle = C.muted; g.lineWidth = 1.2 * dpr; g.setLineDash([]);
+    g.beginPath(); tractPath(g, [[74, 0], [68, 30], [62, 46], [50, 60], [38, 72], [48, 82], [57, 88]], k, false); g.stroke();
+    g.beginPath(); tractPath(g, [[150, 0], [250, 10], [284, 70], [274, 140], [262, 190], [258, 282]], k, false); g.stroke();
+    g.beginPath(); g.moveTo(78 * k, 102 * k); g.quadraticCurveTo(122 * k, 64 * k, 176 * k, 82 * k); g.quadraticCurveTo(200 * k, 88 * k, 204 * k, 112 * k); g.stroke();
+    g.strokeRect(70 * k, 98 * k, 7 * k, 11 * k);
+    g.beginPath(); g.moveTo(224 * k, 70 * k); g.lineTo(224 * k, 282 * k); g.stroke();
+    g.beginPath(); g.moveTo(176 * k, 82 * k); g.quadraticCurveTo(200 * k, 60 * k, 224 * k, 70 * k); g.stroke(); // nasal passage
+    g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'left';
+    g.fillText('palate', 108 * k, 68 * k); g.fillText('throat', 230 * k, 120 * k); g.fillText('lips', 18 * k, 106 * k);
+    const goalCol = state.goal === 'fem' ? C.fem : C.masc;
+    if (!F || !v) {
+      g.fillStyle = C.muted; g.font = `${12 * dpr}px ${C.font}`; g.textAlign = 'center';
+      g.fillText('Hold a vowel to see a sketch', 150 * k, 270 * k);
+      g.restore(); return;
+    }
+    const goalF = state.goal === 'fem' ? v.W : v.M;
+    const you = tractGeom(D.tractShape(F, v, state.goal)), tgt = tractGeom(D.tractShape(goalF, v, state.goal));
+    drawTractLayer(g, k, you, { stroke: C.ink, width: 1.8 * dpr, fill: C.ink });
+    drawTractLayer(g, k, tgt, { stroke: goalCol, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
+    g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`;
+    g.fillText('tongue', (you.peak[0] - 14) * k, (you.peak[1] + 22) * k);
+    g.fillText('larynx', 228 * k, (you.Ly + 14) * k);
+    // the recommended change
+    if (key && key !== 'ok' && key !== 'idle' && !key.startsWith('sib')) {
+      const [f, dir] = key.split(':'), d = +dir;
+      const anchor = (G) => (f === '0' ? G.loLip : f === '1' ? G.peak : f === '2' ? G.upLip : G.larynx);
+      let [x1, y1] = anchor(you), [x2, y2] = anchor(tgt);
+      if (Math.hypot(x2 - x1, y2 - y1) < 8) {
+        // too small to see: draw the direction instead
+        const dv = f === '0' ? [0, 1] : f === '1' ? [-1, 0] : f === '2' ? [1, 0] : [0, -1];
+        x2 = x1 + dv[0] * d * 16; y2 = y1 + dv[1] * d * 16;
+      }
+      g.strokeStyle = C.warn; g.fillStyle = C.warn; g.lineWidth = 2.4 * dpr; g.setLineDash([]);
+      const ax = x1 * k, ay = y1 * k, bx = x2 * k, by = y2 * k, a = Math.atan2(by - ay, bx - ax), hl = 8 * dpr;
+      g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+      g.beginPath(); g.moveTo(bx, by); g.lineTo(bx - hl * Math.cos(a - 0.45), by - hl * Math.sin(a - 0.45)); g.lineTo(bx - hl * Math.cos(a + 0.45), by - hl * Math.sin(a + 0.45)); g.closePath(); g.fill();
+      tractLabel(g, k, dpr, TRACT_REC[state.goal][key] || '', C.ink);
+    } else if (key === 'ok') tractLabel(g, k, dpr, 'Close to the goal shape', C.good);
+    g.restore();
+  }
+  // live sketch outside drills: steadied the same way as the coach's tips
+  const tractLive = { F: null, v: null, at: -1e9, key: null, shownAt: 0, pending: null, pendingAt: 0 };
+  function renderTractLive() {
+    const t = tractLive, now = performance.now();
+    const fresh = t.F && now - t.at < COACH_HOLD_MS;
+    let key = 'idle';
+    if (fresh) { const c = D.coachVowel(t.F, t.v, state.goal); key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok'; }
+    if (key !== t.pending) { t.pending = key; t.pendingAt = now; }
+    if (key !== t.key && (t.key === null || key === 'idle' || (now - t.pendingAt >= (key === 'ok' ? 600 : 1000) && now - t.shownAt >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS)))) { t.key = key; t.shownAt = now; }
+    drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key);
+    const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `vowel "${t.v.cue}" as in ${t.v.word}` : '';
+  }
   // smooth a gauge position so the marker glides instead of jumping
   function ease(co, k, v) {
     const p = co.eased[k];
@@ -820,6 +958,11 @@
     $('coach-why').textContent = why;
     renderHowto(k);
     $('coach-gauges').innerHTML = rows;
+    const ct = $('cv-tract-coach');
+    if (ct) {
+      ct.parentElement.hidden = !def.vowel;
+      if (def.vowel) drawTract(ct, vRecent ? [0, 1, 2].map(i => D.median(co.vf.map(f => f[i]))) : null, D.VOWEL_BY_KEY[def.vowel], k);
+    }
     // closer / further, compared with about half a second ago
     const tr = $('coach-trend');
     if (dist != null) {
@@ -1378,6 +1521,7 @@
     document.body.dataset.goal = goal;
     $('goal-fem').setAttribute('aria-checked', String(goal === 'fem'));
     $('goal-masc').setAttribute('aria-checked', String(goal === 'masc'));
+    document.body.classList.toggle('goal-masc', goal === 'masc');
     const [lo, hi] = pitchBand();
     $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz`;
     try { localStorage.setItem('voicetrainer.goal', goal); } catch (e) {}
@@ -1780,7 +1924,7 @@
     new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
     let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); if (state.coach) renderCoach(); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
     Store.init().then(() => { renderHistory(); return Texts.load(); });
     Reader.init();

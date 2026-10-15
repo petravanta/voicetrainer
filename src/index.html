@@ -84,7 +84,16 @@
       </div>
     </figure>
 
-    <figure class="chart">
+    <figure class="chart tract-fig">
+      <figcaption>Vocal tract <small id="tract-vowel"></small></figcaption>
+      <canvas id="cv-tract" height="270"></canvas>
+      <div class="legend tract-key">
+        <span><i class="ln you"></i>your shape (estimated)</span><span><i class="ln goal"></i>goal shape</span><span><i class="ln arrow"></i>what to change</span>
+      </div>
+      <p class="tract-note">A rough sketch: the app reads jaw opening from F1, tongue front/back from F2, lips from F3, and throat length (larynx height) from how all three shift together. Many shapes can make the same sound, so treat it as a guide, not an X-ray.</p>
+    </figure>
+
+    <figure class="chart pitch-fig">
       <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small></figcaption>
       <canvas id="cv-pitch" height="200"></canvas>
     </figure>
