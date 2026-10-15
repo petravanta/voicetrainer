@@ -77,7 +77,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .meter-desc { color: var(--muted); max-width: 46ch; }
 .meter { position: relative; height: 18px; border-radius: 9px; background: linear-gradient(90deg, var(--masc), color-mix(in srgb, var(--masc) 50%, var(--fem)) 50%, var(--fem)); }
 .meter-target { position: absolute; top: -5px; bottom: -5px; border: 2px dashed var(--ink); border-radius: 6px; opacity: 0.55; }
-.needle { position: absolute; top: -8px; bottom: -8px; width: 4px; margin-left: -2px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--panel); transition: left 0.12s linear; }
+.needle { position: absolute; top: -8px; bottom: -8px; width: 4px; margin-left: -2px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--panel); transition: left 0.4s ease-out; }
 .meter-scale { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); font-family: var(--font-mono); }
 .readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 0; border-top: 1px solid var(--line); padding-top: 12px; }
 .readouts dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
@@ -183,7 +183,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .g-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .g-track { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, color-mix(in srgb, var(--masc) 28%, transparent), color-mix(in srgb, var(--fem) 28%, transparent)); }
 .g-band { position: absolute; top: -3px; bottom: -3px; border: 2px dashed var(--ink); border-radius: 5px; opacity: 0.5; }
-.g-mark { position: absolute; top: -4px; width: 8px; height: 18px; margin-left: -4px; border-radius: 3px; background: var(--warn); transition: left 0.15s linear; }
+.g-mark { position: absolute; top: -4px; width: 8px; height: 18px; margin-left: -4px; border-radius: 3px; background: var(--warn); transition: left 0.4s ease-out; }
 .g-mark.ok { background: var(--good); }
 .g-need { font-family: var(--font-mono); font-size: 0.8rem; text-align: right; }
 .g-need.ok { color: var(--good); } .g-need.off { color: var(--warn); }
