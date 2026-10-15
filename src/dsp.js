@@ -301,8 +301,8 @@
   const COACH_BAND = { fem: [75, 135], masc: [-35, 25] };
   const COACH_WEIGHT = [0.6, 1, 0.8]; // F1 swings with jaw opening and is the noisiest
   // F1 moves about twice as far on this scale as F2/F3 for the same real change, its estimate is the
-  // noisiest, and it varies naturally with jaw opening: give it a much wider zone (about +-20% F1).
-  const F1_SLACK = 70;
+  // noisiest, and it varies naturally with jaw opening: give it a much wider zone.
+  const F1_SLACK = 120; // about +-30% F1
   function coachVowel(F, v, goal) {
     const [lo0, hi0] = COACH_BAND[goal];
     const pos = fitVowel(F, v).per.map(x => x * 100);
