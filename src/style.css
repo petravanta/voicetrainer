@@ -189,7 +189,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .g-need.ok { color: var(--good); } .g-need.off { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) { .g-mark { transition: none; } }
 @media (max-width: 480px) { .gauge { grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr) 3.8em; } }
-.reader { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: grid; grid-template-rows: auto auto minmax(0, 1fr); padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 12px); gap: 10px; }
+.reader { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 12px); gap: 10px; }
 .reader-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; max-width: 1180px; width: 100%; margin: 0 auto; }
 .reader-h { font-size: 1.2rem; margin-right: auto; align-self: center; }
 .reader-field { display: grid; gap: 3px; font-size: 0.78rem; color: var(--muted); min-width: 0; }
@@ -279,3 +279,16 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 .tract-read li.off::before { color: var(--warn); }
 .tract-read b { font-weight: 600; margin-right: 4px; }
 @media (max-width: 480px) { .tract-read { grid-template-columns: minmax(0, 1fr); } }
+
+/* single-line focus track in the reader: the current word stays centred */
+.reader-track { position: relative; overflow: hidden; max-width: 1180px; width: 100%; margin: 0 auto; border: 2px solid var(--accent); border-radius: 14px; background: var(--panel); padding: 0.35em 0; font-family: var(--font-display); font-size: clamp(2rem, 6.5vw, 4rem); line-height: 1.25; }
+.reader-track::before, .reader-track::after { content: ""; position: absolute; top: 0; bottom: 0; width: 18%; z-index: 1; pointer-events: none; }
+.reader-track::before { left: 0; background: linear-gradient(90deg, var(--panel), transparent); }
+.reader-track::after { right: 0; background: linear-gradient(270deg, var(--panel), transparent); }
+.track-inner { white-space: nowrap; display: inline-block; transition: transform 0.35s ease-out; will-change: transform; }
+.track-inner .tw { display: inline-block; padding: 0 0.12em; margin: 0 0.06em; border-radius: 10px; color: var(--muted); cursor: pointer; }
+.track-inner .tw.cur { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.track-inner .tw.next { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 0.15em; }
+.track-inner .tw.ahead { color: var(--ink); opacity: 0.75; }
+.reader.no-track .reader-track { display: none; }
+@media (prefers-reduced-motion: reduce) { .track-inner { transition: none; } }

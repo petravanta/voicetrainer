@@ -186,6 +186,7 @@
         <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
         <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
+        <button type="button" class="btn" id="reader-focus" aria-pressed="true">Focus line on</button>
         <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>
         <button type="button" class="btn" id="reader-bigger" aria-label="Larger text">A+</button>
         <button type="button" class="btn" id="reader-close">Close</button>
@@ -198,6 +199,7 @@
       <span>Breath <b id="rh-breath">--</b></span>
       <span id="rh-hint" class="rh-hint"></span>
     </div>
+    <div class="reader-track" id="reader-track" aria-hidden="true"><div class="track-inner" id="track-inner"></div></div>
     <div class="reader-stage" id="reader-stage">
       <div id="reader-text" class="reader-text"></div>
       <form id="reader-form" class="reader-form" hidden>
