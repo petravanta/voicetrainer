@@ -73,8 +73,41 @@
         'Finish in the zone and hold it there.',
       ] },
   ];
+  // Control exercises: move one part of the tract and check that the matching formant (and only it)
+  // moves, to build trust in what the feedback is tracking.
+  DRILLS.control = [
+    { id: 'c-jaw', type: 'iso', kind: 'jaw', vowel: 'a', cue: 'Jaw only', sub: 'F1 · "ah" to "uh"', title: 'Move only the jaw',
+      why: 'F1 follows how open the mouth is. Move only the jaw: F1 should move while F2 and F3 barely change.',
+      steps: ['Hold a relaxed "ah" at a comfortable pitch until it says the starting point is set.',
+        'Keep the tongue lying flat and the lips loose. Slowly close the jaw about a finger-width, still voicing, then open it again.',
+        'Watch the F1 bar move while F2 and F3 stay near the middle.',
+        'Go back and forth slowly a few times.'] },
+    { id: 'c-tongue', type: 'iso', kind: 'tongue', vowel: 'i', cue: 'Tongue only', sub: 'F2 · "ee" to smiling "oo"', title: 'Move only the tongue',
+      why: 'F2 follows where the body of the tongue sits, front or back. Slide it while the smile and the jaw stay put.',
+      steps: ['Hold "ee" with a slight smile until the starting point is set.',
+        'Keep smiling and keep the jaw still. Slowly pull the tongue back, as if starting "oo" but without rounding the lips. It sounds odd; that is fine.',
+        'F2 should drop a lot while F1 and F3 change much less.',
+        'Slide the tongue forward and back slowly.'] },
+    { id: 'c-lips', type: 'iso', kind: 'lips', vowel: 'i', cue: 'Lips only', sub: 'F3 · smile to rounded', title: 'Move only the lips',
+      why: 'Rounding and pushing the lips forward lengthens the front of the tract, which lowers F3 (and F2 a little). Spreading into a smile raises them.',
+      steps: ['Hold "ee" until the starting point is set.',
+        'Keep the tongue exactly where it is, high and forward. Slowly round and push the lips forward, like the French "u" or German "ü".',
+        'F3 should drop while F1 holds steady. F2 drops a little too; that is expected.',
+        'Alternate slowly between a smile and rounded lips.'] },
+    { id: 'c-larynx', type: 'iso', kind: 'larynx', vowel: 'i', cue: 'Larynx only', sub: 'all formants together', title: 'Move only the larynx',
+      why: 'Raising the larynx shortens the whole tract, so all formants rise together; lowering it makes all of them fall. This is the main size control behind resonance.',
+      steps: ['Hold a quiet "ee" until the starting point is set.',
+        'Keep the jaw, lips and tongue still. Slowly raise the larynx (a small, light kitten voice, or the start of a swallow), then let it drop (the start of a yawn).',
+        'All three bars should move the same way together.',
+        'Pitch may rise with the larynx at first. That is normal, and the check ignores pitch here.'] },
+    { id: 'c-pitch', type: 'iso', kind: 'pitch', vowel: 'a', cue: 'Pitch, not resonance', sub: 'trust check', title: 'Change pitch, keep resonance',
+      why: 'Pitch and resonance are separate. Glide the pitch on one steady vowel: pitch should move while the formants stay put. This shows the resonance feedback is not just measuring pitch.',
+      steps: ['Hold "ah" at a comfortable pitch until the starting point is set.',
+        'Keep the mouth shape exactly the same and slide the pitch up a few notes and back down, like a slow siren.',
+        'The pitch bar should move while the formant bars stay near the middle.'] },
+  ];
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
-  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180 }; // frames at ~60 per second
+  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90 }; // frames at ~60 per second
 
   // ---------------- state ----------------
   const state = {
@@ -558,6 +591,7 @@
       }
       if (d && d.def.type === 'breath') d.breathFr.push(fr.breath);
     }
+    if (d && d.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) d.isoFr.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
@@ -623,13 +657,13 @@
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words', 'breath']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
       state.plan.status = 'paused'; renderPlan();
     }
-    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], inZone: 0, offTarget: null, result: null };
+    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], isoFr: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
     renderDrillGrid();
     renderDrillPanel();
@@ -647,6 +681,7 @@
     const p = $('drill-panel'), d = state.drill;
     if (!d) return;
     if (d.def.type === 'breath') return renderBreathPanel(d);
+    if (d.def.type === 'iso') return renderIsoPanel(d);
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
       <p class="drill-title"></p>
@@ -853,7 +888,7 @@
     g.fillStyle = C.panel; g.fillRect(x - w / 2, y - 14 * dpr, w, 20 * dpr);
     g.fillStyle = col; g.fillText(text, x, y);
   }
-  function drawTract(cv, F, v, key) {
+  function drawTract(cv, F, v, key, refF) {
     if (!cv || !C.ink) return;
     fitCanvas(cv);
     const g = cv.getContext('2d'), dpr = dprOf();
@@ -877,15 +912,16 @@
       g.fillText('Hold a vowel to see a sketch', 150 * k, 270 * k);
       g.restore(); return;
     }
-    const goalF = state.goal === 'fem' ? v.W : v.M;
+    // dashed: the goal shape, or (in control exercises) the shape you started from
+    const goalF = refF || (state.goal === 'fem' ? v.W : v.M);
     const you = tractGeom(D.tractShape(F, v, state.goal)), tgt = tractGeom(D.tractShape(goalF, v, state.goal));
     drawTractLayer(g, k, you, { stroke: C.ink, width: 1.8 * dpr, fill: C.ink });
-    drawTractLayer(g, k, tgt, { stroke: goalCol, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
+    drawTractLayer(g, k, tgt, { stroke: refF ? C.muted : goalCol, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
     g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`;
     g.fillText('tongue', (you.peak[0] - 14) * k, (you.peak[1] + 22) * k);
     g.fillText('larynx', 228 * k, (you.Ly + 14) * k);
     // the recommended change
-    if (key && key !== 'ok' && key !== 'idle' && !key.startsWith('sib')) {
+    if (refF) { /* no recommendation in control exercises */ } else if (key && key !== 'ok' && key !== 'idle' && !key.startsWith('sib')) {
       const [f, dir] = key.split(':'), d = +dir;
       const anchor = (G) => (f === '0' ? G.loLip : f === '1' ? G.peak : f === '2' ? G.upLip : G.larynx);
       let [x1, y1] = anchor(you), [x2, y2] = anchor(tgt);
@@ -992,6 +1028,7 @@
   function updateDrill(d) {
     const def = d.def;
     if (def.type === 'breath') return updateBreath(d);
+    if (def.type === 'iso') return updateIso(d);
     let prog;
     if (def.type === 'vowel') prog = d.vowelFr.length / NEED.vowel;
     else if (def.type === 'sib') prog = d.sibFr.length / NEED.sib;
@@ -1086,6 +1123,104 @@
     session.drills.push({ id: def.id, label: def.cue, score: Math.round(score), at: d.result.at, kind: 'breath' });
     renderDrillGrid(); renderSession();
     $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Do it again, or try another exercise.`;
+    $('drill-again').hidden = false;
+    autoSave('drill finished');
+  }
+
+  // ---------------- control exercises ----------------
+  const ISO_ROWS = [['F1', 'jaw'], ['F2', 'tongue'], ['F3', 'lips, larynx'], ['Pitch', 'semitones']];
+  const ISO_MAIN = { jaw: [0], tongue: [1], lips: [2], larynx: [0, 1, 2], pitch: [3] };
+  function renderIsoPanel(d) {
+    const p = $('drill-panel'), def = d.def, main = ISO_MAIN[def.kind];
+    p.innerHTML = `
+      <p class="eyebrow"><span>Control exercise</span><span>${def.sub}</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      <ol class="breath-steps"></ol>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>Change from your starting point</span><span id="iso-state" class="trend"></span></p>
+        <p class="coach-cue" id="iso-cue"></p>
+        <div class="gauges">${ISO_ROWS.map(([l, sub], i) => `<div class="gauge iso-row${main.includes(i) ? ' main' : ''}">
+          <span class="g-label">${l} <small>${sub}</small></span>
+          <span class="g-track iso-track"><span class="iso-zero"></span><span class="g-mark" id="iso-m${i}" hidden></span></span>
+          <span class="g-need" id="iso-v${i}"></span></div>`).join('')}</div>
+        <figure class="tract-coach"><canvas id="cv-tract-iso" height="230"></canvas>
+          <figcaption class="tract-key"><span><i class="ln you"></i>your shape now (estimated)</span><span><i class="ln start"></i>where you started</span></figcaption></figure>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
+      <p class="drill-msg" id="drill-msg"></p>
+      <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    p.querySelector('.drill-help').textContent = def.why;
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    $('drill-again').addEventListener('click', () => selectDrill(def));
+    $('iso-reset').addEventListener('click', () => { d.base = null; d.isoFr = []; d.inZone = 0; d.best = 0; d.eased = {}; updateIso(d, true); });
+    d.base = null; d.best = 0; d.eased = {};
+    updateIso(d, true);
+  }
+  function updateIso(d, force) {
+    if (!force && frameCount % 6) return;
+    const def = d.def, cue = $('iso-cue'); if (!cue) return;
+    const fr = d.isoFr;
+    if (!d.base) {
+      // the starting point: the median of the first steady stretch of voice
+      if (fr.length >= NEED.isoBase) {
+        const first = fr.slice(0, NEED.isoBase);
+        d.base = { F: [0, 1, 2].map(i => D.median(first.map(f => f.F[i]))), f0: D.median(first.map(f => f.f0)) };
+      } else {
+        cue.textContent = state.running ? `Hold the starting sound steadily (${Math.round(fr.length / NEED.isoBase * 100)}%).` : 'Start the microphone, then hold the starting sound.';
+        $('iso-state').textContent = '';
+        drawTract($('cv-tract-iso'), null, D.VOWEL_BY_KEY[def.vowel], null);
+        return;
+      }
+    }
+    const recent = fr.filter(f => frameCount - f.n < 30); // about the last half second
+    const fresh = recent.length >= 6;
+    $('iso-state').textContent = 'starting point set';
+    if (!fresh) {
+      cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
+      return;
+    }
+    const F = [0, 1, 2].map(i => D.median(recent.map(f => f.F[i]))), f0 = D.median(recent.map(f => f.f0));
+    const r = D.isolation(def.kind, d.base.F, F, d.base.f0, f0);
+    const vals = [...r.dev.map(x => x * 100), r.semis];
+    vals.forEach((v, i) => {
+      const scale = i === 3 ? 8 : 30; // full track = +-30% or +-8 semitones
+      const x = ease(d, 'i' + i, v);
+      const m = $('iso-m' + i); m.hidden = false; m.style.left = clamp(50 + x / scale * 50, 0, 100) + '%';
+      m.classList.toggle('ok', ISO_MAIN[def.kind].includes(i) && r.moved);
+      $('iso-v' + i).textContent = i === 3 ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}` : `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
+    });
+    drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, d.base.F);
+    const main = ISO_MAIN[def.kind];
+    if (main[0] < 3) d.best = Math.max(d.best, ...main.map(i => Math.abs(r.dev[i])));
+    else d.best = Math.max(d.best, Math.abs(r.semis));
+    if (r.ok) cue.textContent = def.kind === 'pitch' ? 'Pitch moved and the formants held still. That is the separation you want.' : 'Isolated: the right formant is moving on its own.';
+    else if (r.moved) {
+      const a = r.dev.map(Math.abs), names = ['F1 (jaw)', 'F2 (tongue)', 'F3 (lips or larynx)'];
+      const extra = def.kind === 'pitch' ? names[a.indexOf(Math.max(...a))]
+        : def.kind === 'larynx' ? null : names[[0, 1, 2].filter(i => !main.includes(i)).sort((x, y) => a[y] - a[x])[0]];
+      cue.textContent = def.kind === 'larynx' ? 'Only some formants moved. Keep the mouth still and let the whole throat do the work.'
+        : `${extra} moved too. Keep that part still and move more slowly.`;
+    } else cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
+    if (d.result) return;
+    if (r.ok) d.inZone += 6;
+    const prog = d.inZone / NEED.isoIn;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
+    $('drill-msg').textContent = prog > 0 ? `Isolated for ${(d.inZone / 60).toFixed(1)} of ${(NEED.isoIn / 60).toFixed(1)} seconds.` : '';
+    if (prog >= 1) finishIso(d);
+  }
+  function finishIso(d) {
+    const def = d.def, pct = def.kind === 'pitch' ? null : Math.round(d.best * 100);
+    d.result = { id: def.id, at: Date.now() };
+    state.lastScores[def.id] = def.kind === 'pitch' ? d.best : pct;
+    session.drills.push({ id: def.id, label: def.cue, score: def.kind === 'pitch' ? Math.round(d.best) : pct, at: d.result.at, kind: 'control' });
+    renderDrillGrid(); renderSession();
+    $('drill-msg').textContent = def.kind === 'pitch'
+      ? `Done. Your pitch moved by up to ${d.best.toFixed(1)} semitones while the formants held still: the resonance reading follows your mouth and throat, not your pitch.`
+      : def.kind === 'larynx' ? `Done. All three formants moved together, by up to ${pct}%: the feedback is tracking your larynx.`
+        : `Done. ${ISO_ROWS[ISO_MAIN[def.kind][0]][0]} moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
     $('drill-again').hidden = false;
     autoSave('drill finished');
   }
@@ -1920,7 +2055,7 @@
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
     $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
-    for (const t of ['vowels', 'sibilants', 'words', 'breath']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem');

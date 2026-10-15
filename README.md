@@ -7,6 +7,7 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 - **Resonance scoring** per vowel (0–100), comparing measured formants F1–F3 against Hillenbrand et al. (1995) male/female averages for the same vowel.
 - **Consonant feedback**: sibilant (s/sh) spectral centre of gravity.
 - **Pitch tracking** (YIN).
+- **Control exercises**: move only the jaw, tongue, lips or larynx (or only the pitch) and see that just the matching formant moves, to build trust in the feedback.
 - **Breathiness** estimate (0–100) from cepstral peak prominence (CPP), with breath exercises (Big dog / little dog, sigh to clear tone, whisper to voice, clean onset, hum into a vowel, breathy-clear-pressed) and a live gauge.
 - **Guided exercises** built from your weakest vowels and sibilants, with synthesized reference examples and before/after scores.
 - **Live spectrogram** with goal markers for the current vowel.

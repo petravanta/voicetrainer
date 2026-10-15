@@ -346,6 +346,36 @@
     };
   }
 
+  // ---------- control (isolation) exercises ----------
+  // Compares the current formants (and pitch) with a baseline taken at the start of the exercise and
+  // says whether the change is the one the exercise asks for, with the other formants holding still.
+  // Changes are natural-log ratios (0.1 = about 10%).
+  const ISO_RULES = {
+    jaw:    { main: [0], thr: 0.12, others: [[1, 0.7], [2, 0.5]] },
+    tongue: { main: [1], thr: 0.10, others: [[0, 0.6], [2, 0.6]] },
+    lips:   { main: [2], thr: 0.06, others: [[0, 0.5]] }, // rounding also lowers F2, so F2 is free
+    larynx: { all: true, thr: 0.04 },
+    pitch:  { pitch: 3, still: 0.07 },
+  };
+  function isolation(kind, baseF, F, baseF0, f0) {
+    const dev = [0, 1, 2].map(i => Math.log(F[i] / baseF[i]));
+    const semis = baseF0 > 0 && f0 > 0 ? 12 * Math.log2(f0 / baseF0) : 0;
+    const r = ISO_RULES[kind], a = dev.map(Math.abs);
+    let ok = false, moved = false;
+    if (r.pitch) {
+      moved = Math.abs(semis) >= r.pitch;
+      ok = moved && Math.max(...a) <= r.still;
+    } else if (r.all) {
+      moved = Math.max(...a) >= r.thr;
+      ok = a.every(x => x >= r.thr) && dev.every(x => Math.sign(x) === Math.sign(dev[0])) && Math.min(...a) >= 0.4 * Math.max(...a);
+    } else {
+      const m = a[r.main[0]];
+      moved = m >= r.thr;
+      ok = moved && r.others.every(([i, k]) => a[i] <= k * m);
+    }
+    return { dev, semis, moved, ok };
+  }
+
   function coachSibilant(cog, sib, goal) {
     const [lo, hi] = COACH_BAND[goal];
     const pos = sibilantAlpha(cog, sib) * 100;
@@ -547,7 +577,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, tractShape, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
