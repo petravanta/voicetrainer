@@ -263,3 +263,11 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 .tract-note { margin: 0; font-size: 0.78rem; color: var(--muted); }
 .tract-coach { margin: 4px 0 0; display: grid; gap: 4px; }
 .tract-coach canvas { width: 100%; max-width: 360px; justify-self: center; display: block; }
+
+/* control exercises */
+.iso-track { background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.iso-zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--muted); }
+.iso-row:not(.main) .g-label { color: var(--muted); }
+.iso-row.main .g-label { font-weight: 600; }
+.tract-key .ln.start { border: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--muted) 0 5px, transparent 5px 9px); }
+.iso-row:not(.main) .g-mark { background: var(--muted); }
