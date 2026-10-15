@@ -809,8 +809,12 @@
     if (!co || !d) return;
     const now = performance.now();
     // keep about the last 1.5 s of frames; the gauges and tips use their median
-    const keep = (arr, ts, v) => { arr.push(v); ts.push(now); while (ts.length > 1 && now - ts[0] > AVG_MS) { ts.shift(); arr.shift(); } };
-    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { keep(co.vf, co.vft || (co.vft = []), fr.formants); co.vt = now; }
+    const keep = (arr, ts, v, win = AVG_MS) => { arr.push(v); ts.push(now); while (ts.length > 1 && now - ts[0] > win) { ts.shift(); arr.shift(); } };
+    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) {
+      keep(co.vf, co.vft || (co.vft = []), fr.formants); co.vt = now;
+      // the jaw reading (F1) is the noisiest, so it gets a longer, 3-second window
+      keep(co.f1 || (co.f1 = []), co.f1t || (co.f1t = []), fr.formants[0], 3000);
+    }
     if (d.def.sib && fr.kind === 'fricative') { keep(co.sf, co.sft || (co.sft = []), fr.cog); co.st = now; }
   }
   // what each gauge asks for in body terms: [to raise it, to lower it]
@@ -820,7 +824,7 @@
     gaugeKind = kind;
     const [b0, b1] = D.COACH_BAND[state.goal], lo = b0 - slack, hi = b1 + slack;
     // a wide zone (the jaw) is drawn at a compressed scale around its centre so it fits the track
-    const c = (b0 + b1) / 2, sq = slack > 30 ? 0.5 : 1;
+    const c = (b0 + b1) / 2, sq = slack > 30 ? 0.45 : 1;
     const x = (v) => clamp((c + (v - c) * sq + 40) / 180 * 100, 0, 100);
     const mark = need ? (need === 1 ? '→ ' : '← ') + GAUGE_ACT[gaugeKind][need === 1 ? 0 : 1] : '✓';
     return `<div class="gauge"><span class="g-label">${label} <small>${sub}</small></span>
@@ -912,8 +916,8 @@
     const vs = fromStart ? 'than at the start' : 'than the goal';
     const row = (part, d, eps, more, less) => ({ part, ok: Math.abs(d) <= eps, text: Math.abs(d) <= eps ? (fromStart ? 'unchanged' : 'about right') : `${d > 0 ? more : less} ${vs}` });
     return [
-      // tolerances in line with the coach zones: about +-20% for the jaw (F1), +-5% tongue, +-5% lips
-      row('Jaw', t.height - y.height, fromStart ? 0.08 : 0.3, 'more open', 'more closed'),
+      // tolerances in line with the coach zones: about +-30% for the jaw (F1), +-5% tongue, +-5% lips
+      row('Jaw', t.height - y.height, fromStart ? 0.08 : 0.45, 'more open', 'more closed'),
       row('Tongue', y.back - t.back, fromStart ? 0.05 : 0.1, 'further back', 'further forward'),
       row('Lips', y.round - t.round, fromStart ? 0.07 : 0.12, 'more rounded', 'more spread'),
       row('Larynx', y.larynx - t.larynx, fromStart ? 0.15 : 0.25, 'higher (shorter throat)', 'lower (longer throat)'),
@@ -994,9 +998,9 @@
     const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `vowel "${t.v.cue}" as in ${t.v.word}` : '';
   }
   // smooth a gauge position so the marker glides instead of jumping
-  function ease(co, k, v) {
+  function ease(co, k, v, rate = 0.2) {
     const p = co.eased[k];
-    return (co.eased[k] = p == null || !isFinite(p) ? v : p + 0.2 * (v - p));
+    return (co.eased[k] = p == null || !isFinite(p) ? v : p + rate * (v - p));
   }
   function renderCoach() {
     const co = state.coach, d = state.drill, cueEl = $('coach-cue');
@@ -1009,10 +1013,20 @@
     if (vRecent) {
       const v = D.VOWEL_BY_KEY[def.vowel];
       const F = [0, 1, 2].map(i => D.median(co.vf.map(f => f[i])));
+      if (co.f1 && co.f1.length) F[0] = D.median(co.f1);
       const c = D.coachVowel(F, v, state.goal);
+      // jaw hysteresis: flag the jaw only once it is clearly outside its zone, and clear it once back inside
+      const [b0, b1] = D.COACH_BAND[state.goal], jlo = b0 - D.F1_SLACK, jhi = b1 + D.F1_SLACK, p0 = c.pos[0];
+      if (!co.jawOff && (p0 < jlo - 20 || p0 > jhi + 20)) co.jawOff = true;
+      else if (co.jawOff && p0 >= jlo && p0 <= jhi) co.jawOff = false;
+      c.need[0] = co.jawOff ? (p0 < jlo ? 1 : -1) : 0;
+      if (c.focus && c.focus.formant === 0 && !c.need[0]) {
+        const rest = [1, 2].filter(i => c.need[i]).sort((a, b) => c.miss[b] - c.miss[a]);
+        c.focus = rest.length ? { formant: rest[0], dir: c.need[rest[0]] } : null;
+      }
       // when all three are off together the fix is the larynx, so say that on each gauge it explains
       const allDir = c.focus && c.focus.formant === 'all' ? c.focus.dir : 0;
-      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p), c.need[i], i === 0 ? D.F1_SLACK : 0,
+      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p, i === 0 ? 0.1 : 0.2), c.need[i], i === 0 ? D.F1_SLACK : 0,
         allDir && c.need[i] === allDir ? 'larynx' : ['jaw', 'tongue', 'lips'][i])).join('');
       dist = c.distance;
       key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
