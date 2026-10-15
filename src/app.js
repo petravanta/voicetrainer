@@ -480,6 +480,7 @@
   }
 
   // ---------------- per-frame logic ----------------
+  const AVG_MS = 1500; // averaging window for the resonance meter and the coach gauges
   let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9, breathBuf = [], breathShown = -1e9;
   function onFrame(fr) {
     frameCount++;
@@ -524,7 +525,7 @@
           state.lastVowel = { v: vowel, at: Date.now() };
           if (!gated || exSrc) {
             if (tractLive.v !== vowel) tractLive.hist = [];
-            tractLive.hist = (tractLive.hist || []).concat([F]).slice(-12);
+            tractLive.hist = (tractLive.hist || []).concat([F]).slice(-90); // ~1.5 s
             tractLive.F = [0, 1, 2].map(i => D.median(tractLive.hist.map(f => f[i])));
             tractLive.v = vowel; tractLive.at = performance.now();
           }
@@ -547,7 +548,7 @@
     if (frameCount - sibShown > 120) $('ro-sib').textContent = '--';
 
     if (fr.breath != null) {
-      breathBuf.push(fr.breath); if (breathBuf.length > 15) breathBuf.shift();
+      breathBuf.push(fr.breath); if (breathBuf.length > 60) breathBuf.shift();
       breathShown = frameCount;
       const b = D.median(breathBuf);
       $('ro-breath').textContent = `${Math.round(b)} · ${breathWord(b)}`;
@@ -569,9 +570,11 @@
   }
 
   function pushMeter(score) {
-    meterFrames.push(score);
-    if (meterFrames.length > 20) meterFrames.shift();
-    state.meter = D.median(meterFrames);
+    // average over the last ~1.5 s so the needle moves calmly
+    const now = performance.now();
+    meterFrames.push({ t: now, s: score });
+    while (meterFrames.length > 1 && now - meterFrames[0].t > AVG_MS) meterFrames.shift();
+    state.meter = D.median(meterFrames.map(m => m.s));
   }
   function addVowelToSession(key, score) {
     (session.vowels[key] = session.vowels[key] || []).push(score);
@@ -767,8 +770,10 @@
     const co = state.coach, d = state.drill;
     if (!co || !d) return;
     const now = performance.now();
-    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { co.vf.push(fr.formants); if (co.vf.length > 16) co.vf.shift(); co.vt = now; }
-    if (d.def.sib && fr.kind === 'fricative') { co.sf.push(fr.cog); if (co.sf.length > 16) co.sf.shift(); co.st = now; }
+    // keep about the last 1.5 s of frames; the gauges and tips use their median
+    const keep = (arr, ts, v) => { arr.push(v); ts.push(now); while (ts.length > 1 && now - ts[0] > AVG_MS) { ts.shift(); arr.shift(); } };
+    if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { keep(co.vf, co.vft || (co.vft = []), fr.formants); co.vt = now; }
+    if (d.def.sib && fr.kind === 'fricative') { keep(co.sf, co.sft || (co.sft = []), fr.cog); co.st = now; }
   }
   function gaugeRow(label, sub, pos, need, slack = 0) {
     const lo = D.COACH_BAND[state.goal][0] - slack, hi = D.COACH_BAND[state.goal][1] + slack;
@@ -912,7 +917,7 @@
   // smooth a gauge position so the marker glides instead of jumping
   function ease(co, k, v) {
     const p = co.eased[k];
-    return (co.eased[k] = p == null || !isFinite(p) ? v : p + 0.35 * (v - p));
+    return (co.eased[k] = p == null || !isFinite(p) ? v : p + 0.2 * (v - p));
   }
   function renderCoach() {
     const co = state.coach, d = state.drill, cueEl = $('coach-cue');
@@ -1046,7 +1051,7 @@
   function updateBreath(d, force) {
     if (!force && frameCount % 6) return;
     const def = d.def, [lo, hi] = breathBand(), now = performance.now();
-    const recent = d.breathFr.slice(-15);
+    const recent = d.breathFr.slice(-90);
     const fresh = recent.length >= 5 && frameCount - breathShown < 90;
     const b = fresh ? D.median(recent) : NaN;
     const key = !fresh ? 'idle' : b > hi ? 'high' : b < lo ? 'low' : 'ok';
