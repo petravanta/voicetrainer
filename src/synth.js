@@ -101,6 +101,90 @@
   }
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
+  // ---------- reading a text aloud (for analysis, not intelligibility) ----------
+  // Spelling -> rough sound units. English spelling is irregular, so this only aims for plausible
+  // vowels, s/sh hiss, nasals and stop gaps with speech-like timing.
+  const V_PATTERNS = [['igh', 'a'], ['eau', 'o'], ['ee', 'i'], ['ea', 'i'], ['ie', 'i'], ['ey', 'e'], ['ai', 'e'], ['ay', 'e'], ['ei', 'e'],
+    ['oa', 'o'], ['oe', 'o'], ['ow', 'o'], ['ou', 'a'], ['oo', 'u'], ['ue', 'u'], ['ew', 'u'], ['au', 'c'], ['aw', 'c'], ['oi', 'c'], ['oy', 'c'],
+    ['er', 'r'], ['ir', 'r'], ['ur', 'r'], ['ar', 'a'], ['or', 'o'], ['a', 'ae'], ['e', 'E'], ['i', 'I'], ['o', 'a'], ['u', 'V']];
+  const MAGIC_E = { a: 'e', e: 'i', i: 'a', o: 'o', u: 'u' };
+  function wordUnits(word) {
+    let w = word.toLowerCase().replace(/[^a-z]/g, '');
+    const out = [];
+    if (!w) return out;
+    // silent final e makes the previous single vowel long ("made", "time", "hope")
+    let magic = null;
+    const m = w.match(/^(.*?)([aeiou])([b-df-hj-np-tv-z])e(s|d)?$/);
+    if (m && w.length > 3) { magic = m[1].length; w = w.slice(0, m[1].length + 2) + (m[4] || ''); }
+    const shortE = /^[b-df-hj-np-tv-z]{1,2}e$/.test(w) && w !== 'the'; // he, she, we, be
+    for (let i = 0; i < w.length;) {
+      const rest = w.slice(i), c = w[i];
+      if (rest.startsWith('sh') || rest.startsWith('ch') || /^ti[oa]/.test(rest)) { out.push({ sib: 'sh' }); i += rest.startsWith('ti') ? 1 : 2; continue; }
+      if (rest.startsWith('th')) { out.push({ fric: 1 }); i += 2; continue; }
+      if (rest.startsWith('ng')) { out.push({ nasal: 1 }); i += 2; continue; }
+      if (c === 'y') {
+        if (i === 0 && w.length > 1) { out.push({ glide: 1 }); i++; continue; }
+        out.push({ v: i === w.length - 1 && w.length > 2 ? 'i' : 'I' }); i++; continue;
+      }
+      const vp = 'aeiou'.includes(c) && V_PATTERNS.find(([p]) => rest.startsWith(p));
+      if (vp) {
+        out.push({ v: magic === i ? MAGIC_E[c] : shortE && i === w.length - 1 ? 'i' : w === 'the' ? 'V' : vp[1] });
+        i += vp[0].length;
+        continue;
+      }
+      if (c === 's' || c === 'z' || c === 'x' || (c === 'c' && /[eiy]/.test(w[i + 1] || ''))) out.push({ sib: 's' });
+      else if (c === 'j' || (c === 'g' && /[eiy]/.test(w[i + 1] || '') && i > 0)) out.push({ sib: 'sh', short: 1 });
+      else if ('mnlrwv'.includes(c)) out.push({ nasal: 1 });
+      else if (c === 'f' || c === 'h') out.push({ fric: 1 });
+      else out.push({ stop: 1 });
+      i += c === w[i + 1] ? 2 : 1; // double letters sound once
+    }
+    if (!out.some(u => u.v)) out.unshift({ v: 'V' });
+    return out;
+  }
+  // words: array of strings. o = {pitch, res, bright, rate}. Returns the samples and each word's
+  // start and end time in seconds.
+  function readText(fs, words, VOWELS, o) {
+    const t = o.res / 100, b = Math.max(0, Math.min(1, (o.bright ?? 50) / 100)), rate = o.rate || 1;
+    const mixV = {};
+    for (const v of VOWELS) mixV[v.key] = v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
+    const sibPeak = { s: 6200 + 1600 * Math.max(-0.3, Math.min(1.3, t)), sh: 3700 + 800 * Math.max(-0.3, Math.min(1.3, t)) };
+    const parts = [silence(fs, 0.15)], starts = [], ends = [];
+    let time = 0.15, seed = 41;
+    const push = (x) => { parts.push(x); time += x.length / fs; };
+    // pitch falls across each sentence and resets after it
+    let sentPos = 0, sentLen = 1;
+    const sentLenFrom = (i) => { let n = 0; for (let j = i; j < words.length; j++) { n++; if (/[.!?]["')\]]*$/.test(words[j])) break; } return n; };
+    for (let wi = 0; wi < words.length; wi++) {
+      if (sentPos === 0) sentLen = sentLenFrom(wi);
+      const units = wordUnits(words[wi]);
+      const nv = units.filter(u => u.v).length;
+      const f0w = o.pitch * (1.12 - 0.24 * sentPos / Math.max(1, sentLen - 1 || 1));
+      starts.push(time);
+      let vi = 0;
+      for (const u of units) {
+        seed += 7;
+        if (u.v) {
+          const F = mixV[u.v] || mixV.V, last = vi === nv - 1, first = vi === 0;
+          const dur = (first ? 0.17 : 0.13) * (last && /[.!?,;:]$/.test(words[wi]) ? 1.35 : 1) / rate;
+          const fa = f0w * (first ? 1.05 : 1), fb = f0w * (first ? 1.0 : 0.96);
+          push(voiced(fs, dur, fa, fb, F, { bright: b, seed, ramp: 0.012, level: 0.3 }));
+          vi++;
+        } else if (u.sib) push(sibilant(fs, (u.short ? 0.07 : 0.12) / rate, sibPeak[u.sib], { level: 0.11, seed }));
+        else if (u.nasal || u.glide) push(voiced(fs, 0.06 / rate, f0w, f0w, [300, 1350, 2500], { level: 0.12, bws: [90, 200, 250, 300, 350], ramp: 0.01, seed }));
+        else if (u.fric) push(sibilant(fs, 0.06 / rate, 2000, { level: 0.04, seed }));
+        else push(silence(fs, 0.05 / rate));
+      }
+      ends.push(time);
+      const wd = words[wi];
+      const gap = /[.!?]["')\]]*$/.test(wd) ? 0.45 : /[,;:]["')\]]*$/.test(wd) ? 0.22 : 0.05;
+      push(silence(fs, gap / rate));
+      sentPos = /[.!?]["')\]]*$/.test(wd) ? 0 : sentPos + 1;
+    }
+    push(silence(fs, 0.2));
+    return { x: concat(parts), starts, ends };
+  }
+
   // ---------- reference examples ----------
   // Voiced segment with gliding pitch and formant transitions: formants move from Fa to F over
   // the first `trans` seconds and from F to Fb over the last `trans` seconds (coarticulation).
@@ -190,7 +274,7 @@
     return concat([example(fs, def, 'masc', VOWELS, SIBILANTS), silence(fs, 0.35), example(fs, def, 'fem', VOWELS, SIBILANTS)]);
   }
 
-  const api = { vowel, sibilant, silence, concat, demo, demoVoice, voiced, example, comparison };
+  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
