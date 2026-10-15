@@ -46,5 +46,13 @@ check(D.coachSibilant(7900, D.SIBILANTS.s, 'fem').onTarget, 's at 7.9 kHz, femin
     console.log((got === want ? 'ok   ' : 'FAIL ') + `control ${kind}: ${want ? 'accepts the right movement' : 'rejects a different movement'}`);
   }
 }
+// The jaw (F1) zone is wide enough to hold: +-15% F1 alone stays on target, +30% does not.
+for (const k of ['i', 'a', 'u']) {
+  const v = D.VOWEL_BY_KEY[k];
+  const okIn = [0.85, 1.15].every(m => D.coachVowel([v.W[0] * m, v.W[1], v.W[2]], v, 'fem').onTarget);
+  const out = !D.coachVowel([v.W[0] * 1.3, v.W[1], v.W[2]], v, 'fem').onTarget;
+  if (!(okIn && out)) fails++;
+  console.log((okIn && out ? 'ok   ' : 'FAIL ') + `jaw zone on "${k}": +-15% F1 on target, +30% flagged`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall coaching checks passed');
 process.exit(fails ? 1 : 0);

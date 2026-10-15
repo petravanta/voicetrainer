@@ -300,11 +300,14 @@
   // the same way (a whole-tract change such as larynx height).
   const COACH_BAND = { fem: [75, 135], masc: [-35, 25] };
   const COACH_WEIGHT = [0.6, 1, 0.8]; // F1 swings with jaw opening and is the noisiest
+  // F1 moves about twice as far on this scale as F2/F3 for the same real change, its estimate is the
+  // noisiest, and it varies naturally with jaw opening: give it a much wider zone (about +-20% F1).
+  const F1_SLACK = 70;
   function coachVowel(F, v, goal) {
     const [lo0, hi0] = COACH_BAND[goal];
     const pos = fitVowel(F, v).per.map(x => x * 100);
     // F1 gets extra slack: it is the least reliable estimate, especially at higher pitch
-    const band = (i) => (i === 0 ? [lo0 - 20, hi0 + 20] : [lo0, hi0]);
+    const band = (i) => (i === 0 ? [lo0 - F1_SLACK, hi0 + F1_SLACK] : [lo0, hi0]);
     const need = pos.map((p, i) => (p < band(i)[0] ? 1 : p > band(i)[1] ? -1 : 0));
     const miss = pos.map((p, i) => (p < band(i)[0] ? band(i)[0] - p : p > band(i)[1] ? p - band(i)[1] : 0) * COACH_WEIGHT[i]);
     const distance = (miss[0] + miss[1] + miss[2]) / (COACH_WEIGHT[0] + COACH_WEIGHT[1] + COACH_WEIGHT[2]);
@@ -577,7 +580,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

@@ -818,8 +818,10 @@
   let gaugeKind = 'jaw';
   function gaugeRow(label, sub, pos, need, slack = 0, kind = 'sib') {
     gaugeKind = kind;
-    const lo = D.COACH_BAND[state.goal][0] - slack, hi = D.COACH_BAND[state.goal][1] + slack;
-    const x = (v) => clamp((v + 40) / 180 * 100, 0, 100);
+    const [b0, b1] = D.COACH_BAND[state.goal], lo = b0 - slack, hi = b1 + slack;
+    // a wide zone (the jaw) is drawn at a compressed scale around its centre so it fits the track
+    const c = (b0 + b1) / 2, sq = slack > 30 ? 0.5 : 1;
+    const x = (v) => clamp((c + (v - c) * sq + 40) / 180 * 100, 0, 100);
     const mark = need ? (need === 1 ? '→ ' : '← ') + GAUGE_ACT[gaugeKind][need === 1 ? 0 : 1] : '✓';
     return `<div class="gauge"><span class="g-label">${label} <small>${sub}</small></span>
       <span class="g-track"><span class="g-band" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="g-mark ${need ? 'off' : 'ok'}" style="left:${x(pos)}%"></span></span>
@@ -910,9 +912,10 @@
     const vs = fromStart ? 'than at the start' : 'than the goal';
     const row = (part, d, eps, more, less) => ({ part, ok: Math.abs(d) <= eps, text: Math.abs(d) <= eps ? (fromStart ? 'unchanged' : 'about right') : `${d > 0 ? more : less} ${vs}` });
     return [
-      row('Jaw', t.height - y.height, 0.06, 'more open', 'more closed'),
-      row('Tongue', y.back - t.back, 0.05, 'further back', 'further forward'),
-      row('Lips', y.round - t.round, 0.07, 'more rounded', 'more spread'),
+      // tolerances in line with the coach zones: about +-20% for the jaw (F1), +-5% tongue, +-5% lips
+      row('Jaw', t.height - y.height, fromStart ? 0.08 : 0.3, 'more open', 'more closed'),
+      row('Tongue', y.back - t.back, fromStart ? 0.05 : 0.1, 'further back', 'further forward'),
+      row('Lips', y.round - t.round, fromStart ? 0.07 : 0.12, 'more rounded', 'more spread'),
       row('Larynx', y.larynx - t.larynx, fromStart ? 0.15 : 0.25, 'higher (shorter throat)', 'lower (longer throat)'),
     ];
   }
@@ -1009,7 +1012,7 @@
       const c = D.coachVowel(F, v, state.goal);
       // when all three are off together the fix is the larynx, so say that on each gauge it explains
       const allDir = c.focus && c.focus.formant === 'all' ? c.focus.dir : 0;
-      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p), c.need[i], i === 0 ? 20 : 0,
+      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p), c.need[i], i === 0 ? D.F1_SLACK : 0,
         allDir && c.need[i] === allDir ? 'larynx' : ['jaw', 'tongue', 'lips'][i])).join('');
       dist = c.distance;
       key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
