@@ -406,7 +406,7 @@
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) {}
         const type = saved && (saved.type === 'masc' || saved.type === 'fem') ? saved.type : state.goal;
-        this.v = Object.assign({ type, rate: 0.95 }, DEMO_PRESETS[type], saved || {});
+        this.v = Object.assign({ type, rate: 0.95, reader: 'speech' }, DEMO_PRESETS[type], saved || {});
       }
       return this.v;
     },
@@ -419,6 +419,8 @@
       $('vd-res').value = v.res; $('vd-res-out').textContent = v.res;
       $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
       $('vd-rate').value = v.rate; $('vd-rate-out').textContent = (+v.rate).toFixed(2) + '×';
+      $('vd-reader').value = v.reader;
+      $('reader-voice-wrap').hidden = v.reader === 'synth' || this.voiceCount < 2;
     },
     open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
     init() {
@@ -431,6 +433,7 @@
       $('vd-play').addEventListener('click', () => { Reader.stopListen(); playDemo(false); });
       $('vd-sweep').addEventListener('click', () => { Reader.stopListen(); playDemo(true); });
       $('reader-voice').addEventListener('change', (e) => { this.get().voice = e.target.value; this.save(); });
+      $('vd-reader').addEventListener('change', (e) => { Reader.stopListen(); this.get().reader = e.target.value; this.save(); this.paint(); });
     },
   };
   function playExample(def, mode) {
@@ -503,7 +506,7 @@
 
   function ensureLoop() { if (!loopOn) { loopOn = true; lastT = 0; raf = requestAnimationFrame(loop); } }
   function loop(t) {
-    if (!state.running && !exSrc) { loopOn = false; return; } // nothing to listen to
+    if (!state.running && !exSrc && !Reader.synth) { loopOn = false; return; } // nothing to listen to
     raf = requestAnimationFrame(loop);
     if (t - lastT < 14) return; // cap at ~70 analyses per second
     lastT = t;
@@ -521,7 +524,7 @@
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0);
     if (pitchBuf.length > 360) pitchBuf.shift();
     // While a reference example plays (and briefly after), show it but don't score it as the user.
-    const gated = !!exSrc || !!Reader.tts || performance.now() - exampleEnd < 400;
+    const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
     const d = !gated && state.drill && !state.drill.result ? state.drill : null;
 
     if (fr.kind === 'voiced') {
@@ -1822,7 +1825,8 @@
           stage.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
         }
       }
-      $('rh-hint').textContent = this.tts ? 'Listening to the demo voice. Your meters ignore it; press Stop reading to take over.' : this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
+      $('rh-hint').textContent = this.synth ? 'The synthetic demo voice is reading, and the meters are analysing it live. It does not count toward your progress.'
+        : this.tts ? (state.running === 'mic' ? 'The speech voice is reading. The microphone picks it up, so the meters show it (use speakers, not headphones); it does not count toward your progress.' : 'The speech voice is reading. Start the microphone too if you want the meters to follow it through your speakers.') : this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
     },
     // the single focus line: words left to right, the current one centred and highlighted
     paintTrack() {
@@ -1879,7 +1883,8 @@
     },
     fillVoices() {
       const sel = $('reader-voice'), list = this.voices();
-      $('reader-voice-wrap').hidden = list.length < 2;
+      DemoVoice.voiceCount = list.length;
+      $('reader-voice-wrap').hidden = list.length < 2 || DemoVoice.get().reader === 'synth';
       if (!list.length) return;
       const keep = sel.value;
       sel.innerHTML = '';
@@ -1900,9 +1905,10 @@
     },
     listen() {
       const S = window.speechSynthesis;
-      if (this.tts) return this.stopListen();
+      if (this.tts || this.synth) return this.stopListen();
+      if (DemoVoice.get().reader === 'synth') return this.listenSynth();
       if (!S || !window.SpeechSynthesisUtterance) { $('rh-hint').textContent = 'This browser has no speech voice to read the text aloud.'; return; }
-      if (state.running === 'mic') stop();
+      // the microphone stays on if it is running, so the meters can follow the voice from the speakers
       S.cancel();
       // group words from the current one into sentences
       const start = this.idx >= this.words.length - 1 ? 0 : this.idx;
@@ -1955,8 +1961,57 @@
       pace();
       this.paint();
     },
+    // The synthetic demo voice reads sentence by sentence through the analyser, so every meter
+    // tracks it like microphone input; the highlight follows its own word timings.
+    listenSynth() {
+      if (state.running) stop();
+      ensureCtx();
+      const fs = ctx.sampleRate, start = this.idx >= this.words.length - 1 ? 0 : this.idx;
+      const groups = [];
+      let g = null;
+      for (let i = start; i < this.words.length; i++) {
+        if (!g) { g = { first: i, words: [] }; groups.push(g); }
+        g.words.push(this.words[i].text);
+        if (/[.!?]["')\]]*$/.test(this.words[i].text) || g.words.length >= 40) g = null;
+      }
+      const sy = this.synth = { gi: 0, src: null, chunk: null };
+      const dv = DemoVoice.get();
+      const playNext = () => {
+        if (this.synth !== sy) return;
+        const grp = groups[sy.gi];
+        if (!grp) return this.stopListen(true);
+        const r = Synth.readText(fs, grp.words, D.VOWELS, dv);
+        const ab = ctx.createBuffer(1, r.x.length, fs);
+        ab.copyToChannel(r.x, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = ab; src.connect(ctx.destination); src.connect(analyser);
+        src.onended = () => { if (this.synth === sy) { sy.gi++; playNext(); } };
+        sy.src = src; sy.chunk = { t0: ctx.currentTime + 0.02, starts: r.starts, first: grp.first };
+        src.start(sy.chunk.t0);
+      };
+      const follow = () => {
+        if (this.synth !== sy) return;
+        requestAnimationFrame(follow);
+        const c = sy.chunk; if (!c) return;
+        const el = ctx.currentTime - c.t0;
+        let j = 0;
+        while (j + 1 < c.starts.length && c.starts[j + 1] <= el) j++;
+        if (el >= 0 && c.first + j !== this.idx) this.go(c.first + j, false);
+      };
+      an.reset(); meterFrames = [];
+      setStatus('Analysing the demo voice reading', true);
+      this.go(start, false);
+      this.setListenButton(true);
+      playNext(); follow(); ensureLoop();
+      this.paint();
+    },
     stopListen(finished) {
-      if (!this.tts) return;
+      if (!this.tts && !this.synth) return;
+      if (this.synth) {
+        const sy = this.synth; this.synth = null;
+        if (sy.src) { try { sy.src.onended = null; sy.src.stop(); } catch (e) {} try { sy.src.disconnect(); } catch (e) {} }
+        if (!state.running) setStatus('Not listening');
+      }
       this.tts = null;
       exampleEnd = performance.now();
       try { window.speechSynthesis.cancel(); } catch (e) {}
@@ -2063,7 +2118,7 @@
       $('reader-focus').addEventListener('click', () => this.setFocusLine(!this.focusLine));
       window.addEventListener('resize', () => { if (this.open) this.paintTrack(); });
       $('reader-close').addEventListener('click', () => this.hide());
-      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.stopListen(), startMic().then(() => { this.restart(); }))));
+      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.synth && this.stopListen(), startMic().then(() => { if (!this.tts) this.restart(); else this.paint(); }))));
       $('reader-listen').addEventListener('click', () => this.listen());
       if (window.speechSynthesis) {
         this.fillVoices();
