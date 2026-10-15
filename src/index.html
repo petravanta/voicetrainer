@@ -35,7 +35,7 @@
       <div class="eyebrow"><span>Resonance</span><span id="res-context">all vowels</span></div>
       <div class="meter-row">
         <output id="res-num" class="big">--</output>
-        <p class="meter-desc" id="res-desc">Hold a vowel or speak a sentence. The score compares your formants with typical adult values for the same vowel.</p>
+        <p class="meter-desc" id="res-desc">Hold a vowel or speak a sentence. The score compares the shape of your mouth and throat (measured as formants) with typical adult values for the same vowel.</p>
       </div>
       <div class="meter" aria-hidden="true">
         <div class="meter-target" id="meter-target"></div>
@@ -44,7 +44,7 @@
       <div class="meter-scale"><span>0 masculine avg</span><span class="mid">50</span><span>100 feminine avg</span></div>
       <dl class="readouts">
         <div><dt>Vowel heard</dt><dd id="ro-vowel">--</dd></div>
-        <div><dt>F1 · F2 · F3</dt><dd id="ro-formants">--</dd></div>
+        <div><dt>Jaw · tongue · lips/larynx <small>(F1 · F2 · F3, Hz)</small></dt><dd id="ro-formants">--</dd></div>
         <div><dt>Pitch</dt><dd id="ro-pitch">--</dd></div>
         <div><dt>Sibilant</dt><dd id="ro-sib">--</dd></div>
         <div><dt>Breathiness</dt><dd id="ro-breath">--</dd></div>
@@ -52,7 +52,7 @@
     </div>
 
     <figure class="chart chart-vowel">
-      <figcaption>Vowel space <small>F2 across, F1 down, Hz</small></figcaption>
+      <figcaption>Vowel space <small>← tongue forward · tongue back → (F2) · jaw more open ↓ (F1)</small></figcaption>
       <canvas id="cv-vowel" height="300"></canvas>
       <div class="legend">
         <span><i class="dot masc"></i>typical masculine</span>
@@ -63,14 +63,14 @@
     </figure>
 
     <figure class="chart spec-fig">
-      <figcaption>Spectrogram <small>0 to 5 kHz, formant tracks</small>
+      <figcaption>Spectrogram <small>0 to 5 kHz, mouth and throat resonances</small>
         <button type="button" class="info-btn" id="spec-info" aria-expanded="false" aria-controls="spec-help" aria-label="How to read the spectrogram">?</button>
       </figcaption>
       <div id="spec-help" class="spec-help" role="note" hidden>
         <p class="eyebrow"><span>How to read this</span></p>
         <ul>
           <li><b>The newest sound appears at the right edge</b> and scrolls left over time. Height is frequency, from 0 at the bottom to 5 kHz at the top. Darker means louder.</li>
-          <li><b>The coloured dashes are your formants</b>, the resonances of your mouth and throat: <span class="k f1">F1</span> lowest, then <span class="k f2">F2</span>, then <span class="k f3">F3</span>. They move when you change your mouth, tongue, lips or larynx height.</li>
+          <li><b>The coloured dashes are the resonances of your mouth and throat</b> (formants): <span class="k f1">jaw (F1)</span> lowest, then <span class="k f2">tongue (F2)</span>, then <span class="k f3">lips and larynx (F3)</span>. Opening the jaw lifts the lowest dash; moving the tongue forward lifts the middle one; a smile or a higher larynx lifts the top one.</li>
           <li id="spec-help-goal"></li>
           <li><b>The evenly stacked wavy stripes are harmonics of your pitch.</b> They move with pitch, not resonance, so don't chase them.</li>
           <li><b>Grainy patches without stripes are hissing sounds.</b> An /s/ puts most of its energy above about 4 kHz (higher reads brighter); /ʃ/ starts lower, around 2 to 3 kHz.</li>
@@ -80,7 +80,7 @@
       <canvas id="cv-spec" height="200"></canvas>
       <div id="spec-tip" class="spec-tip" role="status" hidden></div>
       <div class="legend">
-        <span><i class="dot f1"></i>F1</span><span><i class="dot f2"></i>F2</span><span><i class="dot f3"></i>F3</span><span><i class="tri"></i>goal for the current vowel</span>
+        <span><i class="dot f1"></i>jaw (F1)</span><span><i class="dot f2"></i>tongue (F2)</span><span><i class="dot f3"></i>lips, larynx (F3)</span><span><i class="tri"></i>goal for the current vowel</span>
       </div>
     </figure>
 

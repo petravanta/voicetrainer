@@ -76,35 +76,35 @@
   // Control exercises: move one part of the tract and check that the matching formant (and only it)
   // moves, to build trust in what the feedback is tracking.
   DRILLS.control = [
-    { id: 'c-jaw', type: 'iso', kind: 'jaw', vowel: 'a', cue: 'Jaw only', sub: 'F1 · "ah" to "uh"', title: 'Move only the jaw',
-      why: 'F1 follows how open the mouth is. Move only the jaw: F1 should move while F2 and F3 barely change.',
+    { id: 'c-jaw', type: 'iso', kind: 'jaw', vowel: 'a', cue: 'Jaw only', sub: 'jaw (F1) · "ah" to "uh"', title: 'Move only the jaw',
+      why: 'The jaw reading (F1) follows how open the mouth is. Move only the jaw: the jaw bar should move while the tongue and lips/larynx bars barely change.',
       steps: ['Hold a relaxed "ah" at a comfortable pitch until it says the starting point is set.',
         'Keep the tongue lying flat and the lips loose. Slowly close the jaw about a finger-width, still voicing, then open it again.',
-        'Watch the F1 bar move while F2 and F3 stay near the middle.',
+        'Watch the jaw bar move while the tongue and lips/larynx bars stay near the middle.',
         'Go back and forth slowly a few times.'] },
-    { id: 'c-tongue', type: 'iso', kind: 'tongue', vowel: 'i', cue: 'Tongue only', sub: 'F2 · "ee" to smiling "oo"', title: 'Move only the tongue',
-      why: 'F2 follows where the body of the tongue sits, front or back. Slide it while the smile and the jaw stay put.',
+    { id: 'c-tongue', type: 'iso', kind: 'tongue', vowel: 'i', cue: 'Tongue only', sub: 'tongue (F2) · "ee" to smiling "oo"', title: 'Move only the tongue',
+      why: 'The tongue reading (F2) follows where the body of the tongue sits, front or back. Slide it while the smile and the jaw stay put.',
       steps: ['Hold "ee" with a slight smile until the starting point is set.',
         'Keep smiling and keep the jaw still. Slowly pull the tongue back, as if starting "oo" but without rounding the lips. It sounds odd; that is fine.',
-        'F2 should drop a lot while F1 and F3 change much less.',
+        'The tongue bar should swing a long way while the jaw and lips/larynx bars change much less.',
         'Slide the tongue forward and back slowly.'] },
-    { id: 'c-lips', type: 'iso', kind: 'lips', vowel: 'i', cue: 'Lips only', sub: 'F3 · smile to rounded', title: 'Move only the lips',
-      why: 'Rounding and pushing the lips forward lengthens the front of the tract, which lowers F3 (and F2 a little). Spreading into a smile raises them.',
+    { id: 'c-lips', type: 'iso', kind: 'lips', vowel: 'i', cue: 'Lips only', sub: 'lips (F3) · smile to rounded', title: 'Move only the lips',
+      why: 'Rounding and pushing the lips forward lengthens the front of the tract, which lowers the lips/larynx reading (F3), and the tongue reading (F2) a little. Spreading into a smile raises them.',
       steps: ['Hold "ee" until the starting point is set.',
         'Keep the tongue exactly where it is, high and forward. Slowly round and push the lips forward, like the French "u" or German "ü".',
-        'F3 should drop while F1 holds steady. F2 drops a little too; that is expected.',
+        'The lips/larynx bar should drop while the jaw bar holds steady. The tongue bar dips a little too; that is expected.',
         'Alternate slowly between a smile and rounded lips.'] },
     { id: 'c-larynx', type: 'iso', kind: 'larynx', vowel: 'i', cue: 'Larynx only', sub: 'all formants together', title: 'Move only the larynx',
       why: 'Raising the larynx shortens the whole tract, so all formants rise together; lowering it makes all of them fall. This is the main size control behind resonance.',
       steps: ['Hold a quiet "ee" until the starting point is set.',
         'Keep the jaw, lips and tongue still. Slowly raise the larynx (a small, light kitten voice, or the start of a swallow), then let it drop (the start of a yawn).',
-        'All three bars should move the same way together.',
+        'All three bars (jaw, tongue, lips/larynx) should move the same way together, because the whole tube got shorter or longer.',
         'Pitch may rise with the larynx at first. That is normal, and the check ignores pitch here.'] },
     { id: 'c-pitch', type: 'iso', kind: 'pitch', vowel: 'a', cue: 'Pitch, not resonance', sub: 'trust check', title: 'Change pitch, keep resonance',
-      why: 'Pitch and resonance are separate. Glide the pitch on one steady vowel: pitch should move while the formants stay put. This shows the resonance feedback is not just measuring pitch.',
+      why: 'Pitch and resonance are separate. Glide the pitch on one steady vowel: pitch should move while the mouth and throat readings stay put. This shows the resonance feedback is not just measuring pitch.',
       steps: ['Hold "ah" at a comfortable pitch until the starting point is set.',
         'Keep the mouth shape exactly the same and slide the pitch up a few notes and back down, like a slow siren.',
-        'The pitch bar should move while the formant bars stay near the middle.'] },
+        'The pitch bar should move while the jaw, tongue and lips/larynx bars stay near the middle.'] },
   ];
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
   const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90 }; // frames at ~60 per second
@@ -724,31 +724,31 @@
   // Turns the last few frames into one concrete adjustment, plus a gauge per formant.
   const COACH_CUES = {
     fem: {
-      '0:1': ['Open your jaw a little more and keep your throat light.', 'F1 is low for this vowel. It rises with a more open mouth and a smaller throat.'],
-      '0:-1': ['Close your jaw slightly.', 'F1 is above the target, which usually means the mouth is too open for this vowel.'],
-      '1:1': ['Slide your tongue forward, toward your top teeth, and spread your lips a little.', 'F2 follows the tongue. Moving it forward raises F2 and brightens the vowel.'],
-      '1:-1': ['Let your tongue sit a little further back.', 'F2 is above the target for this vowel, so the tongue is further forward than it needs to be.'],
-      '2:1': ['Pull your lips into a slight smile and keep your larynx up.', 'F3 rises with less lip rounding and a shorter throat.'],
-      '2:-1': ['Relax the smile slightly.', 'F3 is above the target for this vowel.'],
-      'all:1': ['Make the whole space smaller: raise your larynx (like a light, high "hee" or the start of a swallow) and smile slightly.', 'All three formants are low by a similar amount. That is a whole-throat change, not the tongue or lips alone.'],
-      'all:-1': ['Ease off a little: let the larynx drop slightly.', 'All three formants are above the target together.'],
+      '0:1': ['Open your jaw a little more and keep your throat light.', 'Your jaw is more closed (or your throat bigger) than this vowel needs (low F1). Opening the mouth and keeping the throat small fixes it.'],
+      '0:-1': ['Close your jaw slightly.', 'Your mouth is more open than this vowel needs (high F1).'],
+      '1:1': ['Slide your tongue forward, toward your top teeth, and spread your lips a little.', 'Your tongue sits further back than the goal for this vowel (low F2). A more forward tongue brightens the vowel.'],
+      '1:-1': ['Let your tongue sit a little further back.', 'Your tongue is further forward than this vowel needs (high F2).'],
+      '2:1': ['Pull your lips into a slight smile and keep your larynx up.', 'Your lips are more rounded or your larynx lower than the goal (low F3). Less rounding and a shorter throat fix it.'],
+      '2:-1': ['Relax the smile slightly.', 'Your lips are more spread or your larynx higher than this vowel needs (high F3).'],
+      'all:1': ['Make the whole space smaller: raise your larynx (like a light, high "hee" or the start of a swallow) and smile slightly.', 'Jaw, tongue and lips readings are all low by a similar amount: your throat is longer than the goal. That is a larynx change, not the tongue or lips alone.'],
+      'all:-1': ['Ease off a little: let the larynx drop slightly.', 'Jaw, tongue and lips readings are all above the goal together: your throat is shorter than it needs to be.'],
     },
     masc: {
-      '0:1': ['Open your jaw a little more.', 'F1 is low for this vowel, so the mouth may be too closed.'],
-      '0:-1': ['Open your throat: start a yawn with your mouth closed and speak through that space.', 'F1 is high for this vowel. A bigger throat lowers it.'],
-      '1:1': ['Bring your tongue slightly forward.', 'F2 is below the target for this vowel.'],
-      '1:-1': ['Let your tongue sit a little further back and relax any smile.', 'F2 follows the tongue. Moving it back lowers F2 and darkens the vowel.'],
-      '2:1': ['Relax the lip rounding slightly.', 'F3 is below the target for this vowel.'],
-      '2:-1': ['Round your lips slightly and let your larynx settle lower.', 'F3 drops with rounded lips and a longer throat.'],
-      'all:1': ['Ease off a little: let the larynx rise slightly.', 'All three formants are below the target together.'],
-      'all:-1': ['Make the whole space bigger: lower your larynx (the start of a yawn) and round your lips a little.', 'All three formants are high by a similar amount. That is a whole-throat change, not the tongue or lips alone.'],
+      '0:1': ['Open your jaw a little more.', 'Your mouth is more closed than this vowel needs (low F1).'],
+      '0:-1': ['Open your throat: start a yawn with your mouth closed and speak through that space.', 'Your throat space is small for this vowel (high F1). A wider, lower throat fixes it.'],
+      '1:1': ['Bring your tongue slightly forward.', 'Your tongue sits further back than this vowel needs (low F2).'],
+      '1:-1': ['Let your tongue sit a little further back and relax any smile.', 'Your tongue is further forward than the goal (high F2). Moving it back darkens the vowel.'],
+      '2:1': ['Relax the lip rounding slightly.', 'Your lips are more rounded or your larynx lower than this vowel needs (low F3).'],
+      '2:-1': ['Round your lips slightly and let your larynx settle lower.', 'Your lips are spread or your larynx high compared with the goal (high F3). Rounded lips and a longer throat fix it.'],
+      'all:1': ['Ease off a little: let the larynx rise slightly.', 'Jaw, tongue and lips readings are all below the goal together: your throat is longer than it needs to be.'],
+      'all:-1': ['Make the whole space bigger: lower your larynx (the start of a yawn) and round your lips a little.', 'Jaw, tongue and lips readings are all high by a similar amount: your throat is shorter than the goal. That is a larynx change, not the tongue or lips alone.'],
     },
   };
   const SIB_CUES = {
     '1': ['Bring your tongue tip closer to your top teeth and smile slightly to raise the hiss.', 'A smaller space in front of the tongue makes a higher, brighter hiss.'],
     '-1': ['Pull your tongue tip back a little and round your lips to lower the hiss.', 'A bigger space in front of the tongue makes a lower, darker hiss.'],
   };
-  const FORMANT_ROLE = ['jaw opening', 'tongue front / back', 'lips and larynx'];
+  const FORMANT_ROLE = [['Jaw', 'opening (F1)'], ['Tongue', 'front/back (F2)'], ['Lips, larynx', '(F3)']];
   // Step-by-step "how do I do that?" for each physical adjustment the coach can ask for.
   const HOWTO = {
     larynxUp: { title: 'Raising the larynx (a smaller, lighter throat)', steps: [
@@ -756,13 +756,13 @@
       'Swallow once and feel it jump up. That upward movement is what you want, just much smaller and held.',
       'Now whisper a light, high "hee" or make a small "kitten mew". You should feel the bump rise a little and stay up.',
       'Keep it there while you say the vowel quietly. Your neck should not squeeze; if it feels tight or strained, let it down a little and try again more gently.',
-      'Check the gauges: F2 and F3 should move up together when this works.'] },
+      'Check the gauges: the tongue and lips/larynx markers should move right together when this works.'] },
     larynxDown: { title: 'Opening the throat (a lower larynx)', steps: [
       'An "open throat" just means more space between the back of your tongue and the back of your throat, with the larynx sitting lower.',
       'Start a yawn with your mouth closed and stop halfway. Notice the cool, wide feeling at the back of the mouth and the bump in your neck moving down. That is the open throat.',
       'Keep that feeling and speak the vowel through it, without actually yawning or opening the mouth wider.',
       'Another way: say "uh" like a sleepy, low "duh". The larynx drops and the throat widens on its own.',
-      'Check the gauges: F1, F2 and F3 should all move down a little.'] },
+      'Check the gauges: all three markers (jaw, tongue, lips/larynx) should move left a little.'] },
     throatLight: { title: 'Keeping the throat light', steps: [
       'Light means not opening up the back of the throat. Avoid the "yawn" feeling.',
       'Think of the sound sitting just behind your front teeth rather than deep in your chest or throat.',
@@ -770,23 +770,23 @@
     tongueForward: { title: 'Moving the tongue forward', steps: [
       'Rest the tip of your tongue against the back of your bottom front teeth.',
       'Let the middle of your tongue arch up and forward toward the ridge behind your top teeth, as if getting ready to say "ee" or "y".',
-      'Hold the vowel and slide the tongue body a few millimetres further forward. Small moves count: watch F2 rise.'] },
+      'Hold the vowel and slide the tongue body a few millimetres further forward. Small moves count: watch the tongue marker move right.'] },
     tongueBack: { title: 'Moving the tongue back', steps: [
       'Let the tip of your tongue drop away from your teeth.',
       'Feel the back of the tongue settle toward your throat, as in "oo" or "aw".',
-      'Hold the vowel and pull the tongue body back slightly. Watch F2 fall.'] },
+      'Hold the vowel and pull the tongue body back slightly. Watch the tongue marker move left.'] },
     smile: { title: 'Spreading the lips (a slight smile)', steps: [
       'Pull the corners of your mouth back a little, as if politely smiling. Keep the teeth visible but relaxed.',
       'Avoid pushing the lips forward or rounding them. Rounded lips make the tube longer and darker.'] },
     round: { title: 'Rounding the lips', steps: [
       'Push your lips slightly forward into a soft circle, as for "oo", without closing the mouth more.',
-      'A little goes a long way: rounding lengthens the vocal tract and lowers F2 and F3.'] },
+      'A little goes a long way: rounding lengthens the vocal tract, which shows on the tongue and lips/larynx gauges.'] },
     jawOpen: { title: 'Opening the jaw', steps: [
       'Let your bottom jaw drop by about a finger\'s width, keeping the tongue where it is.',
-      'Keep the jaw loose, not pushed down. F1 rises as the mouth opens.'] },
+      'Keep the jaw loose, not pushed down. The jaw marker moves right as the mouth opens.'] },
     jawClose: { title: 'Closing the jaw slightly', steps: [
       'Bring your teeth a little closer together without clenching.',
-      'Keep the tongue position the same. F1 falls as the mouth closes.'] },
+      'Keep the tongue position the same. The jaw marker moves left as the mouth closes.'] },
   };
   const CUE_HOWTO = {
     fem: { '0:1': ['jawOpen', 'throatLight'], '0:-1': ['jawClose'], '1:1': ['tongueForward', 'smile'], '1:-1': ['tongueBack'], '2:1': ['smile', 'larynxUp'], '2:-1': ['smile'], 'all:1': ['larynxUp', 'smile'], 'all:-1': ['larynxDown'] },
@@ -813,10 +813,14 @@
     if (d.def.vowel && fr.kind === 'voiced' && fr.formants) { keep(co.vf, co.vft || (co.vft = []), fr.formants); co.vt = now; }
     if (d.def.sib && fr.kind === 'fricative') { keep(co.sf, co.sft || (co.sft = []), fr.cog); co.st = now; }
   }
-  function gaugeRow(label, sub, pos, need, slack = 0) {
+  // what each gauge asks for in body terms: [to raise it, to lower it]
+  const GAUGE_ACT = { jaw: ['open', 'close'], tongue: ['forward', 'back'], lips: ['smile', 'round'], larynx: ['larynx up', 'larynx down'], sib: ['brighter', 'darker'] };
+  let gaugeKind = 'jaw';
+  function gaugeRow(label, sub, pos, need, slack = 0, kind = 'sib') {
+    gaugeKind = kind;
     const lo = D.COACH_BAND[state.goal][0] - slack, hi = D.COACH_BAND[state.goal][1] + slack;
     const x = (v) => clamp((v + 40) / 180 * 100, 0, 100);
-    const mark = need === 1 ? '↑ raise' : need === -1 ? '↓ lower' : '✓';
+    const mark = need ? (need === 1 ? '→ ' : '← ') + GAUGE_ACT[gaugeKind][need === 1 ? 0 : 1] : '✓';
     return `<div class="gauge"><span class="g-label">${label} <small>${sub}</small></span>
       <span class="g-track"><span class="g-band" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></span><span class="g-mark ${need ? 'off' : 'ok'}" style="left:${x(pos)}%"></span></span>
       <span class="g-need ${need ? 'off' : 'ok'}">${mark}</span></div>`;
@@ -1003,7 +1007,10 @@
       const v = D.VOWEL_BY_KEY[def.vowel];
       const F = [0, 1, 2].map(i => D.median(co.vf.map(f => f[i])));
       const c = D.coachVowel(F, v, state.goal);
-      rows += c.pos.map((p, i) => gaugeRow('F' + (i + 1), FORMANT_ROLE[i], ease(co, 'f' + i, p), c.need[i], i === 0 ? 20 : 0)).join('');
+      // when all three are off together the fix is the larynx, so say that on each gauge it explains
+      const allDir = c.focus && c.focus.formant === 'all' ? c.focus.dir : 0;
+      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p), c.need[i], i === 0 ? 20 : 0,
+        allDir && c.need[i] === allDir ? 'larynx' : ['jaw', 'tongue', 'lips'][i])).join('');
       dist = c.distance;
       key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
     }
@@ -1057,7 +1064,7 @@
     const n = $('ex-note'), d = state.drill; if (!n || !d) return;
     const fem = state.goal === 'fem', def = d.def;
     const parts = [];
-    if (def.vowel) { const v = D.VOWEL_BY_KEY[def.vowel], F = fem ? v.W : v.M; parts.push(`F1 ${F[0]}, F2 ${F[1]}, F3 ${F[2]} Hz`); }
+    if (def.vowel) { const v = D.VOWEL_BY_KEY[def.vowel], F = fem ? v.W : v.M; parts.push(`jaw (F1) ${F[0]}, tongue (F2) ${F[1]}, lips/larynx (F3) ${F[2]} Hz`); }
     if (def.sib) parts.push(`/${def.sib === 's' ? 's' : 'ʃ'}/ centred near ${((fem ? D.SIBILANTS[def.sib].W : D.SIBILANTS[def.sib].M) / 1000).toFixed(1)} kHz`);
     n.textContent = `Synthesized at typical ${fem ? 'feminine' : 'masculine'} values (${parts.join('; ')}; pitch ${fem ? 'about 200' : 'about 110'} Hz). It shows on the charts while it plays and doesn't count toward your scores. The comparison plays the masculine version first, then the feminine one.`;
   }
@@ -1164,7 +1171,7 @@
   }
 
   // ---------------- control exercises ----------------
-  const ISO_ROWS = [['F1', 'jaw'], ['F2', 'tongue'], ['F3', 'lips, larynx'], ['Pitch', 'semitones']];
+  const ISO_ROWS = [['Jaw', 'opening (F1)'], ['Tongue', 'front/back (F2)'], ['Lips, larynx', '(F3)'], ['Pitch', 'semitones']];
   const ISO_MAIN = { jaw: [0], tongue: [1], lips: [2], larynx: [0, 1, 2], pitch: [3] };
   function renderIsoPanel(d) {
     const p = $('drill-panel'), def = d.def, main = ISO_MAIN[def.kind];
@@ -1234,11 +1241,11 @@
     else d.best = Math.max(d.best, Math.abs(r.semis));
     if (r.ok) cue.textContent = def.kind === 'pitch' ? 'Pitch moved and the formants held still. That is the separation you want.' : 'Isolated: the right formant is moving on its own.';
     else if (r.moved) {
-      const a = r.dev.map(Math.abs), names = ['F1 (jaw)', 'F2 (tongue)', 'F3 (lips or larynx)'];
+      const a = r.dev.map(Math.abs), names = ['The jaw (F1)', 'The tongue (F2)', 'The lips or larynx (F3)'];
       const extra = def.kind === 'pitch' ? names[a.indexOf(Math.max(...a))]
         : def.kind === 'larynx' ? null : names[[0, 1, 2].filter(i => !main.includes(i)).sort((x, y) => a[y] - a[x])[0]];
       cue.textContent = def.kind === 'larynx' ? 'Only some formants moved. Keep the mouth still and let the whole throat do the work.'
-        : `${extra} moved too. Keep that part still and move more slowly.`;
+        : `${extra} moved too. Keep it still and move more slowly.`;
     } else cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
     if (d.result) return;
     if (r.ok) d.inZone += 6;
@@ -1255,8 +1262,8 @@
     renderDrillGrid(); renderSession();
     $('drill-msg').textContent = def.kind === 'pitch'
       ? `Done. Your pitch moved by up to ${d.best.toFixed(1)} semitones while the formants held still: the resonance reading follows your mouth and throat, not your pitch.`
-      : def.kind === 'larynx' ? `Done. All three formants moved together, by up to ${pct}%: the feedback is tracking your larynx.`
-        : `Done. ${ISO_ROWS[ISO_MAIN[def.kind][0]][0]} moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
+      : def.kind === 'larynx' ? `Done. The jaw, tongue and lips readings all moved together, by up to ${pct}%: the feedback is tracking your larynx.`
+        : `Done. The ${def.kind} reading (${['F1', 'F2', 'F3'][ISO_MAIN[def.kind][0]]}) moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
     $('drill-again').hidden = false;
     autoSave('drill finished');
   }
@@ -1437,13 +1444,13 @@
     const adj = res.per.map((p, i) => (i === 0 ? p + (fem ? 20 : -20) : p));
     const idx = fem ? adj.indexOf(Math.min(...adj)) : adj.indexOf(Math.max(...adj));
     const tips = fem ? [
-      'F1 is low. Let the jaw drop a touch and keep the larynx high (think of a small, light "hmm" before the vowel). F1 rises when the throat space shrinks.',
-      'F2 is low. Bring the tongue body forward and spread the lips slightly, as in a gentle smile. F2 responds most to tongue position, so small forward shifts count.',
-      'F3 is low. Avoid rounding or pushing the lips forward, and keep the larynx raised. A shorter vocal tract lifts F3.',
+      'Jaw and throat (F1 low): let the jaw drop a touch and keep the larynx high (think of a small, light "hmm" before the vowel). A smaller throat space helps.',
+      'Tongue (F2 low): bring the tongue body forward and spread the lips slightly, as in a gentle smile. Small forward shifts of the tongue count.',
+      'Lips and larynx (F3 low): avoid rounding or pushing the lips forward, and keep the larynx raised for a shorter throat.',
     ] : [
-      'F1 is high. Add space in the throat (the start of a yawn) and keep the jaw relaxed, without opening the mouth wider.',
-      'F2 is high. Let the tongue sit slightly further back and relax the lip spreading. Very light lip rounding helps.',
-      'F3 is high. Let the larynx settle lower and round the lips slightly to lengthen the vocal tract.',
+      'Throat and jaw (F1 high): add space in the throat (the start of a yawn) and keep the jaw relaxed, without opening the mouth wider.',
+      'Tongue (F2 high): let the tongue sit slightly further back and relax the lip spreading. Very light lip rounding helps.',
+      'Lips and larynx (F3 high): let the larynx settle lower and round the lips slightly for a longer throat.',
     ];
     return tips[idx];
   }
@@ -1466,7 +1473,7 @@
       parts.push(`<div class="result">
         <div class="result-score"><strong>${Math.round(res.vowelScore)}</strong><span>vowel "${v.cue}" resonance</span>${pill(res.vowelScore)}</div>
         <table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th><th>Position</th></tr></thead><tbody>
-        ${[0, 1, 2].map(i => `<tr><td>F${i + 1}</td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${Math.round(res.per[i])}</td></tr>`).join('')}
+        ${[0, 1, 2].map(i => `<tr><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${Math.round(res.per[i])}</td></tr>`).join('')}
         </tbody></table>
         <p class="tip">${vowelTip(res)}</p></div>`);
     }
@@ -1707,7 +1714,7 @@
   }
   function renderSpecGoalHelp() {
     const fem = state.goal === 'fem';
-    $('spec-help-goal').innerHTML = `<b>The small triangles on the left edge are your goal.</b> While you hold a vowel they mark where F1, F2 and F3 sit for a typical ${fem ? 'feminine' : 'masculine'} voice on that vowel. Try to bring each dash level with its triangle. ${fem ? 'Raising F2 and F3 (tongue forward, lips spread, larynx up) brightens the voice.' : 'Lowering F2 and F3 (more throat space, slight lip rounding, larynx down) darkens the voice.'}`;
+    $('spec-help-goal').innerHTML = `<b>The small triangles on the left edge are your goal.</b> While you hold a vowel they mark where the jaw, tongue and lips/larynx resonances (F1, F2, F3) sit for a typical ${fem ? 'feminine' : 'masculine'} voice on that vowel. Try to bring each dash level with its triangle. ${fem ? 'Moving the tongue forward, spreading the lips and raising the larynx lifts the upper two dashes and brightens the voice.' : 'More throat space, slight lip rounding and a lower larynx bring the upper two dashes down and darken the voice.'}`;
   }
   function initSpecHelp() {
     const btn = $('spec-info'), help = $('spec-help'), cv = $('cv-spec'), tip = $('spec-tip'), fig = cv.closest('figure');
@@ -1724,8 +1731,8 @@
       const v = goalVowel(), recent = state.lastF && Date.now() - state.lastF.at < 1500 ? state.lastF.F : null;
       const near = [0, 1, 2].map(i => ({ i, d: Math.abs((recent ? recent[i] : v ? (state.goal === 'fem' ? v.W : v.M)[i] : 1e9) - f) })).sort((a, b) => a.d - b.d)[0];
       if ((recent || v) && near.d < 300) {
-        const i = near.i, name = 'F' + (i + 1);
-        const what = ['F1 follows how open the mouth and throat are.', 'F2 follows tongue position: forward raises it, back lowers it.', 'F3 follows lip shape and larynx height.'][i];
+        const i = near.i, name = ['Jaw resonance (F1)', 'Tongue resonance (F2)', 'Lips and larynx resonance (F3)'][i];
+        const what = ['It rises as the jaw opens and the throat gets smaller.', 'It rises as the tongue moves forward and falls as it moves back.', 'It rises with a smile or a higher larynx and falls with rounded lips or a lower larynx.'][i];
         html += `<br>${name}${recent ? ` now ${Math.round(recent[i])} Hz` : ''}`;
         if (v) html += `<br>Goal on "${v.cue.split(' ')[0]}": ${(state.goal === 'fem' ? v.W : v.M)[i]} Hz (${state.goal === 'fem' ? 'feminine' : 'masculine'} avg)`;
         html += `<br>${what}`;
