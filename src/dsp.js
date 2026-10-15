@@ -362,6 +362,43 @@
     }
   }
 
+  // Voice quality from one voiced frame: cepstral peak prominence (CPP, dB; lower = more
+  // airflow noise, less clear harmonics) and H1-H2 (dB; higher = folds closing less firmly).
+  function voiceQuality(y, fs, f0) {
+    const n = 1 << Math.floor(Math.log2(Math.min(y.length, Math.round(fs * 0.09))));
+    const ps = powerSpectrum(y, n);
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) re[i] = 10 * Math.log10(ps[i <= n / 2 ? i : n - i] + 1e-12);
+    fft(re, im);
+    const cep = new Float64Array(n / 2);
+    for (let i = 0; i < n / 2; i++) cep[i] = 10 * Math.log10((re[i] * re[i] + im[i] * im[i]) / (n * n) + 1e-12);
+    // highest peak for pitches of 60-500 Hz, against a regression line over 1-20 ms
+    const lo = Math.max(2, Math.floor(fs / 500)), hi = Math.min(n / 2 - 1, Math.ceil(fs / 60));
+    let pk = lo;
+    for (let i = lo; i <= hi; i++) if (cep[i] > cep[pk]) pk = i;
+    const a = Math.round(fs * 0.001), b = Math.min(n / 2 - 1, Math.round(fs * 0.02));
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, m = 0;
+    for (let i = a; i <= b; i++) { sx += i; sy += cep[i]; sxx += i * i; sxy += i * cep[i]; m++; }
+    const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx), icpt = (sy - slope * sx) / m;
+    const cpp = cep[pk] - (icpt + slope * pk);
+    // harmonic amplitudes: the strongest bin within 20% of f0 and 2*f0
+    const bin = fs / n, peakDb = (f) => {
+      let best = 0;
+      for (let k = Math.max(1, Math.round(f * 0.8 / bin)); k <= Math.min(n / 2, Math.round(f * 1.2 / bin)); k++) best = Math.max(best, ps[k]);
+      return 10 * Math.log10(best + 1e-12);
+    };
+    const h1h2 = peakDb(f0) - peakDb(2 * f0);
+    return { cpp, h1h2 };
+  }
+  // Breathiness 0..100 from CPP: 0 is a very clear, firm voice, about 50 a light airy one,
+  // 80+ mostly air. CPP is the most reliable single acoustic cue for breathiness, but room noise
+  // and mic quality lower it too, so read the number as a trend within one setup.
+  const BREATH_CPP = [13, 25]; // dB: mostly air .. very clear (synthetic calibration)
+  const BREATH_BAND = { fem: [20, 50], masc: [10, 40] };
+  function breathiness(q) {
+    return Math.max(0, Math.min(100, 100 * (BREATH_CPP[1] - q.cpp) / (BREATH_CPP[1] - BREATH_CPP[0])));
+  }
+
   function sibilantAlpha(cog, sib) {
     return Math.log(cog / sib.M) / Math.log(sib.W / sib.M);
   }
@@ -431,6 +468,8 @@
         this.pitchHist.push(p.f0);
         if (this.pitchHist.length > 3) this.pitchHist.shift();
         out.f0 = median(this.pitchHist);
+        const vq = voiceQuality(y, this.fsd, out.f0);
+        out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
         const ln = Math.round(this.fsd * 0.03);
         const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder);
         if (fm.length >= 3) {
@@ -448,6 +487,12 @@
           out.formants = F;
           out.stable = this.hist.length >= 3 && spread < 0.06;
         }
+      } else if (hfRatio < 0.6 && p.f0 > 0 && p.aperiodicity < 0.5) {
+        // too airy to count as clean voicing, but still a voice: measure how breathy it is
+        out.kind = 'other';
+        const vq = voiceQuality(y, this.fsd, p.f0);
+        out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
+        this.softReset();
       } else if (hfRatio > 0.6 && p.aperiodicity > 0.3) {
         out.kind = 'fricative';
         out.sib = out.cog > 5200 ? 's' : 'sh';
@@ -474,7 +519,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, countSyllables, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

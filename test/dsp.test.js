@@ -52,5 +52,18 @@ for (const fs of [48000, 44100]) {
 const quiet = run(new Float32Array(48000).map(() => (Math.random() - 0.5) * 0.002), 48000);
 check(quiet.every(f => f.kind === 'silence'), 'low noise reads as silence');
 
+// Breathiness: rises steadily with airflow noise, and does not depend much on pitch or vowel.
+for (const fs of [44100, 48000]) for (const [f0, vk] of [[110, 'u'], [210, 'i'], [180, 'a']]) {
+  const v = D.VOWEL_BY_KEY[vk], F = f0 > 150 ? v.W : v.M, got = [];
+  for (const br of [0, 0.25, 0.5]) {
+    const x = S.voiced(fs, 1.0, f0, f0 * 0.95, F, { breath: br });
+    const an = new D.Analyzer(fs), hop = Math.round(fs / 60), b = [];
+    for (let end = an.needed; end <= x.length; end += hop) { const fr = an.analyze(x.subarray(0, end)); if (fr.breath != null) b.push(fr.breath); }
+    got.push(b.length > 30 ? D.median(b) : NaN);
+  }
+  const ok = got[0] < 12 && got[1] > 20 && got[1] < 50 && got[2] > got[1] + 10;
+  if (!ok) fails++;
+  console.log((ok ? 'ok   ' : 'FAIL ') + `breathiness ${fs} Hz, ${f0} Hz "${vk}": clear ${Math.round(got[0])}, light air ${Math.round(got[1])}, breathy ${Math.round(got[2])}`);
+}
 console.log(fails ? `\n${fails} check(s) failed` : '\nall checks passed');
 process.exit(fails ? 1 : 0);

@@ -47,6 +47,7 @@
         <div><dt>F1 · F2 · F3</dt><dd id="ro-formants">--</dd></div>
         <div><dt>Pitch</dt><dd id="ro-pitch">--</dd></div>
         <div><dt>Sibilant</dt><dd id="ro-sib">--</dd></div>
+        <div><dt>Breathiness</dt><dd id="ro-breath">--</dd></div>
       </dl>
     </div>
 
@@ -96,6 +97,7 @@
         <button type="button" role="tab" id="tab-vowels" aria-selected="true">Vowels</button>
         <button type="button" role="tab" id="tab-sibilants" aria-selected="false">Sibilants</button>
         <button type="button" role="tab" id="tab-words" aria-selected="false">Words</button>
+        <button type="button" role="tab" id="tab-breath" aria-selected="false">Breath</button>
       </div>
     </div>
     <div id="plan" class="plan" hidden></div>
@@ -150,7 +152,7 @@
     </figure>
     <div class="table-wrap" id="hist-table-wrap" hidden>
       <table id="hist-table">
-        <thead><tr><th>Date</th><th>Goal</th><th class="num">Resonance</th><th class="num">/s/</th><th class="num">Pitch</th><th>Lowest vowel</th><th></th></tr></thead>
+        <thead><tr><th>Date</th><th>Goal</th><th class="num">Resonance</th><th class="num">/s/</th><th class="num">Pitch</th><th class="num">Breath</th><th>Lowest vowel</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -181,6 +183,7 @@
       <span>Resonance <b id="rh-res">--</b></span>
       <span>Vowel <b id="rh-vowel">--</b></span>
       <span>Pitch <b id="rh-pitch">--</b></span>
+      <span>Breath <b id="rh-breath">--</b></span>
       <span id="rh-hint" class="rh-hint"></span>
     </div>
     <div class="reader-stage" id="reader-stage">

@@ -113,11 +113,13 @@
       const f = (f0a + (f0b - f0a) * u) * (1 + 0.01 * Math.sin(2 * Math.PI * 5.2 * t)) * (1 + 0.003 * (rand() - 0.5));
       phase += f / fs; if (phase >= 1) phase -= 1;
       // brightness (0..1) shortens the closing phase, which lifts the upper harmonics
-      const op = 0.42, cl = opts.bright == null ? 0.15 : 0.27 - 0.2 * opts.bright;
+      // breath (0..1) leaves the folds open longer and adds turbulent airflow noise
+      const br = opts.breath || 0;
+      const op = 0.42 + 0.22 * br, cl = (opts.bright == null ? 0.15 : 0.27 - 0.2 * opts.bright) + 0.12 * br;
       let g = 0;
       if (phase < op) g = 0.5 * (1 - Math.cos(Math.PI * phase / op));
       else if (phase < op + cl) g = Math.cos(0.5 * Math.PI * (phase - op) / cl);
-      x[i] = g + 0.025 * (rand() - 0.5) * g; // a little breathiness during the open phase
+      x[i] = g + (0.025 + 0.3 * br) * (rand() - 0.5) * (0.25 + g); // airflow noise, strongest while open
     }
     for (let i = n - 1; i > 0; i--) x[i] -= x[i - 1];
     const at = (k, t) => {
