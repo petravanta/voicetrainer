@@ -124,7 +124,7 @@
   function newSession() {
     return { start: Date.now(), vowels: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], breath: [], drills: [] };
   }
-  const target = () => (state.goal === 'fem' ? [75, 110] : [-10, 25]);
+  const target = () => (state.goal === 'fem' ? [75, 100] : [0, 25]);
 
   // ---------------- theme colours for canvases ----------------
   let C = {};
@@ -300,7 +300,7 @@
   }
 
   // ---- pitch trace ----
-  const pitchBuf = [];
+  const pitchBuf = [], pitchT = [];
   const PITCH_RANGE = [60, 400];
   function pitchBand() { return state.goal === 'fem' ? D.PITCH_BANDS.fem : D.PITCH_BANDS.masc; }
   function drawPitch() {
@@ -324,7 +324,86 @@
       const x = w - (n - i) * dx;
       g.beginPath(); g.arc(x, y(clamp(f, 60, 400)), 1.8 * dpr, 0, 7); g.fill();
     }
+    Words.draw(g, w, h, axisW, dx, y);
   }
+
+  // ---- recognised words over the pitch track (browser speech recognition, mic only) ----
+  const Words = {
+    KEY: 'voicetrainer.pitchwords', on: false, rec: null, labels: [], lastT: 0, interim: '', note: '',
+    supported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
+    init() {
+      const box = $('pitch-words'); if (!box) return;
+      if (!this.supported()) { box.disabled = true; box.parentElement.title = 'This browser has no speech recognition (try Chrome, Edge or Safari).'; this.setNote('This browser cannot recognise speech, so the pitch track has no words.'); return; }
+      try { this.on = localStorage.getItem(this.KEY) === '1'; } catch (e) {}
+      box.checked = this.on;
+      box.addEventListener('change', () => { this.on = box.checked; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} this.sync(); });
+      this.sync();
+    },
+    setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } },
+    // Run recognition only while the switch is on and the microphone is live.
+    sync() {
+      const want = this.on && state.running === 'mic';
+      if (want && !this.rec) this.start();
+      else if (!want && this.rec) this.stop();
+      if (this.on && !want) this.setNote('Words appear while the microphone is on.');
+      else if (!this.on) this.setNote('');
+    },
+    start() {
+      const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const r = new R();
+      r.continuous = true; r.interimResults = true; r.lang = navigator.language || 'en-US';
+      this.rec = r; this.lastT = performance.now(); this.interim = '';
+      r.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i], text = res[0].transcript.trim();
+          if (res.isFinal) this.place(text, true); else interim += ' ' + text;
+        }
+        this.interim = interim.trim();
+      };
+      r.onerror = (e) => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { this.setNote('Speech recognition was blocked, so no words are shown.'); this.on = false; const b = $('pitch-words'); if (b) b.checked = false; }
+        else if (e.error === 'network') this.setNote('Speech recognition needs an internet connection in this browser.');
+      };
+      r.onend = () => { if (this.rec === r) { if (this.on && state.running === 'mic') { try { r.start(); } catch (err) { this.rec = null; } } else this.rec = null; } };
+      try { r.start(); this.setNote(''); } catch (err) { this.rec = null; }
+    },
+    stop() { const r = this.rec; this.rec = null; this.interim = ''; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
+    // Final result: spread its words over the voiced frames since the previous result.
+    place(text, final) {
+      const now = performance.now(), times = [];
+      for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > this.lastT) times.push(pitchT[i]);
+      const words = text.split(/\s+/).filter(Boolean);
+      for (const p of D.placeWords(words, times)) this.labels.push(p);
+      if (final) this.lastT = now;
+      while (this.labels.length > 60) this.labels.shift();
+    },
+    xAt(t, w, dx) { // clock time -> x on the pitch track, via the frame timestamps
+      const n = pitchT.length; if (!n || t < pitchT[0]) return -1;
+      let lo = 0, hi = n - 1;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (pitchT[m] <= t) lo = m; else hi = m - 1; }
+      return w - (n - lo) * dx;
+    },
+    draw(g, w, h, axisW, dx, y) {
+      if (!this.on || (!this.labels.length && !this.interim)) return;
+      const dpr = dprOf();
+      g.font = `600 ${12 * dpr}px ${C.font}`; g.textAlign = 'left'; g.textBaseline = 'top';
+      let lastEnd = -1e9;
+      for (const L of this.labels) {
+        const x0 = this.xAt(L.t0, w, dx), x1 = this.xAt(L.t1, w, dx);
+        if (x1 < axisW) continue;
+        const xs = Math.max(axisW + 2 * dpr, x0, lastEnd + 4 * dpr), tw = g.measureText(L.w).width;
+        g.strokeStyle = C.muted; g.globalAlpha = 0.25; g.beginPath(); g.moveTo(Math.max(axisW, x0), 20 * dpr); g.lineTo(Math.max(axisW, x0), h); g.stroke(); g.globalAlpha = 1;
+        g.fillStyle = C.ink; g.fillText(L.w, xs, 6 * dpr);
+        lastEnd = xs + tw;
+      }
+      if (this.interim) {
+        g.fillStyle = C.muted; g.textAlign = 'right'; g.font = `italic ${11 * dpr}px ${C.font}`;
+        g.fillText(this.interim.split(/\s+/).slice(-4).join(' ') + '…', w - 4 * dpr, 22 * dpr);
+      }
+      g.textBaseline = 'alphabetic';
+    },
+  };
 
   // ---------------- audio ----------------
   let ctx = null, analyser = null, an = null, node = null, stream = null, buf = null, raf = 0, lastT = 0, loopOn = false;
@@ -478,6 +557,7 @@
     setStatus(label, true);
     $('btn-stop').hidden = kind === 'mic'; // the mic button itself becomes Stop
     setMicButton(kind === 'mic');
+    Words.sync(); PhoneMode.wake();
     an.reset();
     ensureLoop();
   }
@@ -489,9 +569,37 @@
     state.running = null;
     $('btn-stop').hidden = true;
     setMicButton(false);
+    Words.sync(); PhoneMode.wake();
     setStatus('Not listening');
     if (hadRun) autoSave('stopped listening');
   }
+  // Phone mode: a streamlined layout for practising on the go. Remembered, and ?phone=1 turns it
+  // on for a home-screen bookmark. While the mic runs in phone mode the screen is kept awake.
+  const PhoneMode = {
+    on: false, lock: null,
+    init() {
+      try { this.on = localStorage.getItem('voicetrainer.phone') === '1'; } catch (e) {}
+      const q = new URLSearchParams(location.search).get('phone');
+      if (q != null) this.on = q !== '0';
+      $('btn-phone').addEventListener('click', () => this.set(!this.on));
+      // a drill opens below the long grid on a phone, so bring it into view
+      $('drill-grid').addEventListener('click', (e) => { if (this.on && e.target.closest('button')) setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); });
+      this.apply();
+    },
+    set(on) { this.on = on; try { localStorage.setItem('voicetrainer.phone', on ? '1' : '0'); } catch (e) {} this.apply(); window.scrollTo(0, 0); },
+    apply() {
+      document.body.classList.toggle('phone-mode', this.on);
+      const b = $('btn-phone'); b.textContent = this.on ? 'Full view' : 'Phone mode'; b.setAttribute('aria-pressed', String(this.on));
+      this.wake();
+      window.dispatchEvent(new Event('resize'));
+    },
+    async wake() {
+      const want = this.on && state.running === 'mic' && navigator.wakeLock && document.visibilityState === 'visible';
+      if (want && !this.lock) { try { this.lock = await navigator.wakeLock.request('screen'); this.lock.addEventListener('release', () => { this.lock = null; }); } catch (e) { this.lock = null; } }
+      else if (!want && this.lock) { try { await this.lock.release(); } catch (e) {} this.lock = null; }
+    },
+  };
+  document.addEventListener('visibilitychange', () => PhoneMode.wake());
   function setMicButton(on) {
     for (const b of [$('btn-mic'), $('reader-mic')]) {
       if (!b) continue;
@@ -521,8 +629,8 @@
   function onFrame(fr) {
     frameCount++;
     drawSpecColumn(fr, an.fsd);
-    pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0);
-    if (pitchBuf.length > 360) pitchBuf.shift();
+    pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
+    if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
     // While a reference example plays (and briefly after), show it but don't score it as the user.
     const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
     const d = !gated && state.drill && !state.drill.result ? state.drill : null;
@@ -547,12 +655,12 @@
         if (d && d.def.vowel) {
           const v = D.VOWEL_BY_KEY[d.def.vowel];
           const fit = D.fitVowel(F, v);
-          vowel = v; score = fit.alpha * 100;
+          vowel = v; score = score100(fit.alpha);
           ok = fit.rms < 0.085 || cls.vowel.key === v.key;
           if (ok) d.vowelFr.push({ F, alpha: fit.alpha, per: fit.per });
           else d.offTarget = { key: cls.vowel.key, n: (d.offTarget && d.offTarget.n || 0) + 1 };
         } else if (cls.cost < 0.07) {
-          vowel = cls.vowel; score = cls.alpha * 100; ok = true;
+          vowel = cls.vowel; score = score100(cls.alpha); ok = true;
         }
         if (ok) {
           if (!gated) addVowelToSession(vowel.key, score);
@@ -571,7 +679,7 @@
     } else if (fr.kind === 'fricative') {
       const type = d && d.def.sib ? d.def.sib : fr.sib;
       const sib = D.SIBILANTS[type];
-      const score = D.sibilantAlpha(fr.cog, sib) * 100;
+      const score = score100(D.sibilantAlpha(fr.cog, sib));
       if (!gated) {
         session.sibs[type].push(score);
         if (take) take.sibs[type].push(score);
@@ -606,6 +714,9 @@
     if (frameCount % 30 === 0) renderSession();
   }
 
+  // Scores shown and saved stay on the 0 (masculine average) .. 100 (feminine average) scale.
+  // Going past an average is not extra credit, so it reads as the end of the scale.
+  function score100(alpha) { return clamp(alpha * 100, 0, 100); }
   function pushMeter(score) {
     // average over the last ~1.5 s so the needle moves calmly
     const now = performance.now();
@@ -949,8 +1060,13 @@
     g.fillText('palate', 108 * k, 68 * k); g.fillText('throat', 230 * k, 120 * k); g.fillText('lips', 18 * k, 106 * k);
     const goalCol = state.goal === 'fem' ? C.fem : C.masc;
     if (!F || !v) {
-      g.fillStyle = C.muted; g.font = `${12 * dpr}px ${C.font}`; g.textAlign = 'center';
-      g.fillText('Hold a vowel to see a sketch', 150 * k, 270 * k);
+      // no voice: show the moving parts at rest (jaw nearly closed, tongue relaxed, larynx in the middle)
+      const rest = tractGeom({ height: 0.9, back: 0.5, round: 0, larynx: 0.5 });
+      drawTractLayer(g, k, rest, { stroke: C.muted, width: 1.6 * dpr, fill: C.muted });
+      g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'left';
+      g.fillText('tongue', (rest.peak[0] - 14) * k, (rest.peak[1] + 22) * k);
+      g.fillText('larynx', 228 * k, (rest.Ly + 14) * k);
+      tractLabel(g, k, dpr, 'At rest. Hold a vowel to see yours', C.muted);
       g.restore(); return readout;
     }
     // dashed: the goal shape, or (in control exercises) the shape you started from
@@ -1289,7 +1405,7 @@
     const def = d.def, res = { id: def.id, label: def.cue, type: def.type, at: Date.now() };
     if (d.vowelFr.length) {
       const v = D.VOWEL_BY_KEY[def.vowel];
-      res.vowelScore = D.median(d.vowelFr.map(f => f.alpha)) * 100;
+      res.vowelScore = score100(D.median(d.vowelFr.map(f => f.alpha)));
       res.F = [0, 1, 2].map(i => D.median(d.vowelFr.map(f => f.F[i])));
       res.per = [0, 1, 2].map(i => D.median(d.vowelFr.map(f => f.per[i])) * 100);
       res.vowel = v.key;
@@ -1693,12 +1809,12 @@
     const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height;
     const pad = { l: 36 * dpr, r: 12 * dpr, t: 10 * dpr, b: 26 * dpr };
     g.clearRect(0, 0, w, h);
-    const y = (v) => pad.t + (1 - (clamp(v, -10, 110) + 10) / 120) * (h - pad.t - pad.b);
+    const y = (v) => pad.t + (1 - clamp(v, 0, 100) / 100) * (h - pad.t - pad.b);
     const n = items.length, x = (i) => pad.l + (n === 1 ? 0.5 : i / (n - 1)) * (w - pad.l - pad.r);
     g.font = `${10 * dpr}px ${C.font}`; g.fillStyle = C.muted; g.strokeStyle = C.line; g.lineWidth = dpr;
     const [lo, hi] = target();
     g.fillStyle = state.goal === 'fem' ? C.fem : C.masc; g.globalAlpha = 0.1;
-    g.fillRect(pad.l, y(Math.min(hi, 110)), w - pad.l - pad.r, y(lo) - y(Math.min(hi, 110))); g.globalAlpha = 1;
+    g.fillRect(pad.l, y(Math.min(hi, 100)), w - pad.l - pad.r, y(lo) - y(Math.min(hi, 100))); g.globalAlpha = 1;
     g.fillStyle = C.muted; g.textAlign = 'right';
     for (const v of [0, 25, 50, 75, 100]) { g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(w - pad.r, y(v)); g.stroke(); g.fillText(v, pad.l - 6 * dpr, y(v) + 4 * dpr); }
     g.textAlign = 'center';
@@ -2111,10 +2227,24 @@
       this.fillPicker(id);
       this.pick(id);
     },
+    // Side pane (bottom sheet on narrow screens) or full screen; "Hide pane" tucks it into a tab.
+    layout() {
+      const r = $('reader'), shown = this.open && !this.collapsed;
+      r.hidden = !shown;
+      r.classList.toggle('full', !!this.full);
+      $('reader-tab').hidden = !(this.open && this.collapsed);
+      document.body.classList.toggle('reading', shown && !this.full);
+      document.body.classList.toggle('reading-full', shown && !!this.full);
+      $('reader-full').textContent = this.full ? 'Side pane' : 'Full screen';
+      $('reader-full').setAttribute('aria-pressed', String(!!this.full));
+      window.dispatchEvent(new Event('resize')); // charts re-fit to the narrower page
+    },
+    setFull(on) { this.full = on; try { localStorage.setItem('voicetrainer.readerfull', on ? '1' : '0'); } catch (e) {} this.layout(); requestAnimationFrame(() => this.paintTrack()); },
+    collapse(on) { this.collapsed = on; this.layout(); if (on) $('reader-tab').focus(); else { requestAnimationFrame(() => this.paintTrack()); $('reader-collapse').focus(); } },
     show() {
-      this.open = true;
-      $('reader').hidden = false;
-      document.body.style.overflow = 'hidden';
+      if (this.open) { if (this.collapsed) this.collapse(false); return; }
+      this.open = true; this.collapsed = false;
+      this.layout();
       let id = BUILTIN_TEXTS[0].id;
       try { id = localStorage.getItem('voicetrainer.readtext') || id; } catch (e) {}
       if (!Texts.all().some(t => t.id === id)) id = BUILTIN_TEXTS[0].id;
@@ -2123,13 +2253,12 @@
       setMicButton(state.running === 'mic');
       requestAnimationFrame(() => this.paintTrack());
       this.tick();
-      $('reader-close').focus();
+      $('reader-stage').focus({ preventScroll: true });
     },
     hide() {
       this.stopListen();
       this.open = false;
-      $('reader').hidden = true;
-      document.body.style.overflow = '';
+      this.layout();
       $('btn-read').focus();
     },
     init() {
@@ -2142,6 +2271,10 @@
       $('reader-focus').addEventListener('click', () => this.setFocusLine(!this.focusLine));
       window.addEventListener('resize', () => { if (this.open) this.paintTrack(); });
       $('reader-close').addEventListener('click', () => this.hide());
+      try { this.full = localStorage.getItem('voicetrainer.readerfull') === '1'; } catch (e) {}
+      $('reader-full').addEventListener('click', () => this.setFull(!this.full));
+      $('reader-collapse').addEventListener('click', () => this.collapse(true));
+      $('reader-tab').addEventListener('click', () => this.collapse(false));
       $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.synth && this.stopListen(), startMic().then(() => { if (!this.tts) this.restart(); else this.paint(); }))));
       $('reader-listen').addEventListener('click', () => this.listen());
       if (window.speechSynthesis) {
@@ -2167,9 +2300,13 @@
       });
       $('reader-edit').addEventListener('click', () => { if (this.current && this.current.id.startsWith('u-')) this.editForm(Texts.user.find(t => t.id === this.current.id)); });
       document.addEventListener('keydown', (e) => {
-        if (!this.open) return;
-        if (e.key === 'Escape') { if ($('reader-form').hidden) this.hide(); else $('rf-cancel').click(); return; }
-        if (e.target.closest('input, textarea, select')) return;
+        if (!this.open || this.collapsed) return;
+        // With the pane docked the rest of the app is usable, so keys only steer the reader
+        // when focus is in it (or nowhere in particular).
+        const inPane = e.target === document.body || e.target.closest('#reader');
+        if (!this.full && !inPane) return;
+        if (e.key === 'Escape') { if (!$('reader-form').hidden) $('rf-cancel').click(); else if (this.full) this.setFull(false); else this.collapse(true); return; }
+        if (e.target.closest('input, textarea, select, button')) return;
         if (e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); this.go(this.idx + 1, false); }
         else if (e.key === 'Backspace' || e.key === 'ArrowLeft') { e.preventDefault(); this.go(this.idx - 1, false); }
       });
@@ -2182,6 +2319,8 @@
     try { g = localStorage.getItem('voicetrainer.goal') || 'fem'; } catch (e) {}
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
+    Words.init();
+    PhoneMode.init();
     $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic()));
     $('btn-demo').addEventListener('click', () => playDemo(false));
     DemoVoice.init();
