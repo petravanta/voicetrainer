@@ -2727,6 +2727,7 @@
       r.hidden = !shown;
       // phones (and phone view) get a compact panel along the bottom; More shows the rest of the controls
       document.body.classList.toggle('sheet-ui', sheet);
+      $('btn-read').setAttribute('aria-pressed', String(shown));
       $('reader-more').hidden = !sheet || !!this.full;
       if (!sheet) this.more(false);
       r.classList.toggle('full', !!this.full);
@@ -2784,7 +2785,8 @@
     init() {
       let m = 'voice';
       try { m = localStorage.getItem('voicetrainer.readmode') || 'voice'; } catch (e) {}
-      $('btn-read').addEventListener('click', () => this.show());
+      // the Reading button opens the pane, and closes it again when it is showing
+      $('btn-read').addEventListener('click', () => (this.open && !this.collapsed ? this.hide() : this.show()));
       let fl = true;
       try { fl = localStorage.getItem('voicetrainer.focusline') !== '0'; } catch (e) {}
       this.setFocusLine(fl);
