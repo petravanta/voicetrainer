@@ -623,7 +623,8 @@
   };
   document.addEventListener('visibilitychange', () => PhoneMode.wake());
   function setMicButton(on) {
-    for (const b of [$('btn-mic'), $('reader-mic')]) {
+    if (typeof Reader !== 'undefined' && Reader.open) Reader.paint();
+    for (const b of [$('btn-mic')]) {
       if (!b) continue;
       b.textContent = on ? 'Stop microphone' : 'Start microphone';
       b.setAttribute('aria-pressed', String(on));
@@ -2260,6 +2261,8 @@
       document.body.classList.toggle('reading-full', shown && !!this.full);
       $('reader-full').textContent = this.full ? 'Side pane' : 'Full screen';
       $('reader-full').setAttribute('aria-pressed', String(!!this.full));
+      // full screen sits below the audio bar so the main microphone button stays reachable
+      if (shown && this.full) document.documentElement.style.setProperty('--sbh', $('sourcebar-wrap').offsetHeight + 'px');
       Words.sync();
       window.dispatchEvent(new Event('resize')); // charts re-fit to the narrower page
     },
@@ -2299,7 +2302,6 @@
       $('reader-full').addEventListener('click', () => this.setFull(!this.full));
       $('reader-collapse').addEventListener('click', () => this.collapse(true));
       $('reader-tab').addEventListener('click', () => this.collapse(false));
-      $('reader-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (this.synth && this.stopListen(), startMic().then(() => { if (!this.tts) this.restart(); else this.paint(); }))));
       $('reader-listen').addEventListener('click', () => this.listen());
       if (window.speechSynthesis) {
         this.fillVoices();
@@ -2345,7 +2347,7 @@
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
     Words.init();
     PhoneMode.init();
-    $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : startMic()));
+    $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (Reader.synth && Reader.stopListen(), startMic())));
     $('btn-demo').addEventListener('click', () => playDemo(false));
     DemoVoice.init();
     $('btn-stop').addEventListener('click', stop);

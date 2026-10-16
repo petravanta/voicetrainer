@@ -353,3 +353,5 @@ body.phone-mode .top .goal button { padding-inline: 12px; }
 body.phone-mode .pm-short { display: inline; }
 body.phone-mode .pm-long { display: none; }
 body.phone-mode .sourcebar .btn { white-space: nowrap; }
+body.reading-full .sourcebar { position: fixed; top: 0; left: 0; right: 0; z-index: 51; background: var(--bg); padding: 10px 16px; border-bottom: 1px solid var(--line); }
+body.reading-full .reader.full { top: var(--sbh, 60px); }
