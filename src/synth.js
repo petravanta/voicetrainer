@@ -193,10 +193,17 @@
   function voiced(fs, dur, f0a, f0b, F, opts = {}) {
     const n = Math.round(fs * dur), x = new Float32Array(n), rand = rng(opts.seed || 13);
     const trans = opts.trans || 0.07, Fa = opts.from || F, Fb = opts.to || F;
-    let phase = 0;
+    let phase = 0, lp = 0;
+    // a real voice wanders: slow pitch drift, a light vibrato and small loudness changes
+    const ph = [0, 0, 0, 0, 0].map(() => rand() * 6.283), t0 = (opts.seed || 13) * 0.37;
+    // the closing edge of a real glottal pulse is softer than the model's, so the tone is tilted
+    // down a little (darker voices more), which takes the buzz off the upper harmonics
+    const tilt = opts.bright == null ? 0.35 : 0.5 - 0.3 * opts.bright;
     for (let i = 0; i < n; i++) {
-      const t = i / fs, u = t / dur;
-      const f = (f0a + (f0b - f0a) * u) * (1 + 0.01 * Math.sin(2 * Math.PI * 5.2 * t)) * (1 + 0.003 * (rand() - 0.5));
+      const t = i / fs, u = t / dur, tt = t + t0;
+      const drift = 0.007 * Math.sin(6.283 * 1.3 * tt + ph[0]) + 0.005 * Math.sin(6.283 * 2.9 * tt + ph[1]) + 0.004 * Math.sin(6.283 * 0.6 * tt + ph[2]);
+      const f = (f0a + (f0b - f0a) * u) * (1 + drift + 0.005 * Math.sin(6.283 * 5.2 * t)) * (1 + 0.002 * (rand() - 0.5));
+      const amp = 1 + 0.05 * Math.sin(6.283 * 3.1 * tt + ph[3]) + 0.03 * Math.sin(6.283 * 7.3 * tt + ph[4]);
       phase += f / fs; if (phase >= 1) phase -= 1;
       // brightness (0..1) shortens the closing phase, which lifts the upper harmonics
       // breath (0..1) leaves the folds open longer and adds turbulent airflow noise
@@ -205,7 +212,8 @@
       let g = 0;
       if (phase < op) g = 0.5 * (1 - Math.cos(Math.PI * phase / op));
       else if (phase < op + cl) g = Math.cos(0.5 * Math.PI * (phase - op) / cl);
-      x[i] = g + (0.025 + 0.3 * br) * (rand() - 0.5) * (0.25 + g); // airflow noise, strongest while open
+      lp += (1 - tilt) * (g - lp);
+      x[i] = amp * (lp + (0.025 + 0.3 * br) * (rand() - 0.5) * (0.25 + g)); // airflow noise, strongest while open
     }
     for (let i = n - 1; i > 0; i--) x[i] -= x[i - 1];
     const at = (k, t) => {
