@@ -58,6 +58,8 @@ small { color: var(--muted); font-weight: 400; }
 .goal button[aria-checked="true"]#goal-masc { background: var(--masc); color: var(--panel); }
 
 .sourcebar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+/* the microphone bar stays at the top while scrolling, on every screen */
+.sourcebar { position: sticky; top: 0; z-index: 20; background: var(--bg); padding-block: 8px; margin-block: -8px; box-shadow: 0 0 0 100vmax var(--bg); clip-path: inset(0 -100vmax); }
 .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 .btn:hover:not(:disabled) { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -336,7 +338,6 @@ body.phone-mode .brand p, body.phone-mode #btn-file, body.phone-mode #btn-demo, 
 body.phone-mode .chart-vowel, body.phone-mode .spec-fig, body.phone-mode .tract-fig, body.phone-mode .history, body.phone-mode .foot,
 body.phone-mode .readouts > div:nth-child(2), body.phone-mode .readouts > div:nth-child(4), body.phone-mode .pw-privacy { display: none; }
 body.phone-mode .brand h1 { font-size: 1.4rem; }
-body.phone-mode .sourcebar { position: sticky; top: 0; z-index: 20; background: var(--bg); padding-block: 8px; margin-block: -8px; }
 body.phone-mode .sourcebar { flex-wrap: nowrap; gap: 8px; }
 body.phone-mode .sourcebar .btn { flex: none; padding-inline: 10px; }
 body.phone-mode .sourcebar #btn-mic { flex: 1 1 auto; font-weight: 600; }
