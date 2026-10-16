@@ -46,5 +46,16 @@ for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50],
   const m = D.median(sc);
   check(sc.length > 20 && Math.abs(m - res) < 25, `demo voice pitch ${pitch} res ${res} bright ${bright}: measured ${Math.round(m)} (${sc.length} fr)`);
 }
+// Intonation: a synthesized question rises at the end, a statement falls, through the real analyser.
+{
+  const contour = (x) => run(x, fs).map((f, i) => ({ t: i * 1000 / 60, f0: f.kind === 'voiced' ? f.f0 : 0 }));
+  const o = { pitch: 200, res: 100, bright: 60, rate: 0.95 };
+  const q = D.prosodyStats(contour(S.readText(fs, ["You're", 'coming', 'tonight?'], D.VOWELS, { ...o, f0At: (wi, u) => (wi < 2 ? 1 : 0.99 + 0.46 * u * u) }).x));
+  check(q && q.end >= 3, `prosody: question rises (${q && q.end.toFixed(1)} st)`);
+  const st = D.prosodyStats(contour(S.readText(fs, ["I'm", 'going', 'home', 'now.'], D.VOWELS, { ...o, f0At: (wi, u) => 1.12 - 0.08 * wi - (wi === 3 ? 0.14 * u : 0) }).x));
+  check(st && st.end <= -1.5, `prosody: statement falls (${st && st.end.toFixed(1)} st)`);
+  const flat = D.prosodyStats(contour(S.readText(fs, ['Hi', 'there', 'how', 'are', 'you'], D.VOWELS, { ...o, f0At: () => 1 }).x));
+  check(flat && flat.sd < 1 && flat.span < 2, `prosody: monotone reads as flat (sd ${flat && flat.sd.toFixed(2)})`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall examples on target');
 process.exit(fails ? 1 : 0);

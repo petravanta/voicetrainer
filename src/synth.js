@@ -159,7 +159,8 @@
       if (sentPos === 0) sentLen = sentLenFrom(wi);
       const units = wordUnits(words[wi]);
       const nv = units.filter(u => u.v).length;
-      const f0w = o.pitch * (1.12 - 0.24 * sentPos / Math.max(1, sentLen - 1 || 1));
+      // o.f0At(wordIndex, fractionThroughWord) gives a pitch multiplier for set intonation patterns
+      const f0w = o.f0At ? o.pitch * o.f0At(wi, 0) : o.pitch * (1.12 - 0.24 * sentPos / Math.max(1, sentLen - 1 || 1));
       starts.push(time);
       let vi = 0;
       for (const u of units) {
@@ -167,7 +168,8 @@
         if (u.v) {
           const F = mixV[u.v] || mixV.V, last = vi === nv - 1, first = vi === 0;
           const dur = (first ? 0.17 : 0.13) * (last && /[.!?,;:]$/.test(words[wi]) ? 1.35 : 1) / rate;
-          const fa = f0w * (first ? 1.05 : 1), fb = f0w * (first ? 1.0 : 0.96);
+          const fa = o.f0At ? o.pitch * o.f0At(wi, vi / nv) : f0w * (first ? 1.05 : 1);
+          const fb = o.f0At ? o.pitch * o.f0At(wi, (vi + 1) / nv) : f0w * (first ? 1.0 : 0.96);
           push(voiced(fs, dur, fa, fb, F, { bright: b, seed, ramp: 0.012, level: 0.3 }));
           vi++;
         } else if (u.sib) push(sibilant(fs, (u.short ? 0.07 : 0.12) / rate, sibPeak[u.sib], { level: 0.11, seed }));
