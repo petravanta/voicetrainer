@@ -637,12 +637,17 @@
     meterFrames = [];
     setExampleUi(null);
     const d = state.drill;
-    if (d && d.demoOn) { if (d.def.type === 'prosody') updateProsody(d, true); updateDemo(d, true); renderCoach(); }
+    if (d && d.demoOn) {
+      if (d.def.type === 'prosody') updateProsody(d, true);
+      updateDemo(d, true); renderCoach();
+      const m = $('drill-msg'); if (m) m.textContent = 'That was the demo voice. It was not scored; make the sound yourself to carry on.';
+    }
   }
   // While a demo sound plays, the exercise panel (live coach, gauges, vocal tract sketch, breath
   // gauge, control gauges, prosody line) shows the demo instead of you. Nothing it does is scored.
   // The demo reading stays up until your own voice comes in.
   let demoLabel = '';
+  const demoName = () => exSrc ? 'demo voice' : Reader.synth || Reader.tts ? 'reading voice' : 'demo voice';
   function resetCoachBuf(co) {
     if (!co) return;
     co.vf = []; co.vft = []; co.f1 = []; co.f1t = []; co.sf = []; co.sft = [];
@@ -654,9 +659,15 @@
     d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
+    d.offTarget = null; // a "sounds closer to..." note from before the demo no longer applies
+    const m = $('drill-msg');
+    if (m) { if (!m.classList.contains('demo-msg')) d.msgBefore = m.textContent; m.textContent = `Demo voice playing (${demoLabel}). The panel shows the demo; it is not scored as you.`; m.classList.add('demo-msg'); }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = `Demo playing (${demoLabel}).`; $('pr-cue').classList.remove('ok'); $('pr-state').textContent = 'demo voice'; drawProsody(d); }
   }
   function endDemoView(d) {
+    const m = $('drill-msg');
+    if (m && m.classList.contains('demo-msg')) { m.classList.remove('demo-msg'); m.textContent = d.result ? (d.msgBefore || '') : state.running ? 'Listening...' : ''; }
+    d.offTarget = null;
     d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
@@ -763,6 +774,10 @@
     const dd = exSrc && state.drill && state.drill.demoOn ? state.drill : null; // a demo is playing for this exercise
     // your own voice takes the panel back from the demo
     if (!gated && state.drill && state.drill.demoOn && (fr.kind === 'voiced' || fr.kind === 'fricative')) endDemoView(state.drill);
+    if (!gated && state.meterDemo && (fr.kind === 'voiced' || fr.kind === 'fricative')) {
+      meterFrames = []; state.meter = NaN; state.meterDemo = false;
+      $('res-desc').textContent = 'Hold a vowel or speak a sentence to see your own score.';
+    }
 
     if (fr.kind === 'voiced') {
       if (!gated) {
@@ -793,16 +808,17 @@
         }
         if (ok) {
           if (!gated) addVowelToSession(vowel.key, score);
-          pushMeter(score);
+          pushMeter(score, gated);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
           if (!gated || exSrc) {
-            if (tractLive.v !== vowel) tractLive.hist = [];
+            if (tractLive.v !== vowel || tractLive.demo !== gated) tractLive.hist = [];
+            tractLive.demo = gated;
             tractLive.hist = (tractLive.hist || []).concat([F]).slice(-90); // ~1.5 s
             tractLive.F = [0, 1, 2].map(i => D.median(tractLive.hist.map(f => f[i])));
             tractLive.v = vowel; tractLive.at = performance.now();
           }
-          $('res-context').textContent = gated ? 'example ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue;
+          $('res-context').textContent = gated ? 'demo voice, ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue;
         }
       }
     } else if (fr.kind === 'fricative') {
@@ -852,9 +868,10 @@
   // Scores shown and saved stay on the 0 (masculine average) .. 100 (feminine average) scale.
   // Going past an average is not extra credit, so it reads as the end of the scale.
   function score100(alpha) { return clamp(alpha * 100, 0, 100); }
-  function pushMeter(score) {
-    // average over the last ~1.5 s so the needle moves calmly
+  function pushMeter(score, demo = false) {
+    // average over the last ~1.5 s so the needle moves calmly; a demo voice and yours never mix
     const now = performance.now();
+    if (!!state.meterDemo !== demo) { meterFrames = []; state.meterDemo = demo; state.meterName = demo ? demoName() : ''; }
     meterFrames.push({ t: now, s: score });
     while (meterFrames.length > 1 && now - meterFrames[0].t > AVG_MS) meterFrames.shift();
     state.meter = D.median(meterFrames.map(m => m.s));
@@ -884,7 +901,8 @@
     t.style.width = clamp(hi, 0, 100) - clamp(lo, 0, 100) + '%';
     if (Number.isFinite(v)) {
       const inT = v >= lo && v <= hi;
-      $('res-desc').textContent = inT ? 'In your target range. Keep this shape.'
+      if (state.meterDemo) $('res-desc').textContent = `This is the ${state.meterName}, not you: ${inT ? 'inside' : 'outside'} your target range. It is not scored or saved.`;
+      else $('res-desc').textContent = inT ? 'In your target range. Keep this shape.'
         : state.goal === 'fem' ? (v < 40 ? 'Darker than typical feminine resonance. Try a smaller, brighter mouth space.' : 'Getting brighter. A little more forward and lighter to reach the target.')
           : (v > 60 ? 'Brighter than typical masculine resonance. Try more space in the throat and slightly rounded lips.' : 'Getting darker. A little more depth to reach the target.');
     }
@@ -1260,8 +1278,10 @@
     if (fresh) { const c = D.coachVowel(t.F, t.v, state.goal); key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok'; }
     if (key !== t.pending) { t.pending = key; t.pendingAt = now; }
     if (key !== t.key && (t.key === null || key === 'idle' || (now - t.pendingAt >= (key === 'ok' ? 600 : 1000) && now - t.shownAt >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS)))) { t.key = key; t.shownAt = now; }
-    renderTractRead($('tract-read'), drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key));
-    const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `vowel "${t.v.cue}" as in ${t.v.word}` : '';
+    const demo = fresh && t.demo;
+    const rows = drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key, null, demo ? 'Solid line: the demo voice (estimated)' : '');
+    renderTractRead($('tract-read'), demo ? null : rows); // the adjustment tips are for your voice, not a demo
+    const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `${demo ? 'demo voice, ' : ''}vowel "${t.v.cue}" as in ${t.v.word}` : '';
   }
   // smooth a gauge position so the marker glides instead of jumping
   function ease(co, k, v, rate = 0.2) {
@@ -1382,7 +1402,7 @@
     else prog = Math.min(d.vowelFr.length / NEED.wordVowel, d.sibFr.length / NEED.wordSib);
     const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
     const msg = $('drill-msg');
-    if (msg && frameCount % 6 === 0) {
+    if (msg && frameCount % 6 === 0 && !d.demoOn) {
       if (d.offTarget && d.offTarget.n > 25 && d.offTarget.key !== def.vowel) {
         const heard = D.VOWEL_BY_KEY[d.offTarget.key], want = D.VOWEL_BY_KEY[def.vowel];
         msg.textContent = `That sounds closer to "${heard.cue}" (${heard.word}). Aim for "${want.cue}" as in "${want.word}".`;
