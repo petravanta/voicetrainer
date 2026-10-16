@@ -202,6 +202,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .reader-field textarea { font-family: var(--font-body); line-height: 1.5; resize: vertical; width: 100%; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); flex-wrap: wrap; }
 .seg button { border: 0; background: none; color: var(--ink); font: inherit; font-size: 0.88rem; padding: 7px 11px; cursor: pointer; }
+.seg.rsrc { flex-wrap: nowrap; flex: none; }
 .seg button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
 .reader-hud { display: flex; flex-wrap: wrap; gap: 6px 22px; max-width: 1180px; width: 100%; margin: 0 auto; font-size: 0.88rem; color: var(--muted); border-block: 1px solid var(--line); padding-block: 8px; }
 .reader-hud b { font-family: var(--font-mono); color: var(--ink); font-weight: 500; }
@@ -317,10 +318,11 @@ body.reading-full { overflow: hidden; }
 /* phones and phone view: a compact panel along the bottom (body.sheet-ui is set by the app) */
 .sheet-ui .reader:not(.full) { top: auto; left: 0; width: auto; height: auto; max-height: 50vh; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 6px; padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.12); }
 .sheet-ui .reader:not(.full) .reader-h { display: none; }
-.sheet-ui .reader:not(.full):not(.more) :is(.reader-field, .seg, #reader-voice-set, #reader-focus, #reader-smaller, #reader-bigger, #reader-edit) { display: none; }
+.sheet-ui .reader:not(.full):not(.more) :is(.reader-field, .seg:not(.rsrc), #reader-voice-set, #reader-focus, #reader-smaller, #reader-bigger, #reader-edit) { display: none; }
 .sheet-ui .reader:not(.full) .reader-bar { gap: 6px; }
 .sheet-ui .reader:not(.full) .reader-actions, .sheet-ui .reader:not(.full) .seg { flex-wrap: nowrap; overflow-x: auto; flex: 0 1 100%; min-width: 0; scrollbar-width: none; gap: 6px; }
 .sheet-ui .reader:not(.full) .reader-actions .btn, .sheet-ui .reader:not(.full) .seg button { flex: none; font-size: 0.8rem; padding: 4px 9px; }
+.sheet-ui .reader:not(.full) .seg.rsrc { flex: none; overflow: visible; }
 .sheet-ui .reader:not(.full) .reader-hud { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 10px; font-size: 0.76rem; padding-block: 3px; }
 .sheet-ui .reader:not(.full) .rh-hint { display: none; }
 .sheet-ui .reader:not(.full) .reader-track { font-size: 1.45rem; border-width: 1.5px; border-radius: 10px; padding: 0.15em 0; }
