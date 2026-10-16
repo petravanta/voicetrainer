@@ -238,6 +238,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .voice-dlg { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); padding: 20px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .voice-dlg::backdrop { background: rgba(0, 0, 0, 0.35); }
 .voice-dlg h2 { margin: 0 0 12px; font-family: var(--font-display); font-size: 1.2rem; }
+.voice-dlg p { margin: 0 0 10px; }
 .voice-dlg h3 { margin: 18px 0 8px; font-size: 0.95rem; }
 .vd-type { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
 .vd-type button { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 500; padding: 6px 14px; border-radius: 999px; cursor: pointer; }
@@ -296,6 +297,7 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 @media (prefers-reduced-motion: reduce) { .track-inner { transition: none; } }
 
 .pw-toggle { margin-left: auto; font-weight: 400; font-size: 0.9em; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.linkish { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .pw-note, .pw-privacy { margin: 4px 0 0; font-size: 0.85em; color: var(--muted, #666); }
 
 /* reading practice as a side pane (bottom sheet on narrow screens); .full restores full screen */
@@ -309,18 +311,21 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 body.reading { padding-right: var(--rpane); }
 body.reading-full { overflow: hidden; }
 .reader-tab { position: fixed; z-index: 49; right: 0; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; padding: 14px 8px; border: 1px solid var(--line); border-right: 0; border-radius: 10px 0 0 10px; background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; box-shadow: -3px 0 12px rgb(0 0 0 / 0.12); }
-@media (max-width: 860px) {
-  .reader:not(.full) { top: auto; left: 0; width: auto; height: var(--rsheet); border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.12); }
-  .reader:not(.full) .reader-track { font-size: 1.8rem; }
-  .reader:not(.full) { gap: 6px; padding-top: 10px; }
-  .reader:not(.full) .reader-h { display: none; }
-  .reader:not(.full) .reader-actions, .reader:not(.full) .seg { flex-wrap: nowrap; overflow-x: auto; flex: 0 1 100%; min-width: 0; scrollbar-width: none; }
-  .reader:not(.full) .reader-actions .btn { flex: none; }
-  .reader:not(.full) .rh-hint { display: none; }
-  .reader:not(.full) .reader-hud { padding-block: 4px; }
-  .reader:not(.full) .reader-text { padding-block: 2vh 30vh; }
-  body.reading { padding-right: 0; padding-bottom: var(--rsheet); }
-  .reader-tab { top: auto; bottom: 0; right: 16px; transform: none; writing-mode: horizontal-tb; padding: 8px 16px; border-right: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; }
+/* phones and phone view: a compact panel along the bottom (body.sheet-ui is set by the app) */
+.sheet-ui .reader:not(.full) { top: auto; left: 0; width: auto; height: auto; max-height: 50vh; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 6px; padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.12); }
+.sheet-ui .reader:not(.full) .reader-h { display: none; }
+.sheet-ui .reader:not(.full):not(.more) :is(.reader-field, .seg, #reader-voice-set, #reader-focus, #reader-smaller, #reader-bigger, #reader-edit) { display: none; }
+.sheet-ui .reader:not(.full) .reader-bar { gap: 6px; }
+.sheet-ui .reader:not(.full) .reader-actions, .sheet-ui .reader:not(.full) .seg { flex-wrap: nowrap; overflow-x: auto; flex: 0 1 100%; min-width: 0; scrollbar-width: none; gap: 6px; }
+.sheet-ui .reader:not(.full) .reader-actions .btn, .sheet-ui .reader:not(.full) .seg button { flex: none; font-size: 0.8rem; padding: 4px 9px; }
+.sheet-ui .reader:not(.full) .reader-hud { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 10px; font-size: 0.76rem; padding-block: 3px; }
+.sheet-ui .reader:not(.full) .rh-hint { display: none; }
+.sheet-ui .reader:not(.full) .reader-track { font-size: 1.45rem; border-width: 1.5px; border-radius: 10px; padding: 0.15em 0; }
+.sheet-ui .reader:not(.full) .reader-stage { max-height: 22vh; }
+.sheet-ui .reader:not(.full) .reader-text { font-size: calc(var(--rsize) * 0.55); line-height: 1.5; padding-block: 0.3em 6vh; }
+.sheet-ui .reader.no-track:not(.full) .reader-stage { max-height: 30vh; }
+body.sheet-ui.reading { padding-right: 0; padding-bottom: var(--rsheet-h, 0px); }
+.sheet-ui .reader-tab { top: auto; bottom: 0; right: 16px; transform: none; writing-mode: horizontal-tb; padding: 8px 16px; border-right: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; }
 }
 .reader-stage:focus { outline: none; }
 
