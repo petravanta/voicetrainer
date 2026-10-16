@@ -578,9 +578,9 @@
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
-    playSamples(x, mode);
+    playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
   }
-  function playSamples(x, mode) {
+  function playSamples(x, mode, label) {
     ensureCtx();
     stopExample();
     const fs = ctx.sampleRate;
@@ -593,6 +593,7 @@
     src.onended = () => { if (exSrc === src) finishExample(); };
     exSrc = src;
     meterFrames = []; an.reset();
+    startDemoView(state.drill, label);
     src.start();
     ensureLoop();
     setExampleUi(mode);
@@ -609,6 +610,36 @@
     if (an) an.reset();
     meterFrames = [];
     setExampleUi(null);
+    const d = state.drill;
+    if (d && d.demoOn) { if (d.def.type === 'prosody') updateProsody(d, true); updateDemo(d, true); renderCoach(); }
+  }
+  // While a demo sound plays, the exercise panel (live coach, gauges, vocal tract sketch, breath
+  // gauge, control gauges, prosody line) shows the demo instead of you. Nothing it does is scored.
+  // The demo reading stays up until your own voice comes in.
+  let demoLabel = '';
+  function resetCoachBuf(co) {
+    if (!co) return;
+    co.vf = []; co.vft = []; co.f1 = []; co.f1t = []; co.sf = []; co.sft = [];
+    co.vt = co.st = -1e9; co.eased = {}; co.hist = []; co.jawOff = false;
+  }
+  function startDemoView(d, label) {
+    if (!d) return;
+    demoLabel = label ? label[0].toLowerCase() + label.slice(1) : 'demo';
+    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
+    d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
+    resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
+    if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = `Demo playing (${demoLabel}).`; $('pr-cue').classList.remove('ok'); $('pr-state').textContent = 'demo voice'; drawProsody(d); }
+  }
+  function endDemoView(d) {
+    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
+    d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
+    if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
+  }
+  function updateDemo(d, force) {
+    const t = d.def.type;
+    if (t === 'breath') updateBreath(d, force);
+    else if (t === 'iso') updateIso(d, force);
+    else if (t === 'prosody' && !force) updateProsody(d);
   }
   function setExampleUi(mode) {
     if (!mode) document.querySelectorAll('.proof-play.playing').forEach(x => { if (!exSrc) { x.classList.remove('playing'); x.textContent = '▶'; } });
@@ -701,6 +732,9 @@
     // While a reference example plays (and briefly after), show it but don't score it as the user.
     const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
     const d = !gated && state.drill && !state.drill.result ? state.drill : null;
+    const dd = exSrc && state.drill && state.drill.demoOn ? state.drill : null; // a demo is playing for this exercise
+    // your own voice takes the panel back from the demo
+    if (!gated && state.drill && state.drill.demoOn && (fr.kind === 'voiced' || fr.kind === 'fricative')) endDemoView(state.drill);
 
     if (fr.kind === 'voiced') {
       if (!gated) {
@@ -768,17 +802,22 @@
         if (session.breath.length > 30000) session.breath.splice(0, 10000);
       }
       if (d && d.def.type === 'breath') d.breathFr.push(fr.breath);
+      if (dd && dd.def.type === 'breath') dd.demoBr.push(fr.breath);
     }
     if (d && d.def.type === 'prosody') d.pts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
     if (d && d.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) d.isoFr.push({ F: fr.formants, f0: fr.f0, n: frameCount });
+    if (dd && dd.def.type === 'prosody') dd.demoPts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
+    if (dd && dd.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) dd.demoIso.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
-    if (!gated) coachFrame(fr);
+    if (!gated) coachFrame(fr, false);
+    else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
+    else if (dd) updateDemo(dd);
     if (frameCount % 30 === 0) renderSession();
   }
 
@@ -984,10 +1023,12 @@
       return `<div class="how-item"><p class="how-title">${h.title}</p><ol>${h.steps.map(s => `<li>${s}</li>`).join('')}</ol></div>`;
     }).join('');
   }
-  function coachFrame(fr) {
+  function coachFrame(fr, demo) {
     const co = state.coach, d = state.drill;
     if (!co || !d) return;
     const now = performance.now();
+    // switching between the demo and you starts the readings afresh, so the two never mix
+    if (!!co.demo !== demo) { if (!demo && !(fr.kind === 'voiced' || fr.kind === 'fricative')) return; resetCoachBuf(co); co.demo = demo; co.key = null; }
     // keep about the last 1.5 s of frames; the gauges and tips use their median
     const keep = (arr, ts, v, win = AVG_MS) => { arr.push(v); ts.push(now); while (ts.length > 1 && now - ts[0] > win) { ts.shift(); arr.shift(); } };
     if (d.def.vowel && fr.kind === 'voiced' && fr.formants) {
@@ -1119,7 +1160,7 @@
     if (!rows) { el.innerHTML = ''; return; }
     el.innerHTML = rows.map(r => `<li class="${r.ok ? 'ok' : 'off'}"><b>${r.part}</b> ${r.text}</li>`).join('');
   }
-  function drawTract(cv, F, v, key, refF) {
+  function drawTract(cv, F, v, key, refF, note) {
     let readout = null;
     if (!cv || !C.ink) return readout;
     fitCanvas(cv);
@@ -1176,8 +1217,9 @@
       const ax = x1 * k, ay = y1 * k, bx = x2 * k, by = y2 * k, a = Math.atan2(by - ay, bx - ax), hl = 8 * dpr;
       g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
       g.beginPath(); g.moveTo(bx, by); g.lineTo(bx - hl * Math.cos(a - 0.45), by - hl * Math.sin(a - 0.45)); g.lineTo(bx - hl * Math.cos(a + 0.45), by - hl * Math.sin(a + 0.45)); g.closePath(); g.fill();
-      tractLabel(g, k, dpr, TRACT_REC[state.goal][key] || '', C.ink);
-    } else if (key === 'ok') tractLabel(g, k, dpr, 'Close to the goal shape', C.good);
+      tractLabel(g, k, dpr, note || TRACT_REC[state.goal][key] || '', C.ink);
+    } else if (key === 'ok') tractLabel(g, k, dpr, note || 'Close to the goal shape', C.good);
+    else if (note) tractLabel(g, k, dpr, note, C.ink);
     g.restore();
     return readout;
   }
@@ -1232,6 +1274,7 @@
       rows += gaugeRow(def.sib === 's' ? '/s/' : '/ʃ/', `hiss ${(cog / 1000).toFixed(1)} kHz`, ease(co, 'sib', c.pos), c.dir);
       if (!vRecent || co.st > co.vt) { key = c.onTarget ? 'ok' : 'sib:' + c.dir; dist = c.distance; }
     }
+    if (co.demo) return renderCoachDemo(co, def, key, rows, vRecent);
     // switch the tip only when the new one has held steadily, and leave each tip up long
     // enough to read and try; reaching the target is shown sooner than leaving it
     if (key !== co.pendingKey) { co.pendingKey = key; co.pendingAt = now; }
@@ -1272,6 +1315,25 @@
       tr.textContent = dist === 0 ? 'in the target zone' : delta < -3 ? 'getting closer' : delta > 3 ? 'moving away' : `${Math.round(dist)} point${Math.round(dist) === 1 ? '' : 's'} away`;
       tr.className = dist === 0 || delta < -3 ? 'trend good' : delta > 3 ? 'trend warn' : 'trend';
     } else { tr.textContent = ''; tr.className = 'trend'; }
+  }
+  // the coach while a demo plays: the same gauges and sketch, describing the demo voice
+  function renderCoachDemo(co, def, key, rows, vRecent) {
+    const cueEl = $('coach-cue'), what = def.vowel ? 'jaw, tongue, lips and larynx' : 'tongue (from its hiss)';
+    const heard = vRecent || (def.sib && co.sf.length);
+    let cue;
+    if (!heard) cue = exSrc ? `Demo playing (${demoLabel}). Its reading appears here as it sounds.` : 'That was the demo voice. Make the sound yourself to see your own reading.';
+    else cue = `Demo voice, ${demoLabel}: ${key === 'ok' ? 'on target' : 'off target'}${exSrc ? '' : ' (finished)'}.`;
+    cueEl.textContent = cue;
+    cueEl.classList.toggle('ok', !!heard && key === 'ok');
+    $('coach-why').textContent = heard ? `The gauges and sketch show where the demo's ${what} likely sit${def.vowel ? ', and which way they would need to move' : ''}. Your own voice takes over when you next make a sound.` : '';
+    renderHowto('idle');
+    $('coach-gauges').innerHTML = rows;
+    const ct = $('cv-tract-coach');
+    if (ct) {
+      ct.parentElement.hidden = !def.vowel;
+      if (def.vowel) drawTract(ct, vRecent ? [0, 1, 2].map(i => D.median(co.vf.map(f => f[i]))) : null, D.VOWEL_BY_KEY[def.vowel], key, null, 'Solid line: the demo voice (estimated)');
+    }
+    const tr = $('coach-trend'); tr.textContent = 'demo voice'; tr.className = 'trend demo';
   }
   function renderExampleNote() {
     const n = $('ex-note'), d = state.drill; if (!n || !d) return;
@@ -1347,28 +1409,34 @@
   function updateBreath(d, force) {
     if (!force && frameCount % 6) return;
     const def = d.def, [lo, hi] = breathBand(), now = performance.now();
-    const recent = d.breathFr.slice(-90);
+    const demo = !!d.demoOn;
+    const recent = (demo ? d.demoBr : d.breathFr).slice(-90);
     const fresh = recent.length >= 5 && frameCount - breathShown < 90;
     const b = fresh ? D.median(recent) : NaN;
     const key = !fresh ? 'idle' : b > hi ? 'high' : b < lo ? 'low' : 'ok';
     // the same steadiness rules as the live coach: no flicker between tips
     const c = d.cue || (d.cue = { key: null, at: 0, pending: null, pendingAt: 0, eased: {} });
     if (key !== c.pending) { c.pending = key; c.pendingAt = now; }
-    if (key !== c.key && (c.key === null || (key === 'idle' && now - c.pendingAt > COACH_HOLD_MS - 1200) ||
+    if (demo) { if (key !== 'idle' || !exSrc) c.key = key; } // a demo is short: show its reading straight away
+    else if (key !== c.key && (c.key === null || (key === 'idle' && now - c.pendingAt > COACH_HOLD_MS - 1200) ||
       (key !== 'idle' && now - c.pendingAt >= (key === 'ok' ? 600 : 1000) && now - c.at >= (key === 'ok' ? 600 : COACH_MIN_SHOW_MS)))) { c.key = key; c.at = now; }
     const cue = $('br-cue'); if (!cue) return;
-    cue.textContent = c.key === 'idle' && !state.running ? 'Start the microphone to see your breathiness live.' : BREATH_CUES[c.key || 'idle'];
+    if (demo) {
+      const k = c.key || 'idle';
+      cue.textContent = k === 'idle' ? (exSrc ? `Demo playing (${demoLabel}). Its reading appears here as it sounds.` : 'That was the demo voice. Make a sustained sound to see your own reading.')
+        : `Demo voice, ${demoLabel}: ${k === 'ok' ? 'in the zone' : k === 'high' ? 'airier than the zone' : 'clearer and firmer than the zone'}.`;
+    } else cue.textContent = c.key === 'idle' && !state.running ? 'Start the microphone to see your breathiness live.' : BREATH_CUES[c.key || 'idle'];
     cue.classList.toggle('ok', c.key === 'ok');
     const mark = $('br-mark');
     if (fresh) {
       const x = ease(c, 'b', b);
       mark.hidden = false; mark.style.left = clamp(x, 0, 100) + '%';
       mark.classList.toggle('ok', key === 'ok');
-      $('br-num').textContent = `${Math.round(b)} · ${breathWord(b)}`;
+      $('br-num').textContent = `${demo ? 'demo voice · ' : ''}${Math.round(b)} · ${breathWord(b)}`;
       $('br-need').textContent = key === 'ok' ? '✓' : key === 'high' ? '← clearer' : 'airier →';
       $('br-need').className = 'g-need ' + (key === 'ok' ? 'ok' : 'off');
-    } else if (c.eased.b == null) { mark.hidden = true; $('br-need').textContent = ''; }
-    if (def.aim !== 'band' || d.result) return;
+    } else if (c.eased.b == null) { mark.hidden = true; $('br-need').textContent = ''; $('br-num').textContent = ''; }
+    if (demo || def.aim !== 'band' || d.result) return;
     if (fresh && key === 'ok') d.inZone += 6;
     const prog = d.inZone / NEED.breathIn;
     const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
@@ -1514,7 +1582,7 @@
     host.querySelectorAll('.proof-play').forEach(b => b.addEventListener('click', () => {
       const it = items[+b.dataset.i];
       if (exSrc && b.classList.contains('playing')) { stopExample(); return; }
-      ensureCtx(); playSamples(it.make(ctx.sampleRate), null);
+      ensureCtx(); playSamples(it.make(ctx.sampleRate), null, it.label);
       host.querySelectorAll('.proof-play').forEach(x => { x.classList.remove('playing'); x.textContent = '▶'; });
       b.classList.add('playing'); b.textContent = '■';
     }));
@@ -1573,19 +1641,32 @@
     drawProsody(d);
   }
   // A phrase ends after half a second without voicing; then it is checked and drawn.
-  function updateProsody(d) {
-    const pts = d.pts; if (!pts.length) return;
+  function updateProsody(d, flush) {
+    const demo = !!d.demoOn, pts = demo ? d.demoPts : d.pts; if (!pts.length) return;
     const now = performance.now();
     let lastV = -1; for (let i = pts.length - 1; i >= 0; i--) if (pts[i].f0 > 0) { lastV = i; break; }
     if (lastV < 0) { if (pts.length > 600) pts.length = 0; return; }
     const voicedMs = pts.filter(q => q.f0 > 0).length * 16;
-    const ended = now - pts[lastV].t > 500 || now - pts[0].t > 7000;
+    const ended = flush || now - pts[lastV].t > 500 || now - pts[0].t > 7000;
     if (!ended) return;
     const first = pts.findIndex(q => q.f0 > 0);
     const phrase = pts.slice(first, lastV + 1);
     pts.length = 0;
     if (voicedMs < 400) return; // too short to be a phrase
-    const s = D.prosodyStats(phrase); if (!s || d.result) return;
+    const s = D.prosodyStats(phrase); if (!s) return;
+    if (demo) {
+      // the demo's phrase is drawn and graded like yours, but does not count
+      const r = d.def.check(s, d.demoStep, state.goal === 'fem');
+      if (d.def.pair) d.demoStep = d.demoStep ? 0 : 1;
+      d.demoLast = { s, r };
+      const cue = $('pr-cue'); if (!cue) return;
+      cue.textContent = `Demo voice, ${demoLabel}: ${r.ok ? 'passes' : 'does not pass'}. ${r.text.split('. ')[0].replace(/\.$/, '')}.`;
+      cue.classList.toggle('ok', r.ok);
+      $('pr-state').textContent = `demo voice · ${s.dur.toFixed(1)} s · range ${s.span.toFixed(1)} st`;
+      drawProsody(d);
+      return;
+    }
+    if (d.result) return;
     const def = d.def, fem = state.goal === 'fem', r = def.check(s, d.step, fem);
     d.last = { s, r };
     if (def.pair) {
@@ -1609,10 +1690,12 @@
     g.clearRect(0, 0, w, h);
     g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = dpr;
     for (const st of [-6, 0, 6]) { g.beginPath(); g.moveTo(ax, y(st)); g.lineTo(w, y(st)); g.stroke(); g.fillText((st > 0 ? '+' : '') + st, ax - 5 * dpr, y(st) + 4 * dpr); }
-    if (!d.last) { g.textAlign = 'center'; g.fillText('Say the phrase, then pause', (w + ax) / 2, h / 2 - 6 * dpr); return; }
-    const c = d.last.s.contour, t0 = c[0].t, t1 = c[c.length - 1].t || t0 + 1;
+    const last = d.demoOn ? d.demoLast : d.last;
+    if (!last) { g.textAlign = 'center'; g.fillText(d.demoOn ? 'Demo playing: its line appears when the phrase ends' : 'Say the phrase, then pause', (w + ax) / 2, h / 2 - 6 * dpr); return; }
+    if (d.demoOn) { g.textAlign = 'left'; g.fillText('demo voice', ax + 6 * dpr, 12 * dpr); }
+    const c = last.s.contour, t0 = c[0].t, t1 = c[c.length - 1].t || t0 + 1;
     const x = (t) => ax + 6 * dpr + (t - t0) / Math.max(1, t1 - t0) * (w - ax - 12 * dpr);
-    g.strokeStyle = d.last.r.ok ? C.good : C.ink; g.lineWidth = 2.4 * dpr; g.lineJoin = 'round';
+    g.strokeStyle = last.r.ok ? C.good : C.ink; g.lineWidth = 2.4 * dpr; g.lineJoin = 'round';
     g.beginPath(); let pen = false, prevT = 0;
     for (const q of c) { if (pen && q.t - prevT > 120) pen = false; pen ? g.lineTo(x(q.t), y(q.s)) : g.moveTo(x(q.t), y(q.s)); pen = true; prevT = q.t; }
     g.stroke();
@@ -1665,28 +1748,33 @@
   function updateIso(d, force) {
     if (!force && frameCount % 6) return;
     const def = d.def, cue = $('iso-cue'); if (!cue) return;
-    const fr = d.isoFr;
-    if (!d.base) {
+    // a demo gets its own starting point, so yours is kept for when you carry on
+    const demo = !!d.demoOn, fr = demo ? d.demoIso : d.isoFr, bk = demo ? 'demoBase' : 'base';
+    cue.classList.remove('ok');
+    if (!d[bk]) {
       // the starting point: the median of the first steady stretch of voice
       if (fr.length >= NEED.isoBase) {
         const first = fr.slice(0, NEED.isoBase);
-        d.base = { F: [0, 1, 2].map(i => D.median(first.map(f => f.F[i]))), f0: D.median(first.map(f => f.f0)) };
+        d[bk] = { F: [0, 1, 2].map(i => D.median(first.map(f => f.F[i]))), f0: D.median(first.map(f => f.f0)) };
       } else {
-        cue.textContent = state.running ? `Hold the starting sound steadily (${Math.round(fr.length / NEED.isoBase * 100)}%).` : 'Start the microphone, then hold the starting sound.';
-        $('iso-state').textContent = '';
+        cue.textContent = demo ? (exSrc ? `Demo playing (${demoLabel}): it holds its starting sound first.` : 'That was the demo voice. Hold the starting sound to begin yourself.')
+          : state.running ? `Hold the starting sound steadily (${Math.round(fr.length / NEED.isoBase * 100)}%).` : 'Start the microphone, then hold the starting sound.';
+        $('iso-state').textContent = demo ? 'demo voice' : '';
         drawTract($('cv-tract-iso'), null, D.VOWEL_BY_KEY[def.vowel], null);
         return;
       }
     }
+    const base = d[bk];
     const recent = fr.filter(f => frameCount - f.n < 30); // about the last half second
     const fresh = recent.length >= 6;
-    $('iso-state').textContent = 'starting point set';
+    $('iso-state').textContent = demo ? 'demo voice' : 'starting point set';
     if (!fresh) {
-      cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
+      if (demo && !exSrc) cue.textContent = 'That was the demo voice. Make the movement yourself to see your own reading.';
+      else if (!demo) cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
       return;
     }
     const F = [0, 1, 2].map(i => D.median(recent.map(f => f.F[i]))), f0 = D.median(recent.map(f => f.f0));
-    const r = D.isolation(def.kind, d.base.F, F, d.base.f0, f0);
+    const r = D.isolation(def.kind, base.F, F, base.f0, f0);
     const vals = [...r.dev.map(x => x * 100), r.semis];
     vals.forEach((v, i) => {
       const scale = i === 3 ? 8 : 30; // full track = +-30% or +-8 semitones
@@ -1695,8 +1783,14 @@
       m.classList.toggle('ok', ISO_MAIN[def.kind].includes(i) && r.moved);
       $('iso-v' + i).textContent = i === 3 ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}` : `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
     });
-    renderTractRead($('tract-read-iso'), drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, d.base.F));
+    renderTractRead($('tract-read-iso'), drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, base.F, demo ? 'Solid line: the demo voice (estimated)' : ''));
     const main = ISO_MAIN[def.kind];
+    if (demo) {
+      cue.textContent = `Demo voice, ${demoLabel}: ${r.ok ? (def.kind === 'pitch' ? 'pitch moves while the formants hold still' : 'the right part moves on its own')
+        : r.moved || Math.max(...r.dev.map(Math.abs)) >= 0.06 ? 'the wrong part moved, so the check would not count it' : 'holding its starting point'}.`;
+      cue.classList.toggle('ok', r.ok);
+      return;
+    }
     if (main[0] < 3) d.best = Math.max(d.best, ...main.map(i => Math.abs(r.dev[i])));
     else d.best = Math.max(d.best, Math.abs(r.semis));
     if (r.ok) cue.textContent = def.kind === 'pitch' ? 'Pitch moved and the formants held still. That is the separation you want.' : 'Isolated: the right formant is moving on its own.';
