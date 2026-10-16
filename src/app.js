@@ -73,6 +73,43 @@
         'Finish in the zone and hold it there.',
       ] },
   ];
+  // Prosody: intonation patterns, checked on each spoken phrase from its pitch contour (semitones
+  // around the phrase's own median, so they work at any pitch). check() returns {ok, value, text}.
+  const rise = (n, top) => (wi, u) => (wi < n - 1 ? 1.02 - 0.03 * wi / Math.max(1, n - 1) : 0.99 + (top - 0.99) * u * u);
+  DRILLS.prosody = [
+    { id: 'pr-question', type: 'prosody', cue: 'Question rise', sub: 'end higher', title: 'Rise at the end of a question',
+      say: "You're coming tonight?", f0At: rise(3, 1.45),
+      why: 'Yes/no questions usually rise at the end. A clear, smooth rise sounds engaged and friendly; it is one of the easiest ways to bring more melody into speech.',
+      steps: ['Say the question naturally, as if you really want to know.', 'Let the pitch climb on the last word, "tonight", rather than on the whole sentence.', 'Pause after each try so the app can read the phrase.'],
+      check: (s) => ({ ok: s.end >= 3, value: s.end, text: s.end >= 3 ? `Rose ${s.end.toFixed(1)} semitones at the end. That is a clear question rise.` : s.end > 0.8 ? `A small rise (${s.end.toFixed(1)} semitones). Lift the last word a little more.` : 'The end did not rise. Let "tonight" climb, as if surprised.' }) },
+    { id: 'pr-statement', type: 'prosody', cue: 'Settled statement', sub: 'end lower', title: 'Fall at the end of a statement',
+      say: "I'm going home now.", f0At: (wi, u) => 1.12 - 0.08 * wi - (wi === 3 ? 0.14 * u : 0),
+      why: 'Statements usually settle downward at the end. Ending with a rise on a statement (uptalk) can sound unsure; a gentle fall sounds calm and certain without being flat.',
+      steps: ['Say the sentence as a plain fact.', 'Let the pitch settle down on "now", like putting something down gently.', 'Pause after each try.'],
+      check: (s) => ({ ok: s.end <= -1.5, value: -s.end, text: s.end <= -1.5 ? `Settled down ${(-s.end).toFixed(1)} semitones at the end. Calm and certain.` : s.end > 0.8 ? 'That ended with a rise, which sounds like a question. Let "now" fall.' : 'Nearly level at the end. Let the last word drop a little further.' }) },
+    { id: 'pr-pair', type: 'prosody', cue: 'Statement, then question', sub: 'fall, then rise', title: 'Same words, two tunes', pair: true,
+      say: "It's raining. / It's raining?",
+      why: 'Saying the same words as a statement and then as a question isolates the tune from the words. You hear and feel that the meaning lives in the pitch contour.',
+      steps: ['Say "It\'s raining." as a fact, letting it fall at the end. Pause.', 'Then say "It\'s raining?" as a surprised question, rising at the end. Pause.', 'The app checks the first phrase for a fall and the second for a rise.'],
+      check: (s, step) => step === 0
+        ? ({ ok: s.end <= -1, value: -s.end, text: s.end <= -1 ? 'Statement fell. Now ask it as a question.' : 'For the statement, let the end fall. Try the statement again.' })
+        : ({ ok: s.end >= 2.5, value: s.end, text: s.end >= 2.5 ? `Question rose ${s.end.toFixed(1)} semitones. Two clear tunes.` : 'For the question, lift the end more. Start again with the statement.' }) },
+    { id: 'pr-range', type: 'prosody', cue: 'Expressive range', sub: 'wider melody', title: 'Use more of your range',
+      say: "Oh, that's wonderful!", f0At: (wi, u) => [1.25, 0.98, 1.0 + 0.45 * Math.sin(Math.PI * Math.min(1, u * 1.6))][wi] || 1,
+      why: 'Lively speech moves across a wider pitch range. Feminine-coded speech often uses a wider, more varied range; masculine-coded speech often uses a narrower one. Either way, controlling range is a skill of its own.',
+      steps: (fem) => [fem ? 'Say it with real delight: lift high on "won-" and let it come down after.' : 'Say it warmly with some lift on "won-", then settle down.', 'Keep the voice light; reach with melody, not volume.', 'Pause after each try.'],
+      check: (s, step, fem) => { const need = fem ? 7 : 4.5; return { ok: s.span >= need, value: s.span, text: s.span >= need ? `Used ${s.span.toFixed(1)} semitones of range. Nicely expressive.` : `Used ${s.span.toFixed(1)} semitones. Aim for about ${need}: reach higher on the excited word.` }; } },
+    { id: 'pr-stress', type: 'prosody', cue: 'Stress one word', sub: 'pitch accent', title: 'Lift the word that matters',
+      say: 'I wanted the RED one, not the blue one.', f0At: (wi, u) => (wi === 3 ? 1.0 + 0.4 * Math.sin(Math.PI * u) : 1.05 - 0.02 * wi),
+      why: 'English marks the important word with a pitch accent: a quick lift (or dip) on its stressed syllable. Clear accents make speech sound engaged and easy to follow.',
+      steps: ['Say the sentence, giving "RED" a clear lift in pitch, not just more volume.', 'Keep the rest of the sentence relaxed so the accent stands out.', 'Pause after each try.'],
+      check: (s) => ({ ok: s.peak >= 3.5, value: s.peak, text: s.peak >= 3.5 ? `The accent stood ${s.peak.toFixed(1)} semitones above your line. Clear emphasis.` : `The highest point was ${s.peak.toFixed(1)} semitones above your line. Lift "RED" more.` }) },
+    { id: 'pr-lilt', type: 'prosody', cue: 'Melody, not monotone', sub: 'pitch movement', title: 'Let the pitch move',
+      say: 'Hi there, how have you been lately?', f0At: (wi, u) => 1 + 0.18 * Math.sin(1.7 * wi + 3 * u) + (wi === 5 ? 0.3 * u * u : 0),
+      why: 'A monotone keeps the pitch almost still. Natural, friendly speech keeps the pitch moving gently up and down across the sentence.',
+      steps: (fem) => [fem ? 'Say it warmly and let the pitch rise and fall across the words, like a friendly greeting.' : 'Say it in a relaxed, friendly way with gentle ups and downs.', 'Think of the melody of the words rather than their loudness.', 'Pause after each try.'],
+      check: (s, step, fem) => { const need = fem ? 2.4 : 1.6; return { ok: s.sd >= need, value: s.sd, text: s.sd >= need ? `Pitch movement ${s.sd.toFixed(1)} (goal ${need}+). It has a melody.` : `Pitch movement ${s.sd.toFixed(1)}; aim for ${need}+. Let the pitch travel more between words.` }; } },
+  ];
   // Control exercises: move one part of the tract and check that the matching formant (and only it)
   // moves, to build trust in what the feedback is tracking.
   DRILLS.control = [
@@ -540,7 +577,8 @@
     ensureCtx();
     stopExample();
     const fs = ctx.sampleRate;
-    const x = mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
+    const fem = state.goal === 'fem';
+    const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     const ab = ctx.createBuffer(1, x.length, fs);
     ab.copyToChannel(x, 0);
     const src = ctx.createBufferSource();
@@ -725,6 +763,7 @@
       }
       if (d && d.def.type === 'breath') d.breathFr.push(fr.breath);
     }
+    if (d && d.def.type === 'prosody') d.pts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
     if (d && d.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) d.isoFr.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
@@ -790,17 +829,17 @@
       b.innerHTML = `<span class="cue"></span><span class="sub"></span><span class="last"></span>`;
       b.querySelector('.cue').textContent = def.cue;
       b.querySelector('.sub').textContent = def.sub;
-      b.querySelector('.last').textContent = last != null ? 'last ' + Math.round(last) : ' ';
+      b.querySelector('.last').textContent = last != null ? 'last ' + (def.type === 'prosody' ? last.toFixed(1) + ' st' : Math.round(last)) : ' ';
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
       state.plan.status = 'paused'; renderPlan();
     }
-    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], isoFr: [], inZone: 0, offTarget: null, result: null };
+    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], isoFr: [], pts: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
     renderDrillGrid();
     renderDrillPanel();
@@ -819,6 +858,7 @@
     if (!d) return;
     if (d.def.type === 'breath') return renderBreathPanel(d);
     if (d.def.type === 'iso') return renderIsoPanel(d);
+    if (d.def.type === 'prosody') return renderProsodyPanel(d);
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
       <p class="drill-title"></p>
@@ -1228,6 +1268,7 @@
     const def = d.def;
     if (def.type === 'breath') return updateBreath(d);
     if (def.type === 'iso') return updateIso(d);
+    if (def.type === 'prosody') return updateProsody(d);
     let prog;
     if (def.type === 'vowel') prog = d.vowelFr.length / NEED.vowel;
     else if (def.type === 'sib') prog = d.sibFr.length / NEED.sib;
@@ -1322,6 +1363,101 @@
     session.drills.push({ id: def.id, label: def.cue, score: Math.round(score), at: d.result.at, kind: 'breath' });
     renderDrillGrid(); renderSession();
     $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Do it again, or try another exercise.`;
+    $('drill-again').hidden = false;
+    autoSave('drill finished');
+  }
+
+  // ---------------- prosody exercises ----------------
+  const NEED_PROS = 2; // passing phrases to finish an exercise (one statement+question for the pair)
+  function prosodyExample(fs, def, fem) {
+    const o = { pitch: fem ? 205 : 115, res: fem ? 100 : 0, bright: fem ? 65 : 40, rate: 0.95 };
+    if (!def.pair) return Synth.readText(fs, def.say.split(/\s+/), D.VOWELS, { ...o, f0At: def.f0At }).x;
+    const a = Synth.readText(fs, ["It's", 'raining.'], D.VOWELS, { ...o, f0At: (wi, u) => (wi === 0 ? 1.08 : 1.02 - 0.2 * u) }).x;
+    const b = Synth.readText(fs, ["It's", 'raining?'], D.VOWELS, { ...o, f0At: (wi, u) => (wi === 0 ? 1.0 : 0.98 + 0.45 * u * u) }).x;
+    const out = new Float32Array(a.length + b.length); out.set(a); out.set(b, a.length); return out;
+  }
+  function renderProsodyPanel(d) {
+    const p = $('drill-panel'), def = d.def, fem = state.goal === 'fem';
+    p.innerHTML = `
+      <p class="eyebrow"><span>Prosody exercise</span><span>${def.sub}</span></p>
+      <p class="drill-title"></p>
+      <p class="pr-say"></p>
+      <p class="drill-help"></p>
+      <ol class="breath-steps"></ol>
+      <div class="btn-row"><button type="button" class="btn" id="ex-play">Play example</button></div>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>Your last phrase</span><span id="pr-state" class="trend"></span></p>
+        <p class="coach-cue" id="pr-cue"></p>
+        <canvas id="cv-pros" height="150"></canvas>
+        <p class="coach-why">The line is your pitch in semitones around your own middle pitch, so it works at any voice pitch. Pause briefly after each phrase so the app knows it ended.</p>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
+      <p class="drill-msg" id="drill-msg"></p>
+      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    p.querySelector('.pr-say').textContent = def.say;
+    p.querySelector('.drill-help').textContent = def.why;
+    const ol = p.querySelector('.breath-steps');
+    for (const t of (typeof def.steps === 'function' ? def.steps(fem) : def.steps)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    $('drill-again').addEventListener('click', () => selectDrill(def));
+    d.passes = 0; d.step = 0; d.last = null; d.best = null;
+    $('pr-cue').textContent = state.running ? `Say: ${def.say}` : 'Start the microphone, then say the phrase.';
+    $('drill-msg').textContent = '';
+    drawProsody(d);
+  }
+  // A phrase ends after half a second without voicing; then it is checked and drawn.
+  function updateProsody(d) {
+    const pts = d.pts; if (!pts.length) return;
+    const now = performance.now();
+    let lastV = -1; for (let i = pts.length - 1; i >= 0; i--) if (pts[i].f0 > 0) { lastV = i; break; }
+    if (lastV < 0) { if (pts.length > 600) pts.length = 0; return; }
+    const voicedMs = pts.filter(q => q.f0 > 0).length * 16;
+    const ended = now - pts[lastV].t > 500 || now - pts[0].t > 7000;
+    if (!ended) return;
+    const first = pts.findIndex(q => q.f0 > 0);
+    const phrase = pts.slice(first, lastV + 1);
+    pts.length = 0;
+    if (voicedMs < 400) return; // too short to be a phrase
+    const s = D.prosodyStats(phrase); if (!s || d.result) return;
+    const def = d.def, fem = state.goal === 'fem', r = def.check(s, d.step, fem);
+    d.last = { s, r };
+    if (def.pair) {
+      if (d.step === 0) d.step = r.ok ? 1 : 0;
+      else { d.step = 0; if (r.ok) d.passes = NEED_PROS; }
+    } else if (r.ok) d.passes++;
+    if (r.ok) d.best = d.best == null ? r.value : Math.max(d.best, r.value);
+    const cue = $('pr-cue'); if (!cue) return;
+    cue.textContent = r.text; cue.classList.toggle('ok', r.ok);
+    $('pr-state').textContent = `${s.dur.toFixed(1)} s · range ${s.span.toFixed(1)} st`;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(d.passes / NEED_PROS * 100, 0, 100) + '%';
+    if (!def.pair) $('drill-msg').textContent = `${d.passes} of ${NEED_PROS} phrases on target.`;
+    drawProsody(d);
+    if (d.passes >= NEED_PROS) finishProsody(d);
+  }
+  function drawProsody(d) {
+    const cv = $('cv-pros'); if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, ax = 30 * dpr;
+    const y = (st) => h / 2 - clamp(st, -10, 10) / 10 * (h / 2 - 8 * dpr);
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = dpr;
+    for (const st of [-6, 0, 6]) { g.beginPath(); g.moveTo(ax, y(st)); g.lineTo(w, y(st)); g.stroke(); g.fillText((st > 0 ? '+' : '') + st, ax - 5 * dpr, y(st) + 4 * dpr); }
+    if (!d.last) { g.textAlign = 'center'; g.fillText('Say the phrase, then pause', (w + ax) / 2, h / 2 - 6 * dpr); return; }
+    const c = d.last.s.contour, t0 = c[0].t, t1 = c[c.length - 1].t || t0 + 1;
+    const x = (t) => ax + 6 * dpr + (t - t0) / Math.max(1, t1 - t0) * (w - ax - 12 * dpr);
+    g.strokeStyle = d.last.r.ok ? C.good : C.ink; g.lineWidth = 2.4 * dpr; g.lineJoin = 'round';
+    g.beginPath(); let pen = false, prevT = 0;
+    for (const q of c) { if (pen && q.t - prevT > 120) pen = false; pen ? g.lineTo(x(q.t), y(q.s)) : g.moveTo(x(q.t), y(q.s)); pen = true; prevT = q.t; }
+    g.stroke();
+  }
+  function finishProsody(d) {
+    const def = d.def;
+    d.result = { id: def.id, score: d.best, at: Date.now() };
+    state.lastScores[def.id] = d.best;
+    session.drills.push({ id: def.id, label: def.cue, score: Math.round(d.best * 10) / 10, at: d.result.at, kind: 'prosody' });
+    renderDrillGrid(); renderSession();
+    $('drill-msg').textContent = def.pair ? 'Done: a clear fall and a clear rise on the same words. Do it again, or try another exercise.' : `Done: ${NEED_PROS} phrases on target. Do it again, or try another exercise.`;
     $('drill-again').hidden = false;
     autoSave('drill finished');
   }
@@ -2362,7 +2498,7 @@
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
     $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem');

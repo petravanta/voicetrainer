@@ -9,6 +9,7 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 - **Pitch tracking** (YIN), with optional words over the pitch track ("Show words"): words appear faded as they are recognised and firm up when final (browser speech recognition; in Chrome and Edge that audio is sent to Google or Microsoft). In reading practice the words come from the passage as the highlight moves, without recognition.
 - **Control exercises**: move only the jaw, tongue, lips or larynx (or only the pitch) and see that just the matching formant moves, to build trust in the feedback.
 - **Breathiness** estimate (0–100) from cepstral peak prominence (CPP), with breath exercises (Big dog / little dog, sigh to clear tone, whisper to voice, clean onset, hum into a vowel, breathy-clear-pressed) and a live gauge.
+- **Prosody exercises**: question rise, settled statement, statement-then-question, expressive range, stressing one word and melody vs monotone. Each spoken phrase is checked from its pitch contour in semitones around your own middle pitch, with a synthesized example for each.
 - **Guided exercises** built from your weakest vowels and sibilants, with synthesized reference examples and before/after scores.
 - **Live spectrogram** with goal markers for the current vowel.
 - **Live drill coach**: one concrete adjustment at a time (jaw, tongue, lips/larynx) with per-formant gauges.

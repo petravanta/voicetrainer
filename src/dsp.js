@@ -578,6 +578,32 @@
   }
 
 
+  // ---------- prosody (intonation) ----------
+  // pts: [{t (ms), f0 (Hz, 0 when unvoiced)}] for one phrase. Works in semitones around the
+  // phrase's median pitch. end = how far the last eighth of the voicing sits above (+) or below (-)
+  // the middle of the phrase; span = 10th to 90th percentile range; sd = spread; peak = how far the
+  // highest moment sits above the median, and where it falls (0 = start, 1 = end).
+  function prosodyStats(pts) {
+    const v = pts.filter(p => p.f0 > 0);
+    if (v.length < 12) return null;
+    const med = median(v.map(p => p.f0));
+    const st = v.map(p => ({ t: p.t, s: 12 * Math.log2(p.f0 / med) }));
+    // light smoothing so a single bad frame does not count as a peak or an ending
+    const sm = st.map((p, i) => ({ t: p.t, s: median(st.slice(Math.max(0, i - 2), i + 3).map(q => q.s)) }));
+    const n = sm.length, ss = sm.map(p => p.s);
+    const mid = median(ss.slice(Math.floor(n * 0.3), Math.ceil(n * 0.7)));
+    const end = median(ss.slice(Math.min(n - 4, Math.floor(n * 0.88)))) - mid; // the last eighth: where a final rise or fall lands
+    let pi = 0; for (let i = 1; i < n; i++) if (ss[i] > ss[pi]) pi = i;
+    const t0 = sm[0].t, t1 = sm[n - 1].t;
+    const mean = ss.reduce((a, b) => a + b, 0) / n;
+    return {
+      medianHz: med, end, span: quantile(ss, 0.9) - quantile(ss, 0.1),
+      sd: Math.sqrt(ss.reduce((a, b) => a + (b - mean) ** 2, 0) / n),
+      peak: ss[pi], peakAt: t1 > t0 ? (sm[pi].t - t0) / (t1 - t0) : 0.5,
+      dur: (t1 - t0) / 1000, contour: sm,
+    };
+  }
+
   // ---------- word labels for the pitch track ----------
   // Speech recognition gives words but no timings. Spread the words over the voiced frames heard
   // since the previous result: one word per voiced stretch when the counts match, otherwise by
@@ -608,7 +634,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, prosodyStats, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
