@@ -28,5 +28,18 @@ for (let end = an.needed; end <= x.length; end += hop) {
 }
 check(Math.abs(tr.count - n) <= Math.ceil(n * 0.15), `counted ${tr.count} syllable nuclei of ${n}`);
 check(pauses >= 2, `noticed ${pauses} long pauses (sentence breaks)`);
+// Recognised words land on the voiced stretches of the pitch track.
+{
+  const D2 = require('../src/dsp.js');
+  const frames = (a, b) => { const r = []; for (let t = a; t <= b; t += 15) r.push(t); return r; };
+  const t = [...frames(0, 300), ...frames(600, 900)];
+  const p = D2.placeWords(['hello', 'there'], t);
+  const ok1 = p.length === 2 && p[0].t0 === 0 && p[1].t0 === 600;
+  if (!ok1) fails++; console.log((ok1 ? 'ok   ' : 'FAIL ') + 'words: one word per voiced stretch');
+  const q = D2.placeWords(['a', 'wonderful', 'day'], frames(0, 1000));
+  const ok2 = q.length === 3 && q[0].t1 <= q[1].t0 + 1 && q[1].t1 - q[1].t0 > q[0].t1 - q[0].t0 && q[2].t1 <= 1016;
+  if (!ok2) fails++; console.log((ok2 ? 'ok   ' : 'FAIL ') + 'words: spread by syllables inside one stretch');
+}
 console.log(fails ? `\n${fails} failed` : '\nall reading checks passed');
 process.exit(fails ? 1 : 0);
+

@@ -577,10 +577,38 @@
     reset() { this.gap = 3; this.hist.length = 0; this.pitchHist.length = 0; }
   }
 
+
+  // ---------- word labels for the pitch track ----------
+  // Speech recognition gives words but no timings. Spread the words over the voiced frames heard
+  // since the previous result: one word per voiced stretch when the counts match, otherwise by
+  // syllable count along the voiced time. times: ascending ms timestamps of voiced frames.
+  function placeWords(words, times, gapMs = 120) {
+    words = words.filter(w => /[a-z0-9]/i.test(w));
+    if (!words.length || !times.length) return [];
+    const segs = [];
+    for (const t of times) {
+      const s = segs[segs.length - 1];
+      if (s && t - s[1] <= gapMs) s[1] = t; else segs.push([t, t]);
+    }
+    for (const s of segs) s[1] += 15; // a frame lasts about 15 ms
+    if (segs.length === words.length) return words.map((w, i) => ({ w, t0: segs[i][0], t1: segs[i][1] }));
+    const total = segs.reduce((a, s) => a + s[1] - s[0], 0);
+    const at = (pos) => { // voiced position (ms) -> clock time
+      for (const s of segs) { const d = s[1] - s[0]; if (pos <= d) return s[0] + pos; pos -= d; }
+      return segs[segs.length - 1][1];
+    };
+    const wt = words.map(w => Math.max(1, countSyllables(w))), sum = wt.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    return words.map((w, i) => {
+      const p0 = acc / sum * total; acc += wt[i];
+      return { w, t0: at(p0 + 0.01), t1: at(acc / sum * total) };
+    });
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

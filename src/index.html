@@ -24,8 +24,9 @@
     <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
     <button type="button" id="btn-demo" class="btn">Play demo voice</button>
     <button type="button" id="btn-demo-set" class="btn">Demo voice settings</button>
-    <button type="button" id="btn-read" class="btn">Reading practice</button>
+    <button type="button" id="btn-read" class="btn">Reading<span class="pm-long"> practice</span></button>
     <button type="button" id="btn-stop" class="btn" hidden>Stop</button>
+    <button type="button" id="btn-phone" class="btn" aria-pressed="false">Phone mode</button>
     <span id="src-status" class="status" role="status">Not listening</span>
   </section>
   <p id="mic-note" class="note" hidden></p>
@@ -96,8 +97,11 @@
     </figure>
 
     <figure class="chart pitch-fig">
-      <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small></figcaption>
+      <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small>
+        <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words</label></figcaption>
       <canvas id="cv-pitch" height="200"></canvas>
+      <p class="pw-note" id="pitch-words-note" hidden></p>
+      <p class="pw-privacy">Show words uses your browser's speech recognition. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. Word positions are estimated from where you were voicing.</p>
     </figure>
   </section>
 
@@ -170,7 +174,8 @@
     </div>
   </section>
 
-  <div id="reader" class="reader" role="dialog" aria-modal="true" aria-labelledby="reader-title" hidden>
+  <button type="button" id="reader-tab" class="reader-tab" hidden aria-label="Show reading practice">Reading practice</button>
+  <div id="reader" class="reader" role="complementary" aria-labelledby="reader-title" hidden>
     <div class="reader-bar">
       <h2 id="reader-title" class="reader-h">Reading practice</h2>
       <label class="reader-field"><span>Passage</span><select id="reader-pick"></select></label>
@@ -189,6 +194,8 @@
         <button type="button" class="btn" id="reader-focus" aria-pressed="true">Focus line on</button>
         <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>
         <button type="button" class="btn" id="reader-bigger" aria-label="Larger text">A+</button>
+        <button type="button" class="btn" id="reader-full" aria-pressed="false">Full screen</button>
+        <button type="button" class="btn" id="reader-collapse">Hide pane</button>
         <button type="button" class="btn" id="reader-close">Close</button>
       </div>
     </div>
@@ -200,7 +207,7 @@
       <span id="rh-hint" class="rh-hint"></span>
     </div>
     <div class="reader-track" id="reader-track" aria-hidden="true"><div class="track-inner" id="track-inner"></div></div>
-    <div class="reader-stage" id="reader-stage">
+    <div class="reader-stage" id="reader-stage" tabindex="-1">
       <div id="reader-text" class="reader-text"></div>
       <form id="reader-form" class="reader-form" hidden>
         <label class="reader-field"><span>Title</span><input type="text" id="rf-title" maxlength="80" required></label>
