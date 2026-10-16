@@ -329,11 +329,10 @@
 
   // ---- recognised words over the pitch track (browser speech recognition, mic only) ----
   const Words = {
-    KEY: 'voicetrainer.pitchwords', on: false, rec: null, labels: [], lastT: 0, interim: '', note: '',
+    KEY: 'voicetrainer.pitchwords', on: false, rec: null, labels: [], lastT: 0, interim: [], note: '', readerIdx: -1,
     supported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
     init() {
       const box = $('pitch-words'); if (!box) return;
-      if (!this.supported()) { box.disabled = true; box.parentElement.title = 'This browser has no speech recognition (try Chrome, Edge or Safari).'; this.setNote('This browser cannot recognise speech, so the pitch track has no words.'); return; }
       try { this.on = localStorage.getItem(this.KEY) === '1'; } catch (e) {}
       box.checked = this.on;
       box.addEventListener('change', () => { this.on = box.checked; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} this.sync(); });
@@ -342,11 +341,17 @@
     setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } },
     // Run recognition only while the switch is on and the microphone is live.
     sync() {
-      const want = this.on && state.running === 'mic';
+      // In reading practice the words come from the passage itself (the highlighted word), so
+      // recognition is not needed there.
+      const reading = typeof Reader !== 'undefined' && Reader.open && !Reader.collapsed;
+      const want = this.on && state.running === 'mic' && !reading && this.supported();
       if (want && !this.rec) this.start();
       else if (!want && this.rec) this.stop();
-      if (this.on && !want) this.setNote('Words appear while the microphone is on.');
-      else if (!this.on) this.setNote('');
+      if (!reading) this.readerIdx = -1;
+      if (!this.on) this.setNote('');
+      else if (reading) this.setNote('In reading practice the words come from the passage as the highlight moves.');
+      else if (!this.supported()) this.setNote('This browser cannot recognise speech, so words only appear during reading practice.');
+      else if (state.running !== 'mic') this.setNote('Words appear while the microphone is on.');
     },
     start() {
       const R = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -357,9 +362,10 @@
         let interim = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const res = e.results[i], text = res[0].transcript.trim();
-          if (res.isFinal) this.place(text, true); else interim += ' ' + text;
+          if (res.isFinal) this.place(text); else interim += ' ' + text;
         }
-        this.interim = interim.trim();
+        // words still being recognised show straight away (faded) and firm up when final
+        this.interim = D.placeWords(interim.trim().split(/\s+/).filter(Boolean), this.voicedSince(this.lastT));
       };
       r.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { this.setNote('Speech recognition was blocked, so no words are shown.'); this.on = false; const b = $('pitch-words'); if (b) b.checked = false; }
@@ -368,14 +374,25 @@
       r.onend = () => { if (this.rec === r) { if (this.on && state.running === 'mic') { try { r.start(); } catch (err) { this.rec = null; } } else this.rec = null; } };
       try { r.start(); this.setNote(''); } catch (err) { this.rec = null; }
     },
-    stop() { const r = this.rec; this.rec = null; this.interim = ''; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
+    stop() { const r = this.rec; this.rec = null; this.interim = []; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
+    voicedSince(t) { const times = []; for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > t) times.push(pitchT[i]); return times; },
     // Final result: spread its words over the voiced frames since the previous result.
-    place(text, final) {
-      const now = performance.now(), times = [];
-      for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > this.lastT) times.push(pitchT[i]);
-      const words = text.split(/\s+/).filter(Boolean);
-      for (const p of D.placeWords(words, times)) this.labels.push(p);
-      if (final) this.lastT = now;
+    place(text) {
+      const now = performance.now();
+      for (const p of D.placeWords(text.split(/\s+/).filter(Boolean), this.voicedSince(this.lastT))) this.labels.push(p);
+      this.lastT = now; this.interim = [];
+      while (this.labels.length > 60) this.labels.shift();
+    },
+    // Reading practice: label the passage word the highlight has just moved to.
+    readerWord(idx, words) {
+      if (!this.on || idx === this.readerIdx) return;
+      // if the highlight skipped ahead a few words, label them together
+      const from = idx > this.readerIdx && idx - this.readerIdx <= 4 ? this.readerIdx + 1 : idx;
+      const text = words.slice(from, idx + 1).map(x => x.text).join(' ');
+      this.readerIdx = idx;
+      const now = performance.now(), last = this.labels[this.labels.length - 1];
+      if (last && last.open) { last.t1 = now; last.open = false; }
+      this.labels.push({ w: text.replace(/^[^\w']+|[^\w']+$/g, ''), t0: now, t1: now + 1e9, open: true });
       while (this.labels.length > 60) this.labels.shift();
     },
     xAt(t, w, dx) { // clock time -> x on the pitch track, via the frame timestamps
@@ -385,22 +402,26 @@
       return w - (n - lo) * dx;
     },
     draw(g, w, h, axisW, dx, y) {
-      if (!this.on || (!this.labels.length && !this.interim)) return;
+      if (!this.on || (!this.labels.length && !this.interim.length)) return;
       const dpr = dprOf();
-      g.font = `600 ${12 * dpr}px ${C.font}`; g.textAlign = 'left'; g.textBaseline = 'top';
-      let lastEnd = -1e9;
-      for (const L of this.labels) {
+      g.textAlign = 'left'; g.textBaseline = 'top';
+      // two staggered rows so short, quick words don't push each other off their place
+      const lastEnd = [-1e9, -1e9];
+      const one = (L, faded) => {
+        if (!L.w) return;
         const x0 = this.xAt(L.t0, w, dx), x1 = this.xAt(L.t1, w, dx);
-        if (x1 < axisW) continue;
-        const xs = Math.max(axisW + 2 * dpr, x0, lastEnd + 4 * dpr), tw = g.measureText(L.w).width;
-        g.strokeStyle = C.muted; g.globalAlpha = 0.25; g.beginPath(); g.moveTo(Math.max(axisW, x0), 20 * dpr); g.lineTo(Math.max(axisW, x0), h); g.stroke(); g.globalAlpha = 1;
-        g.fillStyle = C.ink; g.fillText(L.w, xs, 6 * dpr);
-        lastEnd = xs + tw;
-      }
-      if (this.interim) {
-        g.fillStyle = C.muted; g.textAlign = 'right'; g.font = `italic ${11 * dpr}px ${C.font}`;
-        g.fillText(this.interim.split(/\s+/).slice(-4).join(' ') + '…', w - 4 * dpr, 22 * dpr);
-      }
+        if (x1 < axisW) return;
+        g.font = `${faded ? 'italic 500' : '600'} ${12 * dpr}px ${C.font}`;
+        const x = Math.max(axisW + 2 * dpr, x0), tw = g.measureText(L.w).width;
+        const row = x >= lastEnd[0] + 4 * dpr ? 0 : x >= lastEnd[1] + 4 * dpr ? 1 : lastEnd[0] <= lastEnd[1] ? 0 : 1;
+        const xs = Math.max(x, lastEnd[row] + 4 * dpr);
+        g.strokeStyle = C.muted; g.globalAlpha = 0.25; g.beginPath(); g.moveTo(Math.max(axisW, x0), 34 * dpr); g.lineTo(Math.max(axisW, x0), h); g.stroke();
+        g.globalAlpha = faded ? 0.55 : 1;
+        g.fillStyle = C.ink; g.fillText(L.w, xs, (row ? 21 : 5) * dpr); g.globalAlpha = 1;
+        lastEnd[row] = xs + tw;
+      };
+      for (const L of this.labels) one(L, false);
+      for (const L of this.interim) one(L, true);
       g.textBaseline = 'alphabetic';
     },
   };
@@ -1952,6 +1973,7 @@
     },
     paint() {
       const els = this.words;
+      if (els[this.idx] && (state.running === 'mic' || this.synth || this.tts)) Words.readerWord(this.idx, els);
       els.forEach((w, j) => {
         w.el.classList.toggle('past', j < this.idx);
         w.el.classList.toggle('cur', j === this.idx);
@@ -2238,6 +2260,7 @@
       document.body.classList.toggle('reading-full', shown && !!this.full);
       $('reader-full').textContent = this.full ? 'Side pane' : 'Full screen';
       $('reader-full').setAttribute('aria-pressed', String(!!this.full));
+      Words.sync();
       window.dispatchEvent(new Event('resize')); // charts re-fit to the narrower page
     },
     setFull(on) { this.full = on; try { localStorage.setItem('voicetrainer.readerfull', on ? '1' : '0'); } catch (e) {} this.layout(); requestAnimationFrame(() => this.paintTrack()); },
