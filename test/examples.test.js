@@ -57,5 +57,11 @@ for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50],
   const flat = D.prosodyStats(contour(S.readText(fs, ['Hi', 'there', 'how', 'are', 'you'], D.VOWELS, { ...o, f0At: () => 1 }).x));
   check(flat && flat.sd < 1 && flat.span < 2, `prosody: monotone reads as flat (sd ${flat && flat.sd.toFixed(2)})`);
 }
+// An octave slip in the pitch tracker must not read as a big pitch movement.
+{
+  const pts = []; for (let i = 0; i < 120; i++) pts.push({ t: i * 16, f0: i % 30 === 10 || i % 30 === 11 ? 410 : 205 });
+  const s = D.prosodyStats(pts);
+  check(s && s.span < 1 && s.sd < 1, `prosody: octave slips are folded back (span ${s && s.span.toFixed(2)})`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall examples on target');
 process.exit(fails ? 1 : 0);
