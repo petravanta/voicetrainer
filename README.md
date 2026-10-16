@@ -15,7 +15,7 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 - **Vocal tract sketch**: a side view of one plausible tract shape for your formants (jaw from F1, tongue from F2, lips from F3, larynx height from the shared shift), with the goal shape and the recommended change drawn on top.
 - **Reading practice**: a collapsible side pane (bottom sheet on phones, or full screen) so the rest of the app stays usable, with a large-text reading view with karaoke-style highlighting that follows your syllables (or a steady pace, or tap to advance), plus an optional large single-line focus track that keeps the current word centred. Built-in texts include the Rainbow Passage (Fairbanks, 1960) and the Grandfather Passage (Van Riper, 1963), plus your own. "Hear it read" reads the passage aloud, either with the browser's speech voice (real words; the meters follow it through the microphone) or with the synthetic demo voice, which goes straight into the analyser so every meter tracks it live.
 - **Demo voice settings**: voice type, pitch, resonance and brightness for the synthetic demo voice; type, pitch and speed for the reading voice.
-- **Phone mode**: a streamlined layout (meter, pitch, drills) for practising on the go; keeps the screen awake while the microphone runs. Add `?phone=1` to the URL to open in it.
+- **Phone mode** (View: Desktop / Phone switch at the top): a streamlined layout (meter, pitch, drills) for practising on the go; keeps the screen awake while the microphone runs. Add `?phone=1` to the URL to open in it.
 - **Progress history** stored locally.
 
 Everything runs in the browser; no audio leaves your machine.

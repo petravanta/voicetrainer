@@ -16,6 +16,11 @@
       <button type="button" id="goal-fem" role="radio" aria-checked="true">Feminine</button>
       <button type="button" id="goal-masc" role="radio" aria-checked="false">Masculine</button>
     </div>
+    <div class="goal view-mode" role="radiogroup" aria-label="Layout">
+      <span class="goal-label">View</span>
+      <button type="button" id="view-desk" role="radio" aria-checked="true" aria-label="Desktop view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.2"/><path d="M5.5 13.5h5M8 11v2.5"/></svg><span>Desktop</span></button>
+      <button type="button" id="view-phone" role="radio" aria-checked="false" aria-label="Phone view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.4"/><path d="M7 12.3h2"/></svg><span>Phone</span></button>
+    </div>
   </header>
 
   <section class="sourcebar" aria-label="Audio source">
@@ -24,9 +29,8 @@
     <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
     <button type="button" id="btn-demo" class="btn">Play demo voice</button>
     <button type="button" id="btn-demo-set" class="btn">Demo voice settings</button>
-    <button type="button" id="btn-read" class="btn">Reading<span class="pm-long"> practice</span></button>
+    <button type="button" id="btn-read" class="btn"><span class="pm-long">Reading practice</span><span class="pm-short">Reading</span></button>
     <button type="button" id="btn-stop" class="btn" hidden>Stop</button>
-    <button type="button" id="btn-phone" class="btn" aria-pressed="false">Phone mode</button>
     <span id="src-status" class="status" role="status">Not listening</span>
   </section>
   <p id="mic-note" class="note" hidden></p>
