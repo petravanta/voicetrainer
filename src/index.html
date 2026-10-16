@@ -194,6 +194,10 @@
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
       <div class="btn-row reader-actions">
         <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
+        <div class="seg rsrc" role="radiogroup" aria-label="Voice that reads aloud">
+          <button type="button" role="radio" id="rsrc-speech" aria-checked="true" title="The browser's speech voice: real words, but the app can't measure it unless the microphone hears your speakers">Speech voice</button>
+          <button type="button" role="radio" id="rsrc-synth" aria-checked="false" title="The app's synthetic voice: hums the rhythm of the text, and every meter and the pitch chart follow it">Measured voice</button>
+        </div>
         <button type="button" class="btn" id="reader-more" aria-expanded="false" hidden>More</button>
         <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>

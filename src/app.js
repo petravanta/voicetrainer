@@ -583,6 +583,7 @@
       $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
       $('vd-rate').value = v.rate; $('vd-rate-out').textContent = (+v.rate).toFixed(2) + '×';
       $('vd-reader').value = v.reader;
+      for (const k of ['speech', 'synth']) $('rsrc-' + k).setAttribute('aria-checked', String((v.reader === 'synth' ? 'synth' : 'speech') === k));
       $('reader-voice-wrap').hidden = v.reader === 'synth' || this.voiceCount < 2;
     },
     open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
@@ -596,7 +597,10 @@
       $('vd-play').addEventListener('click', () => { Reader.stopListen(); playDemo(false); });
       $('vd-sweep').addEventListener('click', () => { Reader.stopListen(); playDemo(true); });
       $('reader-voice').addEventListener('change', (e) => { this.get().voice = e.target.value; this.save(); });
+      // switching voice while it reads carries on reading with the new one
+      const useReader = (r) => { const was = !!(Reader.tts || Reader.synth); Reader.stopListen(); this.get().reader = r; this.save(); this.paint(); if (was) Reader.listen(); };
       $('pv-synth').addEventListener('click', () => { Reader.stopListen(); this.get().reader = 'synth'; this.save(); this.paint(); Reader.listen(); });
+      for (const k of ['speech', 'synth']) $('rsrc-' + k).addEventListener('click', () => { if (this.get().reader !== k) useReader(k); });
       $('vd-reader').addEventListener('change', (e) => { Reader.stopListen(); this.get().reader = e.target.value; this.save(); this.paint(); });
     },
   };
@@ -2848,7 +2852,7 @@
     PhoneMode.init();
     $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (Reader.synth && Reader.stopListen(), startMic())));
     $('btn-demo').addEventListener('click', () => playDemo(false));
-    DemoVoice.init();
+    DemoVoice.init(); DemoVoice.paint();
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-save').addEventListener('click', saveSession);
