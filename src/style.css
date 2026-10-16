@@ -367,3 +367,15 @@ body.reading-full .reader.full { top: var(--sbh, 60px); }
 .session-grid h3 + .bars + h3 { margin-top: 18px; }
 @media (max-width: 600px) { .g-label small { display: none; } }
 body.phone-mode .g-label small, body.phone-mode .ex-note { display: none; }
+
+/* graded demo sounds */
+.proof { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.proof-lead { margin: 0; font-size: 0.84rem; color: var(--muted); }
+.proof-rows { display: grid; gap: 6px; }
+.proof-row { display: grid; grid-template-columns: auto minmax(0, 9em) 3em minmax(0, 1fr); gap: 4px 10px; align-items: center; font-size: 0.88rem; }
+.proof-play { padding: 4px 10px; min-width: 2.4em; justify-content: center; }
+.proof-label { font-weight: 600; }
+.proof-big { font-family: var(--font-mono); font-size: 1.05rem; text-align: right; }
+.proof-text { color: var(--muted); }
+.proof-row.ok .proof-big { color: var(--good); } .proof-row.off .proof-big { color: var(--warn); }
+@media (max-width: 600px) { .proof-row { grid-template-columns: auto minmax(0, 1fr) 3em; } .proof-text { grid-column: 2 / -1; } }

@@ -587,7 +587,9 @@
     const v = pts.filter(p => p.f0 > 0);
     if (v.length < 12) return null;
     const med = median(v.map(p => p.f0));
-    const st = v.map(p => ({ t: p.t, s: 12 * Math.log2(p.f0 / med) }));
+    // fold octave slips back (a pitch tracker can jump to double or half on a short sound)
+    const fold = (s) => { while (s > 9) s -= 12; while (s < -9) s += 12; return s; };
+    const st = v.map(p => ({ t: p.t, s: fold(12 * Math.log2(p.f0 / med)) }));
     // light smoothing so a single bad frame does not count as a peak or an ending
     const sm = st.map((p, i) => ({ t: p.t, s: median(st.slice(Math.max(0, i - 2), i + 3).map(q => q.s)) }));
     const n = sm.length, ss = sm.map(p => p.s);

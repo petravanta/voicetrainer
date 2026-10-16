@@ -95,17 +95,17 @@
         ? ({ ok: s.end <= -1, value: -s.end, text: s.end <= -1 ? 'Statement fell. Now ask it as a question.' : 'For the statement, let the end fall. Try the statement again.' })
         : ({ ok: s.end >= 2.5, value: s.end, text: s.end >= 2.5 ? `Question rose ${s.end.toFixed(1)} semitones. Two clear tunes.` : 'For the question, lift the end more. Start again with the statement.' }) },
     { id: 'pr-range', type: 'prosody', cue: 'Expressive range', sub: 'wider melody', title: 'Use more of your range',
-      say: "Oh, that's wonderful!", f0At: (wi, u) => [1.25, 0.98, 1.0 + 0.45 * Math.sin(Math.PI * Math.min(1, u * 1.6))][wi] || 1,
+      say: "Oh, that's wonderful!", f0At: (wi, u) => [1.3, 0.95, 1.0 + 0.62 * Math.sin(Math.PI * Math.min(1, u * 1.6))][wi] || 1,
       why: 'Lively speech moves across a wider pitch range. Feminine-coded speech often uses a wider, more varied range; masculine-coded speech often uses a narrower one. Either way, controlling range is a skill of its own.',
       steps: (fem) => [fem ? 'Say it with real delight: lift high on "won-" and let it come down after.' : 'Say it warmly with some lift on "won-", then settle down.', 'Keep the voice light; reach with melody, not volume.', 'Pause after each try.'],
       check: (s, step, fem) => { const need = fem ? 7 : 4.5; return { ok: s.span >= need, value: s.span, text: s.span >= need ? `Used ${s.span.toFixed(1)} semitones of range. Nicely expressive.` : `Used ${s.span.toFixed(1)} semitones. Aim for about ${need}: reach higher on the excited word.` }; } },
     { id: 'pr-stress', type: 'prosody', cue: 'Stress one word', sub: 'pitch accent', title: 'Lift the word that matters',
-      say: 'I wanted the RED one, not the blue one.', f0At: (wi, u) => (wi === 3 ? 1.0 + 0.4 * Math.sin(Math.PI * u) : 1.05 - 0.02 * wi),
+      say: 'I wanted the RED one, not the blue one.', f0At: (wi, u) => (wi === 3 ? 1.0 + 0.45 * u : wi === 4 ? 1.35 - 0.33 * u : 1.05 - 0.02 * wi),
       why: 'English marks the important word with a pitch accent: a quick lift (or dip) on its stressed syllable. Clear accents make speech sound engaged and easy to follow.',
       steps: ['Say the sentence, giving "RED" a clear lift in pitch, not just more volume.', 'Keep the rest of the sentence relaxed so the accent stands out.', 'Pause after each try.'],
       check: (s) => ({ ok: s.peak >= 3.5, value: s.peak, text: s.peak >= 3.5 ? `The accent stood ${s.peak.toFixed(1)} semitones above your line. Clear emphasis.` : `The highest point was ${s.peak.toFixed(1)} semitones above your line. Lift "RED" more.` }) },
     { id: 'pr-lilt', type: 'prosody', cue: 'Melody, not monotone', sub: 'pitch movement', title: 'Let the pitch move',
-      say: 'Hi there, how have you been lately?', f0At: (wi, u) => 1 + 0.18 * Math.sin(1.7 * wi + 3 * u) + (wi === 5 ? 0.3 * u * u : 0),
+      say: 'Hi there, how have you been lately?', f0At: (wi, u) => 1 + 0.3 * Math.sin(1.7 * wi + 3 * u) + (wi === 5 ? 0.3 * u * u : 0),
       why: 'A monotone keeps the pitch almost still. Natural, friendly speech keeps the pitch moving gently up and down across the sentence.',
       steps: (fem) => [fem ? 'Say it warmly and let the pitch rise and fall across the words, like a friendly greeting.' : 'Say it in a relaxed, friendly way with gentle ups and downs.', 'Think of the melody of the words rather than their loudness.', 'Pause after each try.'],
       check: (s, step, fem) => { const need = fem ? 2.4 : 1.6; return { ok: s.sd >= need, value: s.sd, text: s.sd >= need ? `Pitch movement ${s.sd.toFixed(1)} (goal ${need}+). It has a melody.` : `Pitch movement ${s.sd.toFixed(1)}; aim for ${need}+. Let the pitch travel more between words.` }; } },
@@ -575,10 +575,15 @@
   };
   function playExample(def, mode) {
     ensureCtx();
-    stopExample();
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
+    playSamples(x, mode);
+  }
+  function playSamples(x, mode) {
+    ensureCtx();
+    stopExample();
+    const fs = ctx.sampleRate;
     const ab = ctx.createBuffer(1, x.length, fs);
     ab.copyToChannel(x, 0);
     const src = ctx.createBufferSource();
@@ -606,6 +611,7 @@
     setExampleUi(null);
   }
   function setExampleUi(mode) {
+    if (!mode) document.querySelectorAll('.proof-play.playing').forEach(x => { if (!exSrc) { x.classList.remove('playing'); x.textContent = '▶'; } });
     const p = $('ex-play'), c = $('ex-compare');
     if (p) p.textContent = mode === 'play' ? 'Stop example' : 'Play example';
     if (c) c.textContent = mode === 'compare' ? 'Stop comparison' : 'Compare masculine and feminine';
@@ -865,11 +871,11 @@
       <p class="drill-help"></p>
       <div class="example-box">
         <div class="btn-row">
-          <button type="button" class="btn" id="ex-play">Play example</button>
           <button type="button" class="btn" id="ex-compare">Compare masculine and feminine</button>
         </div>
         <p class="ex-note" id="ex-note"></p>
       </div>
+      <div class="proof" id="proof" hidden></div>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
       <div id="coach" class="coach" aria-live="polite">
@@ -887,8 +893,8 @@
     p.querySelector('.drill-help').textContent = drillInstruction(d.def);
     $('drill-msg').textContent = state.running ? 'Listening...' : 'Start the microphone (or analyze a recording) to begin.';
     $('drill-again').addEventListener('click', () => selectDrill(d.def));
-    $('ex-play').addEventListener('click', () => (exSrc && $('ex-play').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'play')));
     $('ex-compare').addEventListener('click', () => (exSrc && $('ex-compare').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'compare')));
+    renderProof($('proof'), d.def);
     renderExampleNote();
     state.coach = { vf: [], vt: -1e9, sf: [], st: -1e9, hist: [], key: null, pendingKey: null, pendingAt: 0, shownAt: 0, eased: {}, trendAt: 0 };
     renderCoach();
@@ -1320,7 +1326,9 @@
       </div>
       ${def.aim === 'band' ? '<div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>' : ''}
       <p class="drill-msg" id="drill-msg"></p>
-      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div class="proof" id="proof" hidden></div>`;
+    renderProof($('proof'), def);
     p.querySelector('.drill-title').textContent = def.title;
     p.querySelector('.drill-help').textContent = def.why;
     const ol = p.querySelector('.breath-steps');
@@ -1378,13 +1386,158 @@
     autoSave('drill finished');
   }
 
+
+  // ---------------- graded examples ("check the checker") ----------------
+  // Each exercise can show demo sounds run through exactly the same scoring as your voice, so you
+  // can hear the difference and see that the grade follows it. Analysis runs offline on the
+  // synthesized samples, so it is the same on every device.
+  const PROOF_FS = 48000, proofCache = new Map();
+  function analyzeSamples(x, fs) {
+    const a = new D.Analyzer(fs), hop = Math.round(fs / 60), out = [];
+    for (let end = a.needed, i = 0; end <= x.length; end += hop, i++) { const fr = a.analyze(x.subarray(0, end)); fr.t = i * 1000 / 60; out.push(fr); }
+    return out;
+  }
+  // phrases are split where the voicing stops for half a second, as in the live prosody check
+  function phrasesOf(frames) {
+    const out = []; let cur = [], gap = 0;
+    for (const f of frames) {
+      const v = f.kind === 'voiced' ? f.f0 : 0;
+      if (v) { cur.push({ t: f.t, f0: v }); gap = 0; } else if (cur.length) { gap++; cur.push({ t: f.t, f0: 0 }); if (gap > 30) { out.push(cur); cur = []; gap = 0; } }
+    }
+    if (cur.length) out.push(cur);
+    return out.map(p => { while (p.length && !p[p.length - 1].f0) p.pop(); return p; }).filter(p => p.filter(q => q.f0).length * 16 >= 400);
+  }
+  function gradeSound(def, frames) {
+    const fem = state.goal === 'fem', r = {};
+    if (def.vowel) {
+      const v = D.VOWEL_BY_KEY[def.vowel], al = [], Fs = [];
+      for (const fr of frames) {
+        if (fr.kind !== 'voiced' || !fr.formants || !fr.stable) continue;
+        const fit = D.fitVowel(fr.formants, v);
+        if (fit.rms < 0.085 || D.classifyVowel(fr.formants).vowel.key === v.key) { al.push(fit.alpha); Fs.push(fr.formants); }
+      }
+      if (al.length) { r.vowelScore = score100(D.median(al)); r.F = [0, 1, 2].map(i => D.median(Fs.map(f => f[i]))); }
+    }
+    if (def.sib) {
+      const sc = frames.filter(fr => fr.kind === 'fricative').map(fr => score100(D.sibilantAlpha(fr.cog, D.SIBILANTS[def.sib])));
+      if (sc.length) r.sibScore = D.median(sc);
+    }
+    r.score = def.type === 'word' ? (r.vowelScore != null && r.sibScore != null ? 0.6 * r.vowelScore + 0.4 * r.sibScore : null) : (r.vowelScore ?? r.sibScore ?? null);
+    if (r.score == null) return { ok: false, text: 'could not be measured' };
+    const parts = [];
+    if (r.F) parts.push(`F1-F3 ${r.F.map(Math.round).join(' · ')} Hz`);
+    if (def.type === 'word') parts.push(`vowel ${Math.round(r.vowelScore)}, consonant ${Math.round(r.sibScore)}`);
+    const ok = onTarget(r.score);
+    return { ok, big: Math.round(r.score), text: `${ok ? `in the ${fem ? 'feminine' : 'masculine'} target zone` : `outside the ${fem ? 'feminine' : 'masculine'} target zone`}${parts.length ? ' · ' + parts.join(' · ') : ''}` };
+  }
+  function gradeIso(def, frames) {
+    const v = frames.filter(f => f.kind === 'voiced' && f.formants);
+    if (v.length < NEED.isoBase + 30) return { ok: false, text: 'could not be measured' };
+    const first = v.slice(0, NEED.isoBase);
+    const base = { F: [0, 1, 2].map(i => D.median(first.map(f => f.formants[i]))), f0: D.median(first.map(f => f.f0)) };
+    const tail = v.slice(-30), F = [0, 1, 2].map(i => D.median(tail.map(f => f.formants[i]))), f0 = D.median(tail.map(f => f.f0));
+    const r = D.isolation(def.kind, base.F, F, base.f0, f0);
+    const pc = (x) => `${x >= 0 ? '+' : ''}${Math.round(x * 100)}%`;
+    const text = `jaw ${pc(r.dev[0])}, tongue ${pc(r.dev[1])}, lips/larynx ${pc(r.dev[2])}${def.kind === 'pitch' ? `, pitch ${r.semis >= 0 ? '+' : ''}${r.semis.toFixed(1)} st` : ''}`;
+    const any = Math.max(...r.dev.map(Math.abs)) >= 0.06;
+    return { ok: r.ok, big: r.ok ? '✓' : '✗', text: (r.ok ? 'isolated · ' : r.moved ? 'not isolated · ' : any ? 'the wrong part moved · ' : 'did not move enough · ') + text };
+  }
+  function gradeBreath(frames) {
+    const b = frames.filter(f => f.breath != null).map(f => f.breath);
+    if (b.length < 10) return { ok: false, text: 'could not be measured' };
+    const m = D.median(b), [lo, hi] = breathBand(), ok = m >= lo && m <= hi;
+    return { ok, big: Math.round(m), text: `${breathWord(m)} · ${ok ? 'in' : 'outside'} the ${state.goal === 'fem' ? 'feminine' : 'masculine'} zone (${lo}-${hi})` };
+  }
+  function gradeProsody(def, frames) {
+    const ph = phrasesOf(frames), fem = state.goal === 'fem';
+    if (!ph.length) return { ok: false, text: 'could not be measured' };
+    if (def.pair) {
+      if (ph.length < 2) return { ok: false, text: 'could not be measured' };
+      const a = D.prosodyStats(ph[0]), b = D.prosodyStats(ph[1]);
+      const ra = def.check(a, 0, fem), rb = def.check(b, 1, fem);
+      return { ok: ra.ok && rb.ok, big: ra.ok && rb.ok ? '✓' : '✗', text: `first ends ${a.end >= 0 ? '+' : ''}${a.end.toFixed(1)} st, second ends ${b.end >= 0 ? '+' : ''}${b.end.toFixed(1)} st` };
+    }
+    const s = D.prosodyStats(ph[0]), r = def.check(s, 0, fem);
+    return { ok: r.ok, big: r.ok ? '✓' : '✗', text: r.text };
+  }
+  // The demo sounds for each kind of exercise: one that should pass and one that should not.
+  function proofItems(def) {
+    const fem = state.goal === 'fem', goalName = fem ? 'feminine' : 'masculine', other = fem ? 'masc' : 'fem';
+    if (def.type === 'vowel' || def.type === 'sib' || def.type === 'word') return [
+      { label: `Typical ${goalName}`, make: (fs) => Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS), grade: (fr) => gradeSound(def, fr) },
+      { label: `Typical ${fem ? 'masculine' : 'feminine'}`, make: (fs) => Synth.example(fs, def, other, D.VOWELS, D.SIBILANTS), grade: (fr) => gradeSound(def, fr) },
+    ];
+    if (def.type === 'prosody') return [
+      { label: 'As intended', make: (fs) => prosodyExample(fs, def, fem), grade: (fr) => gradeProsody(def, fr) },
+      { label: 'Flat (monotone)', make: (fs) => prosodyExample(fs, { ...def, f0At: () => 1, flat: true }, fem), grade: (fr) => gradeProsody(def, fr) },
+    ];
+    if (def.type === 'breath') return [
+      { label: 'Clear tone', make: (fs) => breathExample(fs, fem, fem ? 0.32 : 0.2), grade: gradeBreath },
+      { label: 'Very breathy', make: (fs) => breathExample(fs, fem, 0.85), grade: gradeBreath },
+      { label: 'Pressed', make: (fs) => breathExample(fs, fem, 0), grade: gradeBreath },
+    ];
+    if (def.type === 'iso') return [
+      { label: 'Right movement', make: (fs) => isoExample(fs, def, fem, true), grade: (fr) => gradeIso(def, fr) },
+      { label: ISO_WRONG[def.kind].label, make: (fs) => isoExample(fs, def, fem, false), grade: (fr) => gradeIso(def, fr) },
+    ];
+    return [];
+  }
+  function breathExample(fs, fem, breath) {
+    const v = D.VOWEL_BY_KEY.a, F = fem ? v.W : v.M;
+    return Synth.concat([Synth.silence(fs, 0.1), Synth.voiced(fs, 1.6, fem ? 205 : 115, fem ? 195 : 108, F, { breath, ramp: 0.06, seed: 7 }), Synth.silence(fs, 0.1)]);
+  }
+  // control exercises: hold the vowel, then make one movement (or the wrong one) and hold it
+  const ISO_MOVES = {
+    jaw: [1.3, 1, 1], tongue: [1, 1.2, 1], lips: [1, 0.95, 0.9], larynx: [1.1, 1.1, 1.1], pitch: [1, 1, 1],
+  };
+  const ISO_WRONG = {
+    jaw: { label: 'Tongue moved instead', F: [1, 1.18, 1] }, tongue: { label: 'Jaw moved instead', F: [1.3, 1.04, 1] },
+    lips: { label: 'Jaw moved instead', F: [1.3, 1, 1] }, larynx: { label: 'Only the tongue moved', F: [1, 1.18, 1] },
+    pitch: { label: 'Resonance moved too', F: [1.12, 1.12, 1.12] },
+  };
+  function isoExample(fs, def, fem, right) {
+    const v = D.VOWEL_BY_KEY[def.vowel], base = fem ? v.W : v.M, f0 = fem ? 200 : 115;
+    const k = right ? ISO_MOVES[def.kind] : ISO_WRONG[def.kind].F, moved = base.map((f, i) => f * k[i]);
+    const f1 = def.kind === 'pitch' ? f0 * Math.pow(2, 5 / 12) : f0;
+    return Synth.concat([Synth.silence(fs, 0.1), Synth.voiced(fs, 1.0, f0, f0, base, { ramp: 0.05, seed: 3 }),
+      Synth.voiced(fs, 1.8, f0, f1, moved, { from: base, trans: 0.6, ramp: 0.05, seed: 5 }), Synth.silence(fs, 0.1)]);
+  }
+  function renderProof(host, def) {
+    if (!host) return;
+    const items = proofItems(def); if (!items.length) { host.hidden = true; return; }
+    host.hidden = false;
+    host.innerHTML = `<p class="eyebrow"><span>Check the checker</span><span>demo sounds, graded by the app</span></p>
+      <p class="proof-lead">Each demo is scored by exactly the same check as your voice. Listen, then compare the grades.</p>
+      <div class="proof-rows">${items.map((it, i) => `<div class="proof-row" id="proof-${i}">
+        <button type="button" class="btn proof-play" data-i="${i}" aria-label="Play: ${it.label}">▶</button>
+        <span class="proof-label">${it.label}</span><b class="proof-big">…</b><span class="proof-text">grading…</span></div>`).join('')}</div>`;
+    host.querySelectorAll('.proof-play').forEach(b => b.addEventListener('click', () => {
+      const it = items[+b.dataset.i];
+      if (exSrc && b.classList.contains('playing')) { stopExample(); return; }
+      ensureCtx(); playSamples(it.make(ctx.sampleRate), null);
+      host.querySelectorAll('.proof-play').forEach(x => { x.classList.remove('playing'); x.textContent = '▶'; });
+      b.classList.add('playing'); b.textContent = '■';
+    }));
+    // grade after the panel has painted
+    setTimeout(() => items.forEach((it, i) => {
+      const key = `${def.id}|${state.goal}|${i}`;
+      let g = proofCache.get(key);
+      if (!g) { g = it.grade(analyzeSamples(it.make(PROOF_FS), PROOF_FS)); proofCache.set(key, g); }
+      const row = $('proof-' + i); if (!row || !host.contains(row)) return;
+      row.classList.toggle('ok', g.ok); row.classList.toggle('off', !g.ok);
+      row.querySelector('.proof-big').textContent = g.big ?? (g.ok ? '✓' : '✗');
+      row.querySelector('.proof-text').textContent = g.text;
+    }), 30);
+  }
+
   // ---------------- prosody exercises ----------------
   const NEED_PROS = 2; // passing phrases to finish an exercise (one statement+question for the pair)
   function prosodyExample(fs, def, fem) {
     const o = { pitch: fem ? 205 : 115, res: fem ? 100 : 0, bright: fem ? 65 : 40, rate: 0.95 };
     if (!def.pair) return Synth.readText(fs, def.say.split(/\s+/), D.VOWELS, { ...o, f0At: def.f0At }).x;
-    const a = Synth.readText(fs, ["It's", 'raining.'], D.VOWELS, { ...o, f0At: (wi, u) => (wi === 0 ? 1.08 : 1.02 - 0.2 * u) }).x;
-    const b = Synth.readText(fs, ["It's", 'raining?'], D.VOWELS, { ...o, f0At: (wi, u) => (wi === 0 ? 1.0 : 0.98 + 0.45 * u * u) }).x;
+    const flat = def.flat ? () => 1 : null;
+    const a = Synth.readText(fs, ["It's", 'raining.'], D.VOWELS, { ...o, f0At: flat || ((wi, u) => (wi === 0 ? 1.08 : 1.02 - 0.2 * u)) }).x;
+    const b = Synth.readText(fs, ["It's", 'raining?'], D.VOWELS, { ...o, f0At: flat || ((wi, u) => (wi === 0 ? 1.0 : 0.98 + 0.45 * u * u)) }).x;
     const out = new Float32Array(a.length + b.length); out.set(a); out.set(b, a.length); return out;
   }
   function renderProsodyPanel(d) {
@@ -1396,6 +1549,7 @@
       <p class="drill-help"></p>
       <ol class="breath-steps"></ol>
       <div class="btn-row"><button type="button" class="btn" id="ex-play">Play example</button></div>
+      <div class="proof" id="proof" hidden></div>
       <div class="coach" aria-live="polite">
         <p class="eyebrow"><span>Your last phrase</span><span id="pr-state" class="trend"></span></p>
         <p class="coach-cue" id="pr-cue"></p>
@@ -1411,6 +1565,7 @@
     const ol = p.querySelector('.breath-steps');
     for (const t of (typeof def.steps === 'function' ? def.steps(fem) : def.steps)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    renderProof($('proof'), def);
     $('drill-again').addEventListener('click', () => selectDrill(def));
     d.passes = 0; d.step = 0; d.last = null; d.best = null;
     $('pr-cue').textContent = state.running ? `Say: ${def.say}` : 'Start the microphone, then say the phrase.';
@@ -1495,7 +1650,8 @@
       </div>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
-      <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+      <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div class="proof" id="proof" hidden></div>`;
     p.querySelector('.drill-title').textContent = def.title;
     p.querySelector('.drill-help').textContent = def.why;
     const ol = p.querySelector('.breath-steps');
@@ -1503,6 +1659,7 @@
     $('drill-again').addEventListener('click', () => selectDrill(def));
     $('iso-reset').addEventListener('click', () => { d.base = null; d.isoFr = []; d.inZone = 0; d.best = 0; d.eased = {}; updateIso(d, true); });
     d.base = null; d.best = 0; d.eased = {};
+    renderProof($('proof'), def);
     updateIso(d, true);
   }
   function updateIso(d, force) {
