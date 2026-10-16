@@ -366,13 +366,39 @@
 
   // ---- recognised words over the pitch track (browser speech recognition, mic only) ----
   const Words = {
-    KEY: 'voicetrainer.pitchwords', on: false, rec: null, labels: [], lastT: 0, interim: [], note: '', readerIdx: -1,
+    KEY: 'voicetrainer.pitchwords', CONSENT: 'voicetrainer.speechconsent', on: false, rec: null, labels: [], lastT: 0, interim: [], note: '', readerIdx: -1,
     supported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
     init() {
       const box = $('pitch-words'); if (!box) return;
-      try { this.on = localStorage.getItem(this.KEY) === '1'; } catch (e) {}
+      try { this.on = localStorage.getItem(this.KEY) === '1' && this.consented(); } catch (e) {}
       box.checked = this.on;
-      box.addEventListener('change', () => { this.on = box.checked; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} this.sync(); });
+      box.addEventListener('change', () => {
+        // recognition sends audio off the device, so it needs an explicit opt-in first
+        if (box.checked && !this.consented()) { box.checked = false; this.ask(); return; }
+        this.set(box.checked);
+      });
+      const dlg = $('speech-consent');
+      dlg.addEventListener('close', () => {
+        if (dlg.returnValue !== 'yes') return;
+        try { localStorage.setItem(this.CONSENT, '1'); } catch (e) {}
+        this.consentNow = true;
+        this.set(true);
+      });
+      $('pw-withdraw').addEventListener('click', () => {
+        try { localStorage.removeItem(this.CONSENT); } catch (e) {}
+        this.consentNow = false;
+        this.set(false);
+        this.setNote('Consent withdrawn. Speech recognition is off and will ask again before it is used.');
+      });
+      this.sync();
+    },
+    consentNow: false,
+    consented() { if (this.consentNow) return true; try { return localStorage.getItem(this.CONSENT) === '1'; } catch (e) { return false; } },
+    ask() { const d = $('speech-consent'); d.returnValue = ''; if (d.showModal) d.showModal(); },
+    set(on) {
+      this.on = on && this.consented();
+      $('pitch-words').checked = this.on;
+      try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {}
       this.sync();
     },
     setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } const pv = $('pitch-words-privacy'); if (pv) pv.hidden = !this.on; },
@@ -381,7 +407,7 @@
       // In reading practice the words come from the passage itself (the highlighted word), so
       // recognition is not needed there.
       const reading = typeof Reader !== 'undefined' && Reader.open && !Reader.collapsed;
-      const want = this.on && state.running === 'mic' && !reading && this.supported();
+      const want = this.on && this.consented() && state.running === 'mic' && !reading && this.supported();
       if (want && !this.rec) this.start();
       else if (!want && this.rec) this.stop();
       if (!reading) this.readerIdx = -1;
@@ -686,6 +712,7 @@
     set(on) { this.on = on; try { localStorage.setItem('voicetrainer.phone', on ? '1' : '0'); } catch (e) {} this.apply(); window.scrollTo(0, 0); },
     apply() {
       document.body.classList.toggle('phone-mode', this.on);
+      try { if (Reader.open) Reader.layout(); } catch (e) {} // Reader may not be set up yet at start-up
       $('view-desk').setAttribute('aria-checked', String(!this.on)); $('view-phone').setAttribute('aria-checked', String(this.on));
       this.wake();
       window.dispatchEvent(new Event('resize'));
@@ -697,6 +724,7 @@
     },
   };
   document.addEventListener('visibilitychange', () => PhoneMode.wake());
+  const sheetUi = () => PhoneMode.on || window.matchMedia('(max-width: 860px)').matches;
   function setMicButton(on) {
     if (typeof Reader !== 'undefined' && Reader.open) Reader.paint();
     for (const b of [$('btn-mic')]) {
@@ -2665,24 +2693,47 @@
     },
     // Side pane (bottom sheet on narrow screens) or full screen; "Hide pane" tucks it into a tab.
     layout() {
-      const r = $('reader'), shown = this.open && !this.collapsed;
+      const r = $('reader'), shown = this.open && !this.collapsed, sheet = sheetUi();
       r.hidden = !shown;
+      // phones (and phone view) get a compact panel along the bottom; More shows the rest of the controls
+      document.body.classList.toggle('sheet-ui', sheet);
+      $('reader-more').hidden = !sheet || !!this.full;
+      if (!sheet) this.more(false);
       r.classList.toggle('full', !!this.full);
       $('reader-tab').hidden = !(this.open && this.collapsed);
       document.body.classList.toggle('reading', shown && !this.full);
       document.body.classList.toggle('reading-full', shown && !!this.full);
-      $('reader-full').textContent = this.full ? 'Side pane' : 'Full screen';
+      // short labels in the compact panel so every button fits on one row
+      $('reader-full').textContent = this.full ? (sheet ? 'Panel' : 'Side pane') : sheet ? 'Expand' : 'Full screen';
+      $('reader-restart').textContent = sheet ? 'Restart' : 'Back to start';
+      $('reader-collapse').textContent = sheet ? 'Hide' : 'Hide pane';
+      $('reader-collapse').setAttribute('aria-label', 'Hide reading practice');
+      $('reader-close').textContent = sheet ? '✕' : 'Close';
+      $('reader-close').setAttribute('aria-label', 'Close reading practice');
       $('reader-full').setAttribute('aria-pressed', String(!!this.full));
       // full screen sits below the audio bar so the main microphone button stays reachable
       if (shown && this.full) document.documentElement.style.setProperty('--sbh', $('sourcebar-wrap').offsetHeight + 'px');
+      this.fitSheet();
       Words.sync();
       window.dispatchEvent(new Event('resize')); // charts re-fit to the narrower page
+    },
+    // the page leaves room at the bottom for the compact panel, so nothing hides behind it
+    fitSheet() {
+      const r = $('reader'), on = sheetUi() && this.open && !this.collapsed && !this.full;
+      document.documentElement.style.setProperty('--rsheet-h', on ? r.offsetHeight + 'px' : '0px');
+    },
+    more(on) {
+      const r = $('reader'); r.classList.toggle('more', on);
+      $('reader-more').textContent = on ? 'Less' : 'More';
+      $('reader-more').setAttribute('aria-expanded', String(on));
+      if (this.open) requestAnimationFrame(() => { this.fitSheet(); this.paintTrack(); });
     },
     setFull(on) { this.full = on; try { localStorage.setItem('voicetrainer.readerfull', on ? '1' : '0'); } catch (e) {} this.layout(); requestAnimationFrame(() => this.paintTrack()); },
     collapse(on) { this.collapsed = on; this.layout(); if (on) $('reader-tab').focus(); else { requestAnimationFrame(() => this.paintTrack()); $('reader-collapse').focus(); } },
     show() {
       if (this.open) { if (this.collapsed) this.collapse(false); return; }
       this.open = true; this.collapsed = false;
+      if (sheetUi()) this.full = false; // on a phone it opens as the compact panel; Full screen is one tap away
       this.layout();
       let id = BUILTIN_TEXTS[0].id;
       try { id = localStorage.getItem('voicetrainer.readtext') || id; } catch (e) {}
@@ -2713,6 +2764,10 @@
       try { this.full = localStorage.getItem('voicetrainer.readerfull') === '1'; } catch (e) {}
       $('reader-full').addEventListener('click', () => this.setFull(!this.full));
       $('reader-collapse').addEventListener('click', () => this.collapse(true));
+      $('reader-more').addEventListener('click', () => this.more(!$('reader').classList.contains('more')));
+      if (window.ResizeObserver) new ResizeObserver(() => this.fitSheet()).observe($('reader'));
+      const mq = window.matchMedia('(max-width: 860px)');
+      (mq.addEventListener ? mq.addEventListener.bind(mq, 'change') : mq.addListener.bind(mq))(() => this.layout());
       $('reader-tab').addEventListener('click', () => this.collapse(false));
       $('reader-listen').addEventListener('click', () => this.listen());
       if (window.speechSynthesis) {

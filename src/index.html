@@ -103,10 +103,10 @@
 
     <figure class="chart pitch-fig">
       <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small>
-        <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words</label></figcaption>
+        <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words <small>(online)</small></label></figcaption>
       <canvas id="cv-pitch" height="200"></canvas>
       <p class="pw-note" id="pitch-words-note" hidden></p>
-      <p class="pw-privacy" id="pitch-words-privacy" hidden>Show words uses your browser's speech recognition. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. Word positions are estimated from where you were voicing.</p>
+      <p class="pw-privacy" id="pitch-words-privacy" hidden>Show words uses your browser's speech recognition, which you agreed to. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. <button type="button" class="linkish" id="pw-withdraw">Withdraw consent</button></p>
     </figure>
   </section>
 
@@ -193,6 +193,7 @@
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
       <div class="btn-row reader-actions">
         <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
+        <button type="button" class="btn" id="reader-more" aria-expanded="false" hidden>More</button>
         <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
         <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
@@ -231,6 +232,17 @@
     <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
   </footer>
 </div>
+  <dialog id="speech-consent" class="voice-dlg" aria-labelledby="speech-consent-h">
+    <form method="dialog">
+      <h2 id="speech-consent-h">Send your speech for recognition?</h2>
+      <p>Showing words uses your browser's speech recognition. In Chrome and Edge this sends the microphone audio to Google or Microsoft servers to turn it into text, while Show words is on and the microphone is running. Their privacy terms apply to that audio.</p>
+      <p>Everything else in VoiceTrainer stays on your device, and you can use the app fully without this. You can withdraw consent at any time.</p>
+      <div class="btn-row">
+        <button type="submit" class="btn primary" value="yes" id="sc-yes">I agree, show words</button>
+        <button type="submit" class="btn" value="no" id="sc-no" autofocus>No thanks</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="voice-dlg" class="voice-dlg" aria-labelledby="voice-dlg-h">
     <form method="dialog">
       <h2 id="voice-dlg-h">Demo voice</h2>
