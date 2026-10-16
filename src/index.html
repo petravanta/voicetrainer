@@ -106,7 +106,7 @@
         <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words <small>(online)</small></label></figcaption>
       <canvas id="cv-pitch" height="200"></canvas>
       <p class="pw-note" id="pitch-words-note" hidden></p>
-      <p class="pw-note" id="pitch-voice-note" hidden>The speech voice reading aloud can't be measured directly, so its pitch doesn't show here. <button type="button" class="linkish" id="pv-synth">Read with the synthetic voice</button> to see it, or start the microphone with speakers (not headphones).</p>
+      <p class="pw-note" id="pitch-voice-note" hidden>The voice reading aloud is your browser's speech voice. Browsers don't let apps measure it, so it doesn't show on this chart. Your own voice does when the microphone is on.</p>
       <p class="pw-privacy" id="pitch-words-privacy" hidden>Show words uses your browser's speech recognition, which you agreed to. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. <button type="button" class="linkish" id="pw-withdraw">Withdraw consent</button></p>
     </figure>
   </section>
@@ -194,10 +194,6 @@
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
       <div class="btn-row reader-actions">
         <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
-        <div class="seg rsrc" role="radiogroup" aria-label="Voice that reads aloud">
-          <button type="button" role="radio" id="rsrc-speech" aria-checked="true" title="The browser's speech voice: real words, but the app can't measure it unless the microphone hears your speakers">Speech voice</button>
-          <button type="button" role="radio" id="rsrc-synth" aria-checked="false" title="The app's synthetic voice: hums the rhythm of the text, and every meter and the pitch chart follow it">Measured voice</button>
-        </div>
         <button type="button" class="btn" id="reader-more" aria-expanded="false" hidden>More</button>
         <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
@@ -262,13 +258,9 @@
       <label class="vd-row"><span>Brightness <output id="vd-bright-out"></output></span><input type="range" id="vd-bright" min="0" max="100" step="5"></label>
       <p class="vd-scale"><span>soft, breathy tone</span><span>crisp, buzzy tone</span></p>
       <h3>Reading voice</h3>
-      <label class="vd-row"><span>Reads with</span><select id="vd-reader">
-        <option value="speech">Speech voice: real words</option>
-        <option value="synth">Synthetic voice: analysed live</option>
-      </select></label>
       <label class="vd-row" id="reader-voice-wrap" hidden><span>Speech voice</span><select id="reader-voice"></select></label>
       <label class="vd-row"><span>Speed <output id="vd-rate-out"></output></span><input type="range" id="vd-rate" min="0.6" max="1.5" step="0.05"></label>
-      <p class="vd-note">The speech voice is your browser's own: real words, following the voice type, pitch and speed. Browsers do not let the app analyse it directly, so the meters only follow it if the microphone is on and hears your speakers. The synthetic voice uses all the settings above, including resonance and brightness, and runs straight into the analyser, so every meter, the vocal tract sketch and the highlight track it exactly. It hums vowel-like sounds in the rhythm of the text rather than clear words. Neither counts toward your progress.</p>
+      <p class="vd-note">Reading uses your browser's own speech voice, following the voice type, pitch and speed. Browsers do not let apps measure that voice, so it does not appear on the pitch chart or meters, and it never counts toward your progress.</p>
       <div class="btn-row">
         <button type="button" class="btn primary" id="vd-play">Play demo</button>
         <button type="button" class="btn" id="vd-sweep">Play masculine to feminine</button>
