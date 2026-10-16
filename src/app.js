@@ -596,6 +596,7 @@
       $('vd-play').addEventListener('click', () => { Reader.stopListen(); playDemo(false); });
       $('vd-sweep').addEventListener('click', () => { Reader.stopListen(); playDemo(true); });
       $('reader-voice').addEventListener('change', (e) => { this.get().voice = e.target.value; this.save(); });
+      $('pv-synth').addEventListener('click', () => { Reader.stopListen(); this.get().reader = 'synth'; this.save(); this.paint(); Reader.listen(); });
       $('vd-reader').addEventListener('change', (e) => { Reader.stopListen(); this.get().reader = e.target.value; this.save(); this.paint(); });
     },
   };
@@ -736,7 +737,14 @@
   };
   document.addEventListener('visibilitychange', () => PhoneMode.wake());
   const sheetUi = () => PhoneMode.on || window.matchMedia('(max-width: 860px)').matches;
+  // the browser's speech voice never reaches the analyser; only the microphone can hear it
+  function paintVoiceNote() {
+    const n = $('pitch-voice-note'); if (!n) return;
+    let tts = false; try { tts = !!Reader.tts; } catch (e) {}
+    n.hidden = !(tts && state.running !== 'mic');
+  }
   function setMicButton(on) {
+    paintVoiceNote();
     if (typeof Reader !== 'undefined' && Reader.open) Reader.paint();
     for (const b of [$('btn-mic')]) {
       if (!b) continue;
@@ -2534,6 +2542,7 @@
       if (!S || !window.SpeechSynthesisUtterance) { $('rh-hint').textContent = 'This browser has no speech voice to read the text aloud.'; return; }
       // the microphone stays on if it is running, so the meters can follow the voice from the speakers
       S.cancel();
+      if (state.running !== 'mic') { $('ro-pitch').textContent = '--'; $('ro-vowel').textContent = '--'; state.meter = NaN; } // no stale readings of your voice
       // group words from the current one into sentences
       const start = this.idx >= this.words.length - 1 ? 0 : this.idx;
       const groups = [];
@@ -2645,6 +2654,7 @@
       this.paint();
     },
     setListenButton(on) {
+      paintVoiceNote();
       const b = $('reader-listen');
       b.textContent = on ? 'Stop reading' : 'Hear it read';
       b.setAttribute('aria-pressed', String(on));
