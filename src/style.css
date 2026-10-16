@@ -340,6 +340,16 @@ body.phone-mode .live { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 body.phone-mode .meter-desc { font-size: 0.95rem; }
 body.phone-mode #cv-pitch { height: 140px; }
 body.phone-mode .practice-body { grid-template-columns: minmax(0, 1fr); }
-#btn-phone[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.view-mode button { display: inline-flex; align-items: center; gap: 6px; }
+.view-mode svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.view-mode button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
+.top { align-items: center; }
+.top .brand { margin-right: auto; }
+body.phone-mode .top .goal-label, body.phone-mode .view-mode button span { display: none; }
+body.phone-mode .top { gap: 10px; }
+body.phone-mode .top .brand { flex-basis: 100%; }
+body.phone-mode .top .goal button { padding-inline: 12px; }
+.pm-short { display: none; }
+body.phone-mode .pm-short { display: inline; }
 body.phone-mode .pm-long { display: none; }
 body.phone-mode .sourcebar .btn { white-space: nowrap; }

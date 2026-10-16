@@ -581,7 +581,8 @@
       try { this.on = localStorage.getItem('voicetrainer.phone') === '1'; } catch (e) {}
       const q = new URLSearchParams(location.search).get('phone');
       if (q != null) this.on = q !== '0';
-      $('btn-phone').addEventListener('click', () => this.set(!this.on));
+      $('view-desk').addEventListener('click', () => this.set(false));
+      $('view-phone').addEventListener('click', () => this.set(true));
       // a drill opens below the long grid on a phone, so bring it into view
       $('drill-grid').addEventListener('click', (e) => { if (this.on && e.target.closest('button')) setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); });
       this.apply();
@@ -589,7 +590,7 @@
     set(on) { this.on = on; try { localStorage.setItem('voicetrainer.phone', on ? '1' : '0'); } catch (e) {} this.apply(); window.scrollTo(0, 0); },
     apply() {
       document.body.classList.toggle('phone-mode', this.on);
-      const b = $('btn-phone'); b.textContent = this.on ? 'Full view' : 'Phone mode'; b.setAttribute('aria-pressed', String(this.on));
+      $('view-desk').setAttribute('aria-checked', String(!this.on)); $('view-phone').setAttribute('aria-checked', String(this.on));
       this.wake();
       window.dispatchEvent(new Event('resize'));
     },
