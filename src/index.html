@@ -1,29 +1,30 @@
 <title>VoiceTrainer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /*STYLE*/
 </style>
-<div class="wrap">
-  <header class="top">
-    <div class="brand">
+<header class="top">
+  <div class="wrap">
+    <div class="topbar">
       <a data-hub-link href="https://petravanta.github.io/general/">All apps</a>
-      <h1>VoiceTrainer</h1>
-      <p>Live resonance, vowel, sibilant and pitch feedback for voice training.</p>
+      <h1 class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><g fill="var(--accent)"><rect x="4" y="12" width="3" height="8" rx="1.5"/><rect x="10" y="7" width="3" height="18" rx="1.5"/><rect x="16" y="4" width="3" height="24" rx="1.5"/><rect x="22" y="9" width="3" height="14" rx="1.5"/></g><rect x="28" y="13" width="2.5" height="6" rx="1.25" fill="var(--ink)"/></svg>VoiceTrainer</h1>
+      <div class="goal" role="radiogroup" aria-label="Training goal">
+        <span class="goal-label">Goal</span>
+        <button type="button" id="goal-fem" role="radio" aria-checked="true">Feminine</button>
+        <button type="button" id="goal-masc" role="radio" aria-checked="false">Masculine</button>
+      </div>
+      <div class="goal view-mode" role="radiogroup" aria-label="Layout">
+        <span class="goal-label">View</span>
+        <button type="button" id="view-desk" role="radio" aria-checked="true" aria-label="Desktop view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.2"/><path d="M5.5 13.5h5M8 11v2.5"/></svg><span>Desktop</span></button>
+        <button type="button" id="view-phone" role="radio" aria-checked="false" aria-label="Phone view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.4"/><path d="M7 12.3h2"/></svg><span>Phone</span></button>
+      </div>
     </div>
-    <div class="goal" role="radiogroup" aria-label="Training goal">
-      <span class="goal-label">Goal</span>
-      <button type="button" id="goal-fem" role="radio" aria-checked="true">Feminine</button>
-      <button type="button" id="goal-masc" role="radio" aria-checked="false">Masculine</button>
-    </div>
-    <div class="goal view-mode" role="radiogroup" aria-label="Layout">
-      <span class="goal-label">View</span>
-      <button type="button" id="view-desk" role="radio" aria-checked="true" aria-label="Desktop view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.2"/><path d="M5.5 13.5h5M8 11v2.5"/></svg><span>Desktop</span></button>
-      <button type="button" id="view-phone" role="radio" aria-checked="false" aria-label="Phone view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.4"/><path d="M7 12.3h2"/></svg><span>Phone</span></button>
-    </div>
-  </header>
-
+    <p class="tagline">Live resonance, vowel, sibilant and pitch feedback for voice training.</p>
+  </div>
+</header>
+<div class="wrap">
   <section class="sourcebar" id="sourcebar-wrap" aria-label="Audio source">
     <button type="button" id="btn-mic" class="btn primary">Start microphone</button>
     <label class="btn" for="file-in" id="btn-file">Analyze a recording</label>
