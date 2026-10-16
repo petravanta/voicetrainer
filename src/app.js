@@ -375,7 +375,7 @@
       box.addEventListener('change', () => { this.on = box.checked; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} this.sync(); });
       this.sync();
     },
-    setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } },
+    setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } const pv = $('pitch-words-privacy'); if (pv) pv.hidden = !this.on; },
     // Run recognition only while the switch is on and the microphone is live.
     sync() {
       // In reading practice the words come from the passage itself (the highlighted word), so
@@ -878,8 +878,8 @@
         <p class="coach-why" id="coach-why"></p>
         <details class="how" id="coach-how" hidden><summary>How do I do that?</summary><div class="how-body"></div></details>
         <div class="gauges" id="coach-gauges"></div>
-        <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas><ul class="tract-read" id="tract-read-coach"></ul>
-          <figcaption class="tract-key"><span><i class="ln you"></i>your shape (estimated)</span><span><i class="ln goal"></i>goal shape</span><span><i class="ln arrow"></i>what to change</span></figcaption></figure>
+        <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas>
+          <figcaption class="tract-key"><span><i class="ln you"></i>you</span><span><i class="ln goal"></i>goal</span><span><i class="ln arrow"></i>change</span></figcaption></figure>
       </div>
       <div id="drill-result"></div>
       <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
@@ -1097,6 +1097,17 @@
       row('Larynx', y.larynx - t.larynx, fromStart ? 0.15 : 0.25, 'higher (shorter throat)', 'lower (longer throat)'),
     ];
   }
+  // Against the goal, the readout uses the coach's own zones so the sketch, the gauges and the tips agree.
+  function coachReadout(F, v) {
+    const c = D.coachVowel(F, v, state.goal), all = c.focus && c.focus.formant === 'all';
+    const row = (part, need, up, down) => ({ part, ok: !need, text: !need ? 'about right' : need === 1 ? up : down });
+    return [
+      row('Jaw', c.need[0], 'open a little more', 'close a little'),
+      row('Tongue', all ? 0 : c.need[1], 'further forward', 'further back'),
+      row('Lips', all ? 0 : c.need[2], 'spread slightly (smile)', 'round slightly'),
+      row('Larynx', all ? c.focus.dir : 0, 'higher (shorter throat)', 'lower (longer throat)'),
+    ];
+  }
   function renderTractRead(el, rows) {
     if (!el) return;
     if (!rows) { el.innerHTML = ''; return; }
@@ -1139,7 +1150,7 @@
     const amp = (key2, m) => st[key2] + m * (sy[key2] - st[key2]);
     const shown = { height: amp('height', 2), back: amp('back', 2), round: amp('round', 2), larynx: amp('larynx', 1.5) };
     const you = tractGeom(shown), tgt = tractGeom(st);
-    readout = tractReadout(sy, st, !!refF);
+    readout = refF ? tractReadout(sy, st, true) : coachReadout(F, v);
     drawTractLayer(g, k, you, { stroke: C.ink, width: 1.8 * dpr, fill: C.ink });
     drawTractLayer(g, k, tgt, { stroke: refF ? C.muted : goalCol, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
     g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`;
@@ -1262,7 +1273,7 @@
     const parts = [];
     if (def.vowel) { const v = D.VOWEL_BY_KEY[def.vowel], F = fem ? v.W : v.M; parts.push(`jaw (F1) ${F[0]}, tongue (F2) ${F[1]}, lips/larynx (F3) ${F[2]} Hz`); }
     if (def.sib) parts.push(`/${def.sib === 's' ? 's' : 'ʃ'}/ centred near ${((fem ? D.SIBILANTS[def.sib].W : D.SIBILANTS[def.sib].M) / 1000).toFixed(1)} kHz`);
-    n.textContent = `Synthesized at typical ${fem ? 'feminine' : 'masculine'} values (${parts.join('; ')}; pitch ${fem ? 'about 200' : 'about 110'} Hz). It shows on the charts while it plays and doesn't count toward your scores. The comparison plays the masculine version first, then the feminine one.`;
+    n.textContent = `Synthesized at typical ${fem ? 'feminine' : 'masculine'} values (${parts.join('; ')}; pitch ${fem ? 'about 200' : 'about 110'} Hz). Shown on the charts, not scored. Compare plays masculine, then feminine.`;
   }
   function updateDrill(d) {
     const def = d.def;
@@ -1582,7 +1593,7 @@
     renderDrillGrid();
     renderSession();
     const bar = $('drill-prog'); if (bar) bar.style.width = '100%';
-    $('drill-msg').textContent = 'Done. Try this sound again to beat your score, or pick another sound.';
+    $('drill-msg').textContent = 'Done. Your result is below.';
     $('drill-again').hidden = false;
     planDrillFinished(def, res);
     autoSave('drill finished');
@@ -1731,6 +1742,12 @@
   function vowelTip(res) {
     const fem = state.goal === 'fem';
     if (onTarget(res.vowelScore)) return 'On target for this vowel. Hold the same mouth shape and try it inside a word drill.';
+    // same advice as the live coach, so the result and the coach never disagree
+    if (res.F && res.vowel) {
+      const c = D.coachVowel(res.F, D.VOWEL_BY_KEY[res.vowel], state.goal);
+      const cue = c.focus && COACH_CUES[state.goal][`${c.focus.formant}:${c.focus.dir}`];
+      if (cue) return cue.join(' ');
+    }
     // the formant furthest from the goal drives the advice
     // F1 swings with jaw opening, so it only leads the advice when it is clearly the outlier.
     const adj = res.per.map((p, i) => (i === 0 ? p + (fem ? 20 : -20) : p));
@@ -2007,6 +2024,14 @@
   function renderSpecGoalHelp() {
     const fem = state.goal === 'fem';
     $('spec-help-goal').innerHTML = `<b>The small triangles on the left edge are your goal.</b> While you hold a vowel they mark where the jaw, tongue and lips/larynx resonances (F1, F2, F3) sit for a typical ${fem ? 'feminine' : 'masculine'} voice on that vowel. Try to bring each dash level with its triangle. ${fem ? 'Moving the tongue forward, spreading the lips and raising the larynx lifts the upper two dashes and brightens the voice.' : 'More throat space, slight lip rounding and a lower larynx bring the upper two dashes down and darken the voice.'}`;
+  }
+  // the "?" next to the vocal tract title opens its explanation
+  function initTractHelp() {
+    const btn = $('tract-info'), help = $('tract-help');
+    const setOpen = (open) => { help.hidden = !open; btn.setAttribute('aria-expanded', String(open)); };
+    btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(help.hidden); });
+    document.addEventListener('click', (e) => { if (!help.hidden && !help.contains(e.target) && e.target !== btn) setOpen(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
   }
   function initSpecHelp() {
     const btn = $('spec-info'), help = $('spec-help'), cv = $('cv-spec'), tip = $('spec-tip'), fig = cv.closest('figure');
@@ -2499,7 +2524,7 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
     $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
-    initSpecHelp();
+    initSpecHelp(); initTractHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem');
     renderDrillGrid();
