@@ -23,7 +23,7 @@
     </div>
   </header>
 
-  <section class="sourcebar" aria-label="Audio source">
+  <section class="sourcebar" id="sourcebar-wrap" aria-label="Audio source">
     <button type="button" id="btn-mic" class="btn primary">Start microphone</button>
     <label class="btn" for="file-in" id="btn-file">Analyze a recording</label>
     <input type="file" id="file-in" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" hidden>
@@ -190,7 +190,6 @@
       </div>
       <label class="reader-field" id="reader-wpm-wrap" hidden><span>Words per minute <output id="reader-wpm-out">130</output></span><input type="range" id="reader-wpm" min="60" max="200" step="5" value="130"></label>
       <div class="btn-row reader-actions">
-        <button type="button" class="btn primary" id="reader-mic">Start microphone</button>
         <button type="button" class="btn" id="reader-listen" aria-pressed="false">Hear it read</button>
         <button type="button" class="btn" id="reader-voice-set">Voice settings</button>
         <button type="button" class="btn" id="reader-restart">Back to start</button>
