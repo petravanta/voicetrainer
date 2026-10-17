@@ -2880,7 +2880,7 @@
       const t = Texts.all().find(x => x.id === id);
       if (!t) return;
       try { localStorage.setItem('voicetrainer.readtext', id); } catch (e) {}
-      $('reader-form').hidden = true; $('reader-text').hidden = false;
+      $('reader-form').hidden = true; $('reader-text').hidden = false; $('reader').classList.remove('editing'); this.fromLibrary = false;
       this.render(t);
       this.fillPicker(id);
       $('reader-edit').hidden = !id.startsWith('u-');
@@ -2888,6 +2888,9 @@
     editForm(existing, preset) {
       this.stopListen();
       $('reader-text').hidden = true; $('reader-form').hidden = false; $('reader-edit').hidden = true;
+      // the form replaces the passage, so hide the focus line, live readout and reading controls too
+      $('reader').classList.add('editing');
+      if (preset) $('reader-pick').value = preset.id;
       $('rf-title').value = existing ? existing.title : (preset && preset.title) || '';
       $('rf-body').value = existing ? existing.body : '';
       $('rf-note').textContent = existing ? 'Edit your text, or delete it.' : preset ? preset.note : '';
@@ -2997,13 +3000,18 @@
       $('reader-bigger').addEventListener('click', () => size(0.25));
       $('reader-text').addEventListener('click', () => { if (this.mode === 'tap') this.go(this.idx + 1, false); });
       $('reader-form').addEventListener('submit', (e) => { e.preventDefault(); this.saveForm(); });
-      $('rf-cancel').addEventListener('click', () => { this.editing = null; this.pick((this.current && this.current.id) || BUILTIN_TEXTS[0].id); });
+      $('rf-cancel').addEventListener('click', () => {
+        this.editing = null;
+        if (this.fromLibrary) { this.fromLibrary = false; cancelRun(); this.hide(); return; }
+        this.pick((this.current && this.current.id) || BUILTIN_TEXTS[0].id); });
       $('rf-delete').addEventListener('click', async () => {
         const b = $('rf-delete');
         if (!b.dataset.confirm) { b.dataset.confirm = '1'; b.textContent = 'Confirm delete'; return; }
         delete b.dataset.confirm; b.textContent = 'Delete this text';
         Texts.user = Texts.user.filter(t => t !== this.editing); this.editing = null;
         await Texts.save(); this.fillPicker(BUILTIN_TEXTS[0].id); this.pick(BUILTIN_TEXTS[0].id);
+        // back to the Readings library, where the text is now gone
+        this.fromLibrary = false; cancelRun(); this.hide(); setMode('readings');
       });
       $('reader-edit').addEventListener('click', () => { if (this.current && this.current.id.startsWith('u-')) this.editForm(Texts.user.find(t => t.id === this.current.id)); });
       document.addEventListener('keydown', (e) => {
@@ -3041,7 +3049,7 @@
     for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => setMode(b.dataset.go));
     $('brand-home').addEventListener('click', () => setMode('home'));
     $('rd-hist-pick').addEventListener('change', renderReadingHistory);
-    $('rd-add').addEventListener('click', () => { Reader.show(); Reader.setFull(true); Reader.pick('add-own'); });
+    $('rd-add').addEventListener('click', () => { Reader.show(); Reader.setFull(true); Reader.pick('add-own'); Reader.fromLibrary = true; });
     $('live').addEventListener('scroll', () => paintDots(), { passive: true });
     // on a phone the drill panel opens below the grid, so bring it into view
     $('drill-grid').addEventListener('click', (e) => { if (sheetUi() && e.target.closest('button')) setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); });

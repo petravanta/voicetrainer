@@ -373,6 +373,7 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 .track-inner .tw.next { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 0.15em; }
 .track-inner .tw.ahead { color: var(--ink); opacity: 0.75; }
 .reader.no-track .reader-track { display: none; }
+.reader.editing :is(.reader-track, .reader-hud, #reader-listen, #reader-more, #reader-voice-set, #reader-restart, #reader-focus, #reader-smaller, #reader-bigger, #reader-finish, .reader-bar .seg, #reader-wpm-wrap) { display: none; }
 @media (prefers-reduced-motion: reduce) { .track-inner { transition: none; } }
 
 .pw-toggle { margin-left: auto; font-weight: 400; font-size: 0.9em; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
