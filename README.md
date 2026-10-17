@@ -2,6 +2,18 @@
 
 A browser-based voice training app for tracking **resonance** and **pitch**, aimed at people working toward a more feminine (or masculine) voice. In the vein of voiceduck.cc.
 
+## Modes
+
+- **Readings**: read a prepared passage aloud; press Finish for a result card (resonance, /s/ brightness, pitch, breathiness, change since last time) and the weakest vowels to practise. Each reading is saved with one trend per passage; readings under 70% of the text are kept as partial and left out of the trend.
+- **Freestyle**: every live dial (resonance meter, vowel space, spectrogram, vocal tract, pitch). Nothing is saved. On a phone the dials sit side by side and you swipe between them.
+- **Practice**: one exercise at a time with the live coach. Every finished exercise is saved, with last, best and a trend line per exercise.
+
+Phones get a tab bar along the bottom; the screen stays awake while the microphone runs.
+
+## Saved data and themes
+
+Readings, practice history, settings and your own texts live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. Settings also hold the goal (feminine or masculine) and the theme (system, light or dark).
+
 ## Features
 
 - **Resonance scoring** per vowel (0–100, clamped at both ends), comparing measured formants F1–F3 against Hillenbrand et al. (1995) male/female averages for the same vowel.
@@ -15,12 +27,10 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 - **Live spectrogram** with goal markers for the current vowel.
 - **Live drill coach**: one concrete adjustment at a time (jaw, tongue, lips/larynx) with per-formant gauges.
 - **Vocal tract sketch**: a side view of one plausible tract shape for your formants (jaw from F1, tongue from F2, lips from F3, larynx height from the shared shift), with the goal shape and the recommended change drawn on top.
-- **Reading practice**: a collapsible side pane (a compact panel along the bottom on phones and in phone view, with More for the rest of the controls; or full screen) so the rest of the app stays usable, with a large-text reading view with karaoke-style highlighting that follows your syllables (or a steady pace, or tap to advance), plus an optional large single-line focus track that keeps the current word centred. Built-in texts include the Rainbow Passage (Fairbanks, 1960) and the Grandfather Passage (Van Riper, 1963), plus your own. "Hear it read" reads the passage aloud with the browser's speech voice (real words). Browsers don't let apps measure that voice, so it doesn't appear on the pitch chart or meters, and a note under the chart says so.
+- **Reading practice**: the reader behind Readings, with the highlight following your voice, a single-line focus track, steady-pace and tap modes, and your own texts.
 - **Demo voice settings**: voice type, pitch, resonance and brightness for the synthetic demo voice; type, pitch and speed for the reading voice.
-- **Phone mode** (View: Desktop / Phone switch at the top): a streamlined layout (meter, pitch, drills) for practising on the go; keeps the screen awake while the microphone runs. Add `?phone=1` to the URL to open in it.
-- **Progress history** stored locally.
 
-Everything runs in the browser; no audio leaves your machine.
+Everything runs in the browser; no audio leaves your machine (except the optional Show words recognition noted above).
 
 **Try it: https://petravanta.github.io/voicetrainer/** (allow microphone access when asked)
 

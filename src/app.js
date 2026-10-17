@@ -688,7 +688,7 @@
     setStatus(label, true);
     $('btn-stop').hidden = kind === 'mic'; // the mic button itself becomes Stop
     setMicButton(kind === 'mic');
-    Words.sync(); PhoneMode.wake();
+    Words.sync(); Wake.update();
     an.reset();
     ensureLoop();
   }
@@ -700,40 +700,20 @@
     state.running = null;
     $('btn-stop').hidden = true;
     setMicButton(false);
-    Words.sync(); PhoneMode.wake();
+    Words.sync(); Wake.update();
     setStatus('Not listening');
-    if (hadRun) autoSave('stopped listening');
   }
-  // Phone mode: a streamlined layout for practising on the go. Remembered, and ?phone=1 turns it
-  // on for a home-screen bookmark. While the mic runs in phone mode the screen is kept awake.
-  const PhoneMode = {
-    on: false, lock: null,
-    init() {
-      try { this.on = localStorage.getItem('voicetrainer.phone') === '1'; } catch (e) {}
-      const q = new URLSearchParams(location.search).get('phone');
-      if (q != null) this.on = q !== '0';
-      $('view-desk').addEventListener('click', () => this.set(false));
-      $('view-phone').addEventListener('click', () => this.set(true));
-      // a drill opens below the long grid on a phone, so bring it into view
-      $('drill-grid').addEventListener('click', (e) => { if (this.on && e.target.closest('button')) setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); });
-      this.apply();
-    },
-    set(on) { this.on = on; try { localStorage.setItem('voicetrainer.phone', on ? '1' : '0'); } catch (e) {} this.apply(); window.scrollTo(0, 0); },
-    apply() {
-      document.body.classList.toggle('phone-mode', this.on);
-      try { if (Reader.open) Reader.layout(); } catch (e) {} // Reader may not be set up yet at start-up
-      $('view-desk').setAttribute('aria-checked', String(!this.on)); $('view-phone').setAttribute('aria-checked', String(this.on));
-      this.wake();
-      window.dispatchEvent(new Event('resize'));
-    },
-    async wake() {
-      const want = this.on && state.running === 'mic' && navigator.wakeLock && document.visibilityState === 'visible';
+  // While the microphone runs the screen is kept awake, so a phone doesn't dim mid-exercise.
+  const Wake = {
+    lock: null,
+    async update() {
+      const want = state.running === 'mic' && navigator.wakeLock && document.visibilityState === 'visible';
       if (want && !this.lock) { try { this.lock = await navigator.wakeLock.request('screen'); this.lock.addEventListener('release', () => { this.lock = null; }); } catch (e) { this.lock = null; } }
       else if (!want && this.lock) { try { await this.lock.release(); } catch (e) {} this.lock = null; }
     },
   };
-  document.addEventListener('visibilitychange', () => PhoneMode.wake());
-  const sheetUi = () => PhoneMode.on || window.matchMedia('(max-width: 860px)').matches;
+  document.addEventListener('visibilitychange', () => Wake.update());
+  const sheetUi = () => window.matchMedia('(max-width: 860px)').matches;
   // the browser's speech voice never reaches the analyser; only the microphone can hear it
   function paintVoiceNote() {
     const n = $('pitch-voice-note'); if (!n) return;
@@ -921,7 +901,7 @@
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'drill'; b.id = 'drill-' + def.id;
       b.setAttribute('aria-pressed', String(!!(state.drill && state.drill.def.id === def.id)));
-      const last = state.lastScores[def.id];
+      const hist = practiceFor(def.id), last = hist.length ? hist.at(-1).score : state.lastScores[def.id];
       b.innerHTML = `<span class="cue"></span><span class="sub"></span><span class="last"></span>`;
       b.querySelector('.cue').textContent = def.cue;
       b.querySelector('.sub').textContent = def.sub;
@@ -1504,7 +1484,7 @@
     renderDrillGrid(); renderSession();
     $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Do it again, or try another exercise.`;
     $('drill-again').hidden = false;
-    autoSave('drill finished');
+    recordPractice(session.drills[session.drills.length - 1]);
   }
 
 
@@ -1761,7 +1741,7 @@
     renderDrillGrid(); renderSession();
     $('drill-msg').textContent = def.pair ? 'Done: a clear fall and a clear rise on the same words. Do it again, or try another exercise.' : `Done: ${NEED_PROS} phrases on target. Do it again, or try another exercise.`;
     $('drill-again').hidden = false;
-    autoSave('drill finished');
+    recordPractice(session.drills[session.drills.length - 1]);
   }
 
   // ---------------- control exercises ----------------
@@ -1872,7 +1852,7 @@
       : def.kind === 'larynx' ? `Done. The jaw, tongue and lips readings all moved together, by up to ${pct}%: the feedback is tracking your larynx.`
         : `Done. The ${def.kind} reading (${['F1', 'F2', 'F3'][ISO_MAIN[def.kind][0]]}) moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
     $('drill-again').hidden = false;
-    autoSave('drill finished');
+    recordPractice(session.drills[session.drills.length - 1]);
   }
 
   function finishDrill(d) {
@@ -1900,7 +1880,7 @@
     $('drill-msg').textContent = 'Done. Your result is below.';
     $('drill-again').hidden = false;
     planDrillFinished(def, res);
-    autoSave('drill finished');
+    recordPractice(session.drills[session.drills.length - 1]);
   }
 
   // ---------------- guided exercise ----------------
@@ -1994,7 +1974,6 @@
     session.exercises = session.exercises || [];
     session.exercises.push({ at: pl.started, steps: pl.steps.map(s => ({ id: s.def.id, label: s.def.cue, before: s.before == null ? null : Math.round(s.before), after: s.after == null ? null : Math.round(s.after) })) });
     renderPlan(); renderSession();
-    autoSave('exercise finished');
   }
   function stepLabel(def) {
     return def.type === 'vowel' ? `"${def.cue}" (${D.VOWEL_BY_KEY[def.vowel].word})` : def.type === 'sib' ? `"${def.cue}"` : `word "${def.cue}"`;
@@ -2146,146 +2125,449 @@
       ['Drills completed', session.drills.length],
     ];
     sum.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-    $('btn-save').disabled = !(Number.isFinite(st.resonance) || session.drills.length || Object.keys(st.sib).length);
-    $('btn-save').textContent = autoOn() ? 'Save and start new session' : 'Save to progress';
   }
 
-  // ---------------- progress storage ----------------
-  const LS_KEY = 'voicetrainer.sessions.v1';
-  const Store = {
-    kind: 'local', col: null, items: [],
-    async init() {
-      try {
-        if (window.claude && typeof window.claude.use === 'function') {
-          const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
-          const uid = db && user ? await user.id() : null;
-          if (uid) { this.col = db.collection('data/users/' + uid); this.kind = 'account'; }
-        }
-      } catch (e) { this.col = null; this.kind = 'local'; }
-      await this.load();
-    },
-    async load() {
-      if (this.col) {
-        try {
-          const snap = await this.col.orderBy('at', 'asc').limit(500).get();
-          this.items = snap.docs.filter(s => !s.id.startsWith('_')).map(s => Object.assign({ id: s.id }, s.data()));
-          return;
-        } catch (e) { this.col = null; this.kind = 'local'; }
-      }
-      try { this.items = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) { this.items = []; }
-    },
-    async save(rec) {
-      // upsert: auto-save rewrites the same session record as it grows
-      const next = this.items.filter(r => r.id !== rec.id).concat([rec]);
-      if (this.col) await this.col.doc(rec.id).set(rec);
-      else localStorage.setItem(LS_KEY, JSON.stringify(next));
-      this.items = next;
-    },
-    async remove(id) {
-      if (this.col) await this.col.doc(id).delete();
-      else localStorage.setItem(LS_KEY, JSON.stringify(this.items.filter(r => r.id !== id)));
-      this.items = this.items.filter(r => r.id !== id);
-    },
-  };
-
-  const hasData = () => { const st = sessionStats(); return Number.isFinite(st.resonance) || session.drills.length > 0 || Object.keys(st.sib).length > 0; };
-  function sessionRecord() {
-    const st = sessionStats();
-    const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
-    if (!session.id) session.id = 's' + session.start.toString(36) + Math.random().toString(36).slice(2, 6);
-    return {
-      id: session.id,
-      at: new Date(session.start).toISOString(),
-      goal: state.goal,
-      resonance: round(st.resonance),
-      vowels: Object.fromEntries(Object.entries(st.vowels).map(([k, v]) => [k, round(v.score)])),
-      sibS: st.sib.s ? round(st.sib.s.score) : null,
-      sibSh: st.sib.sh ? round(st.sib.sh.score) : null,
-      pitchMedian: st.pitch ? Math.round(st.pitch.median) : null,
-      pitchP10: st.pitch ? Math.round(st.pitch.p10) : null,
-      pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
-      breath: round(st.breath),
-      drills: session.drills.slice(-60),
-      exercises: (session.exercises || []).slice(-10),
-    };
-  }
-  // ---- auto-save: keeps this session's record up to date at natural checkpoints ----
-  let autoBusy = false, autoAgain = false;
-  const autoOn = () => $('auto-save').checked;
-  async function autoSave(why) {
-    if (!autoOn() || session.noAuto || !hasData()) return;
-    if (autoBusy) { autoAgain = true; return; }
-    autoBusy = true;
-    try {
-      await Store.save(sessionRecord());
-      const t = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      $('save-status').textContent = `Auto-saved at ${t}${why ? ' (' + why + ')' : ''}.`;
-      renderHistory();
-    } catch (e) {
-      $('save-status').textContent = e && e.code === 'quota_exceeded' ? 'Auto-save failed: progress storage is full. Delete a few old sessions.' : 'Auto-save failed. It will try again at the next checkpoint.';
-    } finally {
-      autoBusy = false;
-      if (autoAgain) { autoAgain = false; autoSave(why); }
-    }
-  }
-  async function saveSession() {
-    const rec = sessionRecord();
-    const s = $('save-status');
-    try {
-      await Store.save(rec);
-      s.textContent = Store.kind === 'account' ? 'Saved to your progress.' : 'Saved to your progress in this browser.';
-      session = newSession();
-      renderSession(); resetSessionViews();
-      renderHistory();
-    } catch (e) {
-      s.textContent = e && e.code === 'quota_exceeded' ? 'Progress storage is full. Delete a few old sessions and save again.' : 'Could not save this session. Check your connection and try again.';
-    }
-  }
   function resetSessionViews() {
     $('sess-vowels').innerHTML = '<p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p>';
     $('sess-sibs').innerHTML = '<p class="empty">Hold an "sss" or "shh" to measure how bright your sibilants are.</p>';
     renderSession();
   }
 
-  function renderHistory() {
-    const items = Store.items.slice().sort((a, b) => a.at.localeCompare(b.at));
-    $('store-kind').textContent = Store.kind === 'account' ? 'Saved to your account' : 'Saved in this browser';
-    const has = items.length > 0;
-    $('hist-empty').hidden = has;
-    $('hist-chart-wrap').hidden = !has;
-    $('hist-table-wrap').hidden = !has;
+  // ---------------- saved data: Google Drive ----------------
+  // Readings and practice history (plus settings and your own texts) live in one JSON file in the
+  // user's Google Drive, as in petravanta's other apps. Until Drive is connected, and where Drive
+  // can't be used (a file opened from disk, a claude.ai Artifact), the browser keeps the copy.
+  const GOOGLE_CLIENT_ID = /^(petravanta\.github\.io|localhost)$/.test(location.hostname) ? '326863468616-4hf2conk0ks0s4qdva9tphphdo7ht7eh.apps.googleusercontent.com' : '';
+  const PRIVACY = '<a href="https://petravanta.github.io/general/privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="https://petravanta.github.io/general/terms.html" target="_blank" rel="noopener">Terms</a>';
+  const emptyData = () => ({ settings: {}, readings: [], practice: [], texts: [], deleted: [] });
+  // Combine two copies (Drive and this browser, or two devices): every record from both minus
+  // deletions, the more recently changed settings, and the newer edit of each text.
+  function mergeData(a, b) {
+    a = a || {}; b = b || {};
+    const del = new Set([...(a.deleted || []), ...(b.deleted || [])]);
+    const union = (k, newer) => {
+      const by = new Map();
+      for (const r of [...(b[k] || []), ...(a[k] || [])]) {
+        if (!r || !r.id || del.has(r.id)) continue;
+        const old = by.get(r.id);
+        if (!old || !newer || (r.upd || '') >= (old.upd || '')) by.set(r.id, r);
+      }
+      return [...by.values()];
+    };
+    const sa = a.settings || {}, sb = b.settings || {};
+    return {
+      settings: (sa.upd || '') >= (sb.upd || '') ? sa : sb,
+      readings: union('readings').sort((x, y) => (x.at < y.at ? -1 : 1)),
+      practice: union('practice').sort((x, y) => (x.at < y.at ? -1 : 1)),
+      texts: union('texts', true),
+      deleted: [...del].slice(-2000),
+    };
+  }
+  /* ===== Drive store: petravanta's apps =====
+     Canonical copy: https://github.com/petravanta/general/blob/main/shared/drive-store.js (see STANDARDS.md, "Data lives in Google Drive").
+     Keeps an app's data in one JSON file in the user's Google Drive (drive.file scope: the app only sees files it created).
+     The browser keeps only sign-in details, and a copy of changes that haven't reached Drive yet (for example while offline);
+     that copy is deleted as soon as Drive has it. */
+  function DriveStore(o){
+    // o: {clientId, file:'App data.json', app:'app-id', key:'localStorage prefix', empty:()=>data, merge:(remote,local)=>data, onChange:()=>{}}
+    const API='https://www.googleapis.com', SCOPE='https://www.googleapis.com/auth/drive.file';
+    const get=k=>{try{return JSON.parse(localStorage.getItem(o.key+'.'+k)||'null')}catch(e){return null}};
+    const put=(k,v)=>{try{v==null?localStorage.removeItem(o.key+'.'+k):localStorage.setItem(o.key+'.'+k,JSON.stringify(v));return true}catch(e){return false}};
+    const S={token:null,exp:0,fileId:get('file'),known:!!get('known'),data:null,busy:false,err:null,last:null,timer:null,ask:0};
+    const t=get('token'); if(t&&t.exp>Date.now()){S.token=t.token;S.exp=t.exp}
+    const live=()=>!!S.token&&Date.now()<S.exp;
+    const note=()=>{try{o.onChange&&o.onChange()}catch(e){}};
+    function gis(){return new Promise((res,rej)=>{
+      if(window.google&&google.accounts&&google.accounts.oauth2) return res();
+      const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.onload=res; s.onerror=()=>rej({code:'offline'}); document.head.appendChild(s)})}
+    // Asking for a token opens Google's window, so call this from a tap. For an account that already agreed, the window closes by itself.
+    function signIn(){return new Promise(async(res,rej)=>{
+      try{await gis()}catch(e){return rej(e)}
+      google.accounts.oauth2.initTokenClient({client_id:o.clientId,scope:SCOPE,error_callback:rej,
+        callback:r=>{if(r.error) return rej(r); S.token=r.access_token; S.exp=Date.now()+(Number(r.expires_in||3600)-60)*1000; put('token',{token:S.token,exp:S.exp}); S.known=true; put('known',true); res()}
+      }).requestAccessToken({prompt:S.known?'':'consent'});
+    })}
+    async function call(path,opt={}){
+      if(!live()) throw {code:'expired'};
+      let r; try{r=await fetch(API+path,{...opt,headers:{...(opt.headers||{}),Authorization:'Bearer '+S.token}})}catch(e){throw {code:'offline'}}
+      if(r.status===401){S.token=null; put('token',null); throw {code:'expired'}}
+      if(!r.ok) throw {code:'http',status:r.status};
+      return r;
+    }
+    async function find(){
+      if(S.fileId){try{const j=await (await call(`/drive/v3/files/${S.fileId}?fields=id,trashed`)).json(); if(!j.trashed) return S.fileId}catch(e){if(e.code!=='http') throw e}}
+      const q=encodeURIComponent(`name='${o.file.replace(/'/g,"\\'")}' and trashed=false`);
+      const j=await (await call(`/drive/v3/files?q=${q}&orderBy=modifiedTime desc&fields=files(id)`)).json();
+      S.fileId=j.files&&j.files[0]?j.files[0].id:null; put('file',S.fileId); return S.fileId;
+    }
+    async function read(){const id=await find(); return id?(await call(`/drive/v3/files/${id}?alt=media`)).json():null}
+    async function write(data){
+      const body=JSON.stringify({app:o.app,saved:new Date().toISOString(),...data}), id=await find();
+      if(id){await call(`/upload/drive/v3/files/${id}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body});return}
+      const b='b'+Math.random().toString(36).slice(2), meta=JSON.stringify({name:o.file,mimeType:'application/json'});
+      const j=await (await call('/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},
+        body:`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`})).json();
+      S.fileId=j.id; put('file',j.id);
+    }
+    async function flush(){
+      clearTimeout(S.timer); if(!S.data||S.busy) return;
+      if(!live()){note();return}
+      S.busy=true; note();
+      try{await write(S.data); S.err=null; S.last=new Date(); put('pending',null)}
+      catch(e){S.err=e.code==='expired'?null:e.code==='offline'?'offline':'error'}
+      finally{S.busy=false; note()}
+    }
+    // Load: Drive's copy, merged with any changes this browser hadn't saved yet. Creates the file on first use.
+    async function load(interactive){
+      if(!live()){ if(!interactive) throw {code:'expired'}; await signIn() }
+      S.busy=true; note();
+      const pending=get('pending');
+      try{
+        const remote=await read();
+        let data=remote?o.merge(remote,o.empty()):o.empty();
+        if(pending) data=o.merge(pending,data);
+        S.data=data; S.err=null; S.last=new Date();
+        if(!remote||pending){await write(data); put('pending',null)}
+        return data;
+      }catch(e){
+        // offline with unsaved changes: carry on from them; they go to Drive once the connection is back
+        if(e.code==='offline'&&pending){S.data=o.merge(pending,o.empty()); S.err='offline'; return S.data}
+        S.err=e.code==='offline'?'offline':e.code==='expired'?null:'error'; throw e;
+      }finally{S.busy=false; note()}
+    }
+    // Pick up changes made on another device
+    async function refresh(){
+      if(!live()||S.busy||!S.data) return false;
+      try{const r=await read(); if(!r) return false; const before=JSON.stringify(S.data); S.data=o.merge(r,S.data); return JSON.stringify(S.data)!==before}
+      catch(e){return false}
+    }
+    function save(data){S.data=data; if(!put('pending',data)) {/* storage full or blocked: Drive still gets it */} clearTimeout(S.timer); S.timer=setTimeout(flush,1500); note()}
+    function signOut(){
+      if(S.token&&window.google&&google.accounts&&google.accounts.oauth2) google.accounts.oauth2.revoke(S.token,()=>{});
+      S.token=null; S.data=null; ['token','known','file','pending'].forEach(k=>put(k,null)); S.known=false; note();
+    }
+    // Tokens last an hour. Renew on a tap when it is close to running out or gone, then save anything waiting.
+    document.addEventListener('click',e=>{
+      if(!o.clientId||!S.known||e.target.closest('[data-drive]')) return;
+      if(S.exp-Date.now()>10*60000||Date.now()-S.ask<60000) return;
+      S.ask=Date.now(); signIn().then(flush).catch(()=>note());
+    },true);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden') flush()});
+    window.addEventListener('online',()=>flush());
+    function status(){
+      if(!S.data) return '';
+      if(S.busy) return 'Saving to Google Drive…';
+      const waiting=!!get('pending');
+      if(S.err==='offline') return 'Offline · changes save to Drive when you’re back online';
+      if(S.err) return 'Couldn’t reach Google Drive · will retry';
+      if(!live()) return waiting?'Tap anywhere to reconnect Google Drive':'Google Drive sign-in expired';
+      if(waiting) return 'Saving to Google Drive…';
+      return 'Saved to Google Drive'+(S.last?' · '+S.last.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'');
+    }
+    return {load,save,flush,refresh,signIn,signOut,status,live,
+      get data(){return S.data}, get known(){return S.known}, get configured(){return !!o.clientId}, get file(){return o.file},
+      get needsTap(){return !!S.data&&!live()}};
+  }
+  /* ===== end Drive store ===== */
+
+  // Data: the one copy the app reads and writes. 'drive' once Drive is connected, else 'browser'.
+  const LOCAL_KEY = 'vt.local';
+  const Data = {
+    d: emptyData(), where: 'browser', busy: false, err: '',
+    store: null,
+    init() {
+      this.store = DriveStore({ clientId: GOOGLE_CLIENT_ID, file: 'VoiceTrainer data.json', app: 'voicetrainer', key: 'vt',
+        empty: emptyData, merge: mergeData, onChange: () => this.paintStatus() });
+      let local = null;
+      try { local = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch (e) {}
+      this.d = mergeData(local || this.migrate(), emptyData());
+      // Drive sign-ins last about an hour, so a returning visitor reconnects with one tap
+      if (this.store.configured && this.store.live()) this.connect(false);
+      this.paintStatus();
+    },
+    // Earlier versions kept your own texts and the goal in this browser; progress starts fresh (Peter, 2026-10-16)
+    migrate() {
+      const d = emptyData();
+      try { d.texts = JSON.parse(localStorage.getItem('voicetrainer.texts.v1') || '[]').map(t => Object.assign({ upd: '' }, t)); } catch (e) {}
+      try { const g = localStorage.getItem('voicetrainer.goal'); if (g) d.settings.goal = g; } catch (e) {}
+      return d;
+    },
+    async connect(interactive) {
+      if (!this.store.configured) return;
+      this.busy = true; this.err = ''; this.paintStatus();
+      try {
+        const remote = await this.store.load(interactive);
+        this.d = mergeData(remote, this.d);
+        this.where = 'drive';
+        this.store.save(this.d);
+        try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+        onDataChanged();
+      } catch (e) {
+        this.err = e && (e.code === 'expired' || e.type === 'popup_closed' || e.type === 'popup_failed_to_open' || e.error) ? '' : 'Couldn’t reach Google Drive. Check your connection and try again.';
+      } finally { this.busy = false; this.paintStatus(); }
+    },
+    signOut() {
+      // keep a browser copy so nothing disappears from this screen; Drive keeps its own copy
+      this.store.signOut(); this.where = 'browser'; this.persist(); this.paintStatus();
+    },
+    persist() {
+      if (this.where === 'drive') this.store.save(this.d);
+      else { try { localStorage.setItem(LOCAL_KEY, JSON.stringify(this.d)); } catch (e) {} }
+      this.paintStatus();
+    },
+    add(list, rec) { this.d[list].push(rec); this.persist(); },
+    remove(list, id) { this.d[list] = this.d[list].filter(r => r.id !== id); this.d.deleted.push(id); this.persist(); },
+    setting(k, v) {
+      if (v === undefined) return this.d.settings[k];
+      this.d.settings = Object.assign({}, this.d.settings, { [k]: v, upd: new Date().toISOString() });
+      this.persist();
+    },
+    statusText() {
+      if (this.busy) return 'Connecting to Google Drive…';
+      if (this.where === 'drive') return this.store.status();
+      return this.store.configured ? 'Saved in this browser' : 'Saved in this browser';
+    },
+    paintStatus() {
+      const s = $('save-state'); if (s) s.textContent = this.statusText();
+      const b = $('drive-resume'); if (b) b.hidden = !(this.where === 'drive' && this.store.needsTap);
+      paintDrive();
+    },
+  };
+  function paintDrive() {
+    const p = $('drive-panel'), h = $('home-drive'); if (!p || !Data.store) return;
+    const st = Data.store;
+    let html;
+    if (!st.configured) html = `<p class="vd-note">This copy saves your readings and practice in this browser only. Open VoiceTrainer at petravanta.github.io/voicetrainer to keep them in your Google Drive.</p>`;
+    else if (Data.where !== 'drive') html = `<p class="vd-note">VoiceTrainer can keep your readings, practice history, settings and texts in one file in your own Google Drive, so they follow you to any device. It can only see the file it creates. Until then they are saved in this browser.</p>
+      ${Data.err ? `<p class="vd-note">${Data.err}</p>` : ''}
+      <div class="btn-row"><button type="button" class="btn primary" data-act="drive-connect" data-drive="1">${st.known ? 'Reconnect Google Drive' : 'Connect Google Drive'}</button></div>`;
+    else html = `<p class="vd-note">${st.status()}. Everything is saved to <b>${st.file}</b> in your Drive a moment after each change.</p>
+      <div class="btn-row"><button type="button" class="btn sm" data-act="drive-save" data-drive="1">Save now</button><button type="button" class="btn sm ghost" data-act="drive-signout" data-drive="1">Sign out of Google Drive</button></div>`;
+    p.innerHTML = html + `<p class="vd-note">${PRIVACY}</p>`;
+    if (h) {
+      const show = st.configured && Data.where !== 'drive';
+      h.hidden = !show;
+      if (show) h.innerHTML = `<p>${st.known ? 'Your Google Drive sign-in has expired. Reconnect to keep saving there.' : 'Keep your readings and practice history in your own Google Drive, so they follow you to any device.'}</p>
+        <button type="button" class="btn primary" data-act="drive-connect" data-drive="1">${st.known ? 'Reconnect' : 'Connect Google Drive'}</button>`;
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const a = b.dataset.act;
+    if (a === 'drive-connect') Data.connect(true);
+    else if (a === 'drive-save') Data.store.flush();
+    else if (a === 'drive-signout') {
+      if (!b.dataset.confirm) { b.dataset.confirm = '1'; b.textContent = 'Sign out: tap again'; return; }
+      Data.signOut();
+    }
+  });
+  // another device may have added readings: pick them up when the app comes back to the front
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || Data.where !== 'drive') return;
+    if (await Data.store.refresh()) { Data.d = Data.store.data; onDataChanged(); }
+  });
+  function onDataChanged() {
+    applyTheme(Data.setting('theme') || 'system');
+    const g = Data.setting('goal'); if (g && g !== state.goal) setGoal(g, true);
+    Texts.sync();
+    renderReadings(); renderPracticeHistory(); renderDrillGrid(); renderHome();
+  }
+
+  // ---------------- theme ----------------
+  function applyTheme(t) {
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    else delete document.documentElement.dataset.theme;
+    for (const k of ['system', 'light', 'dark']) { const b = $('theme-' + k); if (b) b.setAttribute('aria-checked', String(k === t)); }
+    try { localStorage.setItem('vt.theme', t); } catch (e) {} // applied before Drive loads on the next visit
+  }
+
+  // ---------------- practice history ----------------
+  const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'control' ? '' : '');
+  function recordPractice(entry) {
+    if (!entry) return;
+    Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score });
+    renderPracticeHistory(); renderHome();
+  }
+  const practiceFor = (id) => Data.d.practice.filter(p => p.drill === id && p.goal === state.goal);
+  function sparkline(vals, lo, hi) {
+    if (vals.length < 2) return '';
+    const w = 72, h = 20, n = vals.length, mn = Math.min(lo, ...vals), mx = Math.max(hi, ...vals), span = mx - mn || 1;
+    const pts = vals.map((v, i) => `${(i / (n - 1) * (w - 4) + 2).toFixed(1)},${(h - 2 - (v - mn) / span * (h - 4)).toFixed(1)}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}"/></svg>`;
+  }
+  function renderPracticeHistory() {
+    const ul = $('pr-list'); if (!ul) return;
+    const by = new Map();
+    for (const p of Data.d.practice) if (p.goal === state.goal) { if (!by.has(p.drill)) by.set(p.drill, []); by.get(p.drill).push(p); }
+    $('pr-hist-empty').hidden = by.size > 0;
+    $('pr-hist-note').textContent = by.size ? `${state.goal === 'fem' ? 'Feminine' : 'Masculine'} goal` : '';
+    const rows = [...by.entries()].sort((a, b) => (a[1].at(-1).at < b[1].at(-1).at ? 1 : -1));
+    ul.innerHTML = '';
+    for (const [id, list] of rows) {
+      const def = drillById(id), vals = list.map(p => p.score).filter(Number.isFinite);
+      const kind = list[0].kind, u = unitOf(kind), f = (v) => (kind === 'prosody' ? v.toFixed(1) : Math.round(v)) + u;
+      const li = document.createElement('li');
+      li.innerHTML = `<button type="button" class="pr-name"></button><span class="pr-n">${list.length}×</span><span class="pr-last">last ${vals.length ? f(vals.at(-1)) : '--'}</span><span class="pr-best">best ${vals.length ? f(Math.max(...vals)) : '--'}</span>${kind === 'sound' ? sparkline(vals.slice(-20), 0, 100) : sparkline(vals.slice(-20), Math.min(...vals), Math.max(...vals))}`;
+      const nb = li.querySelector('.pr-name'); nb.textContent = def ? def.cue : list[0].label;
+      nb.addEventListener('click', () => { if (def) openDrill(def); });
+      ul.appendChild(li);
+    }
+  }
+  function drillById(id) { for (const [tab, list] of Object.entries(DRILLS)) { const d = list.find(x => x.id === id); if (d) return Object.assign(d, { tab }); } return null; }
+  function openDrill(def) {
+    const t = drillById(def.id); if (t) state.tab = t.tab;
+    setMode('practice');
+    selectDrill(def);
+    setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  }
+
+  // ---------------- readings ----------------
+  const Run = { on: false, text: null, maxIdx: 0, start: 0 };
+  function startReading(id) {
+    Reader.show();
+    Reader.pick(id);
+    Reader.setFull(true);
+    beginRun();
+  }
+  function beginRun() {
+    const t = Reader.current; if (!t) return;
+    Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now();
+    session = newSession();
+    $('reader').classList.add('run');
+    $('reader-finish').hidden = false;
+    Reader.restart();
+    if (state.running !== 'mic') startMic();
+  }
+  function endRun() {
+    Run.on = false;
+    $('reader').classList.remove('run');
+    $('reader-finish').hidden = true;
+  }
+  function finishReading() {
+    if (!Run.on) return;
+    const t = Run.text, st = sessionStats(session);
+    const cover = Reader.words.length ? clamp((Run.maxIdx + 1) / Reader.words.length, 0, 1) : 0;
+    const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
+    const rec = {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title,
+      cover: Math.round(cover * 100), partial: cover < 0.7, seconds: Math.round((Date.now() - Run.start) / 1000),
+      resonance: round(st.resonance),
+      vowels: Object.fromEntries(Object.entries(st.vowels).map(([k, v]) => [k, round(v.score)])),
+      sibS: st.sib.s ? round(st.sib.s.score) : null, sibSh: st.sib.sh ? round(st.sib.sh.score) : null,
+      pitchMedian: st.pitch ? Math.round(st.pitch.median) : null, pitchP10: st.pitch ? Math.round(st.pitch.p10) : null, pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
+      breath: round(st.breath),
+    };
+    endRun();
+    Reader.hide();
+    if (state.running === 'mic') stop();
+    if (rec.resonance == null && rec.sibS == null) {
+      showReadingResult(null, 'Not enough voice was heard to score that reading, so nothing was saved. Check that the microphone is on and read a little louder.');
+    } else {
+      Data.add('readings', rec);
+      // the weakest sounds become suggested exercises in Practice
+      const steps = buildPlan(st);
+      if (steps.length) { state.plan = { status: 'offer', source: 'reading', steps, idx: 0 }; renderPlan(); }
+      showReadingResult(rec);
+    }
+    session = newSession(); resetSessionViews();
+    renderReadings(); renderHome();
+    $('rd-hist-pick').value = t.id; renderReadingHistory();
+  }
+  function cancelRun() { if (Run.on) { endRun(); session = newSession(); resetSessionViews(); } }
+  const fullReadings = (id) => Data.d.readings.filter(r => r.text === id && r.goal === state.goal && !r.partial);
+  function showReadingResult(rec, msg) {
+    const box = $('rd-result'); box.hidden = false;
+    if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
+    const prev = fullReadings(rec.text).filter(r => r.id !== rec.id);
+    const last = prev.at(-1), best = prev.reduce((m, r) => (r.resonance != null && (m == null || better(r.resonance, m)) ? r.resonance : m), null);
+    const delta = (v, o) => (v == null || o == null ? '' : `<small class="${better(v, o) ? 'up' : v === o ? '' : 'down'}">${v - o > 0 ? '+' : ''}${Math.round(v - o)} vs last</small>`);
+    const [lo, hi] = target();
+    const weak = Object.entries(rec.vowels || {}).filter(([, s]) => Math.round(s) < lo || Math.round(s) > hi).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
+    const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
+    box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}</h3><span class="muted small">${rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
+      <div class="stats">
+        ${stat('Resonance', rec.resonance != null ? Math.round(rec.resonance) : '--', delta(rec.resonance, last && last.resonance))}
+        ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', delta(rec.sibS, last && last.sibS))}
+        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : '')}
+        ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
+      </div>
+      <p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>
+      ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
+      <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
+    box.querySelectorAll('[data-weak]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === b.dataset.weak); if (def) openDrill(def); }));
+    $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
+    $('rd-close').onclick = () => { box.hidden = true; };
+    $('rd-discard').onclick = (e) => {
+      const b = e.currentTarget;
+      if (!b.dataset.confirm) { b.dataset.confirm = '1'; b.textContent = 'Discard: tap again'; return; }
+      Data.remove('readings', rec.id); box.hidden = true; renderReadings(); renderHome();
+    };
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  // a higher score is better for the feminine goal and a lower one for the masculine goal
+  const better = (a, b) => (state.goal === 'fem' ? a > b : a < b);
+  const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  function renderReadings() {
+    const ul = $('rd-library'); if (!ul) return;
+    ul.innerHTML = '';
+    for (const t of Texts.all()) {
+      const list = fullReadings(t.id), last = list.at(-1);
+      const li = document.createElement('li');
+      li.className = 'rd-item';
+      li.innerHTML = `<div class="rd-text"><b></b><span class="small muted"></span></div><div class="rd-actions"><button type="button" class="btn primary sm">Read</button></div>`;
+      li.querySelector('b').textContent = t.title;
+      li.querySelector('.small').textContent = list.length ? `${list.length} reading${list.length > 1 ? 's' : ''} · last ${last.resonance != null ? Math.round(last.resonance) : '--'} on ${new Date(last.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : `${t.body.split(/\s+/).length} words · not read yet`;
+      li.querySelector('.btn').addEventListener('click', () => startReading(t.id));
+      if (t.id.startsWith('u-')) {
+        const e = document.createElement('button'); e.type = 'button'; e.className = 'btn sm ghost'; e.textContent = 'Edit';
+        e.addEventListener('click', () => { Reader.show(); Reader.setFull(true); Reader.editForm(Texts.user.find(x => x.id === t.id)); });
+        li.querySelector('.rd-actions').appendChild(e);
+      }
+      ul.appendChild(li);
+    }
+    const pick = $('rd-hist-pick'), cur = pick.value;
+    pick.innerHTML = '';
+    const readIds = new Set(Data.d.readings.filter(r => r.goal === state.goal).map(r => r.text));
+    for (const t of Texts.all().filter(x => readIds.has(x.id))) { const o = document.createElement('option'); o.value = t.id; o.textContent = t.title; pick.appendChild(o); }
+    pick.hidden = !pick.options.length;
+    if ([...pick.options].some(o => o.value === cur)) pick.value = cur;
+    else { const last = Data.d.readings.filter(r => r.goal === state.goal).at(-1); if (last && readIds.has(last.text)) pick.value = last.text; }
+    renderReadingHistory();
+  }
+  function renderReadingHistory() {
+    const id = $('rd-hist-pick').value;
+    const items = Data.d.readings.filter(r => r.text === id && r.goal === state.goal);
+    const full = items.filter(r => !r.partial);
+    $('rd-hist-title').textContent = 'History';
+    $('rd-hist-empty').hidden = items.length > 0;
+    $('rd-hist-empty').textContent = Data.d.readings.length ? 'No readings of this passage yet.' : 'No readings yet. Each reading you finish appears here, with one trend per passage.';
+    $('rd-chart-wrap').hidden = full.length < 1;
+    $('rd-table-wrap').hidden = !items.length;
     const tb = document.querySelector('#hist-table tbody');
     tb.innerHTML = '';
     for (const r of items.slice().reverse()) {
       const tr = document.createElement('tr');
-      const low = Object.entries(r.vowels || {}).sort((a, b) => a[1] - b[1])[0];
-      const lowTxt = low ? `${D.VOWEL_BY_KEY[low[0]].cue.split(' ')[0]} (${Math.round(low[1])})` : '--';
       const date = new Date(r.at);
       const cells = [date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
-        r.goal === 'masc' ? 'Masculine' : 'Feminine',
-        r.resonance != null ? Math.round(r.resonance) : '--',
-        r.sibS != null ? Math.round(r.sibS) : '--',
-        r.pitchMedian != null ? r.pitchMedian + ' Hz' : '--', r.breath != null ? Math.round(r.breath) : '--', lowTxt];
-      cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i >= 2 && i <= 5) td.className = 'num'; tr.appendChild(td); });
+        r.resonance != null ? Math.round(r.resonance) : '--', r.sibS != null ? Math.round(r.sibS) : '--',
+        r.pitchMedian != null ? r.pitchMedian + ' Hz' : '--', r.breath != null ? Math.round(r.breath) : '--', r.cover + '%' + (r.partial ? ' (partial)' : '')];
+      cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i >= 1) td.className = 'num'; tr.appendChild(td); });
       const td = document.createElement('td');
       const del = document.createElement('button');
       del.type = 'button'; del.textContent = 'Delete';
-      del.addEventListener('click', async () => {
-        if (del.dataset.confirm) {
-          await Store.remove(r.id);
-          if (r.id === session.id) { session.noAuto = true; $('save-status').textContent = 'Deleted. Auto-save will start again with your next session.'; }
-          renderHistory();
-        }
-        else { del.dataset.confirm = '1'; del.textContent = 'Confirm delete'; }
+      del.addEventListener('click', () => {
+        if (!del.dataset.confirm) { del.dataset.confirm = '1'; del.textContent = 'Confirm delete'; return; }
+        Data.remove('readings', r.id); renderReadings(); renderHome();
       });
       td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
     }
-    drawHistory();
+    drawHistory(full);
   }
-  function drawHistory() {
-    const cv = $('cv-hist'); if (!cv || !C.ink || $('hist-chart-wrap').hidden) return;
+  function drawHistory(items) {
+    const cv = $('cv-hist'); if (!cv || !C.ink || $('rd-chart-wrap').hidden || !cv.clientWidth) return;
+    items = items || Data.d.readings.filter(r => r.text === $('rd-hist-pick').value && r.goal === state.goal && !r.partial);
     fitCanvas(cv);
-    const items = Store.items.slice().sort((a, b) => a.at.localeCompare(b.at));
     const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height;
     const pad = { l: 36 * dpr, r: 12 * dpr, t: 10 * dpr, b: 26 * dpr };
     g.clearRect(0, 0, w, h);
@@ -2311,8 +2593,40 @@
     series('sibS', C.warn);
   }
 
+  // ---------------- modes ----------------
+  let mode = 'home';
+  function setMode(m) {
+    if (!['home', 'readings', 'freestyle', 'practice'].includes(m)) m = 'home';
+    mode = m;
+    document.body.dataset.mode = m;
+    for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(m);
+    for (const b of document.querySelectorAll('#modes [data-mode]')) b.setAttribute('aria-selected', String(b.dataset.mode === m));
+    if (m !== 'readings' && Reader.open) { cancelRun(); Reader.hide(); }
+    if (m === 'home') renderHome();
+    window.scrollTo(0, 0);
+    // canvases in a section that was hidden have no size until now
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    paintDots();
+  }
+  function renderHome() {
+    const r = Data.d.readings.filter(x => x.goal === state.goal && !x.partial), last = r.at(-1);
+    const rm = $('home-readings-meta'); if (rm) rm.textContent = last ? `Last: ${escapeTitle(last.title)}, resonance ${last.resonance != null ? Math.round(last.resonance) : '--'}` : 'No readings yet';
+    const p = Data.d.practice.filter(x => x.goal === state.goal);
+    const pm = $('home-practice-meta'); if (pm) pm.textContent = state.plan && state.plan.status === 'offer' ? `${state.plan.steps.length} exercises suggested by your last reading` : p.length ? `${new Set(p.map(x => x.drill)).size} exercises practised` : 'Start with a vowel';
+    const hg = $('home-goal'); if (hg) hg.textContent = state.goal === 'fem' ? 'feminine' : 'masculine';
+  }
+  const escapeTitle = (s) => (s.length > 40 ? s.slice(0, 38) + '…' : s);
+  // Freestyle on a phone: the dials sit side by side and you swipe between them; dots show where you are
+  function paintDots() {
+    const live = $('live'), dots = $('dial-dots'); if (!live || !dots) return;
+    const figs = [...live.children].filter(c => c.tagName === 'FIGURE');
+    if (dots.childElementCount !== figs.length) dots.innerHTML = figs.map(() => '<i></i>').join('');
+    const i = Math.round(live.scrollLeft / Math.max(1, live.clientWidth));
+    [...dots.children].forEach((d, k) => d.classList.toggle('on', k === i));
+  }
+
   // ---------------- wiring ----------------
-  function setGoal(goal) {
+  function setGoal(goal, fromData) {
     state.goal = goal;
     document.body.dataset.goal = goal;
     $('goal-fem').setAttribute('aria-checked', String(goal === 'fem'));
@@ -2320,10 +2634,11 @@
     document.body.classList.toggle('goal-masc', goal === 'masc');
     const [lo, hi] = pitchBand();
     $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz`;
-    try { localStorage.setItem('voicetrainer.goal', goal); } catch (e) {}
+    if (!fromData && Data.setting('goal') !== goal) Data.setting('goal', goal);
     try { if (!localStorage.getItem(DemoVoice.KEY)) DemoVoice.v = null; } catch (e) {}
     renderMeter(); drawPitch(); drawHistory(); renderSpecGoalHelp(); renderExampleNote(); if (state.coach) { state.coach.key = null; renderCoach(); } if (C.ink) drawSpecAxis();
     if (state.drill && state.drill.result) renderDrillResult(state.drill.result);
+    renderDrillGrid(); renderReadings(); renderPracticeHistory(); renderHome();
   }
   function renderSpecGoalHelp() {
     const fem = state.goal === 'fem';
@@ -2386,18 +2701,17 @@
   const ADD_PRESETS = [
     { id: 'add-own', title: '', note: 'Paste or type anything you want to practise: a script for a phone call, a poem, a paragraph from a book. Blank lines start new paragraphs.' },
   ];
-  const TEXTS_KEY = 'voicetrainer.texts.v1';
+  // Your own texts are part of the saved data (Drive or this browser)
   const Texts = {
     user: [],
-    async load() {
-      try { this.user = JSON.parse(localStorage.getItem(TEXTS_KEY) || '[]'); } catch (e) { this.user = []; }
-      if (Store.col) {
-        try { const s = await Store.col.doc('_texts').get(); if (s.exists) this.user = (s.data().items || []); } catch (e) {}
-      }
-    },
+    sync() { this.user = Data.d.texts.slice(); if (Reader.open) Reader.fillPicker(); },
     async save() {
-      try { localStorage.setItem(TEXTS_KEY, JSON.stringify(this.user)); } catch (e) {}
-      if (Store.col) { try { await Store.col.doc('_texts').set({ items: this.user }); } catch (e) {} }
+      const now = new Date().toISOString(), ids = new Set(this.user.map(t => t.id));
+      for (const t of Data.d.texts) if (!ids.has(t.id)) Data.d.deleted.push(t.id);
+      const old = new Map(Data.d.texts.map(t => [t.id, t]));
+      Data.d.texts = this.user.map(t => { const o = old.get(t.id); return o && o.title === t.title && o.body === t.body ? o : Object.assign({}, t, { upd: now }); });
+      Data.persist();
+      renderReadings();
     },
     all() { return [...this.user, ...BUILTIN_TEXTS]; },
   };
@@ -2434,6 +2748,7 @@
     go(i, fromVoice) {
       i = clamp(i, 0, this.words.length - 1);
       this.idx = i;
+      if (Run.on) Run.maxIdx = Math.max(Run.maxIdx, i);
       if (!fromVoice) { this.base = this.cum[i] - this.tracker.count; }
       this.paint();
     },
@@ -2681,7 +2996,6 @@
       r.hidden = !shown;
       // phones (and phone view) get a compact panel along the bottom; More shows the rest of the controls
       document.body.classList.toggle('sheet-ui', sheet);
-      $('btn-read').setAttribute('aria-pressed', String(shown));
       $('reader-more').hidden = !sheet || !!this.full;
       if (!sheet) this.more(false);
       r.classList.toggle('full', !!this.full);
@@ -2734,19 +3048,17 @@
       this.stopListen();
       this.open = false;
       this.layout();
-      $('btn-read').focus();
     },
     init() {
       let m = 'voice';
       try { m = localStorage.getItem('voicetrainer.readmode') || 'voice'; } catch (e) {}
-      // the Reading button opens the pane, and closes it again when it is showing
-      $('btn-read').addEventListener('click', () => (this.open && !this.collapsed ? this.hide() : this.show()));
       let fl = true;
       try { fl = localStorage.getItem('voicetrainer.focusline') !== '0'; } catch (e) {}
       this.setFocusLine(fl);
       $('reader-focus').addEventListener('click', () => this.setFocusLine(!this.focusLine));
       window.addEventListener('resize', () => { if (this.open) this.paintTrack(); });
-      $('reader-close').addEventListener('click', () => this.hide());
+      $('reader-close').addEventListener('click', () => { cancelRun(); this.hide(); });
+      $('reader-finish').addEventListener('click', () => finishReading());
       try { this.full = localStorage.getItem('voicetrainer.readerfull') === '1'; } catch (e) {}
       $('reader-full').addEventListener('click', () => this.setFull(!this.full));
       $('reader-collapse').addEventListener('click', () => this.collapse(true));
@@ -2761,7 +3073,7 @@
         window.speechSynthesis.addEventListener('voiceschanged', () => this.fillVoices());
       } else $('reader-listen').hidden = true;
       $('reader-restart').addEventListener('click', () => this.restart());
-      $('reader-pick').addEventListener('change', (e) => this.pick(e.target.value));
+      $('reader-pick').addEventListener('change', (e) => { this.pick(e.target.value); if (Run.on) { if (this.current && this.current.id === e.target.value) beginRun(); else cancelRun(); } });
       for (const k of ['voice', 'pace', 'tap']) $('rmode-' + k).addEventListener('click', () => this.setMode(k));
       $('reader-wpm').addEventListener('input', (e) => { $('reader-wpm-out').textContent = e.target.value; });
       const size = (d) => { this.size = clamp(this.size + d, 1.2, 3.6); $('reader-text').style.setProperty('--rsize', this.size + 'rem'); };
@@ -2794,40 +3106,49 @@
   };
 
   function init() {
-    let g = 'fem';
-    try { g = localStorage.getItem('voicetrainer.goal') || 'fem'; } catch (e) {}
+    let th = 'system';
+    try { th = localStorage.getItem('vt.theme') || 'system'; } catch (e) {}
+    applyTheme(th);
+    Data.init();
+    if (Data.setting('theme')) applyTheme(Data.setting('theme'));
+    const g = Data.setting('goal') || 'fem';
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
+    for (const k of ['system', 'light', 'dark']) $('theme-' + k).addEventListener('click', () => { applyTheme(k); Data.setting('theme', k); });
+    $('btn-settings').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
+    $('settings-voice').addEventListener('click', () => { $('settings-dlg').close(); $('btn-demo-set').click(); });
+    $('home-goal').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
+    $('drive-resume').addEventListener('click', () => Data.connect(true));
+    for (const b of document.querySelectorAll('#modes [data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
+    for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => setMode(b.dataset.go));
+    $('brand-home').addEventListener('click', () => setMode('home'));
+    $('rd-hist-pick').addEventListener('change', renderReadingHistory);
+    $('rd-add').addEventListener('click', () => { Reader.show(); Reader.setFull(true); Reader.pick('add-own'); });
+    $('live').addEventListener('scroll', () => paintDots(), { passive: true });
+    // on a phone the drill panel opens below the grid, so bring it into view
+    $('drill-grid').addEventListener('click', (e) => { if (sheetUi() && e.target.closest('button')) setTimeout(() => $('drill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); });
     Words.init();
-    PhoneMode.init();
     $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (Reader.synth && Reader.stopListen(), startMic())));
     $('btn-demo').addEventListener('click', () => playDemo(false));
     DemoVoice.init(); DemoVoice.paint();
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
-    $('btn-save').addEventListener('click', saveSession);
-    try { $('auto-save').checked = localStorage.getItem('voicetrainer.autosave') === '1'; } catch (e) {}
-    $('auto-save').addEventListener('change', (e) => {
-      try { localStorage.setItem('voicetrainer.autosave', e.target.checked ? '1' : '0'); } catch (err) {}
-      $('save-status').textContent = e.target.checked ? 'Auto-save is on. This session is saved whenever you stop listening, finish a drill or leave the page.' : 'Auto-save is off.';
-      renderSession();
-      if (e.target.checked) autoSave();
-    });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autoSave(); });
-    $('btn-reset').addEventListener('click', () => { session = newSession(); state.lastScores = {}; resetSessionViews(); renderDrillGrid(); $('save-status').textContent = 'Session cleared.'; });
+    $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp();
     readTheme();
-    setGoal(g === 'masc' ? 'masc' : 'fem');
+    setGoal(g === 'masc' ? 'masc' : 'fem', true);
     renderDrillGrid();
     renderSession();
     new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
     let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); if (state.coach) renderCoach(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); if (state.coach) renderCoach(); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
-    Store.init().then(() => { renderHistory(); return Texts.load(); });
     Reader.init();
+    Texts.sync();
+    renderReadings(); renderPracticeHistory(); renderDrillGrid();
+    setMode('home');
   }
   init();
 
