@@ -1,0 +1,93 @@
+[
+  {
+    "id": "b-dog",
+    "title": "Big dog, little dog",
+    "cue": "Big dog, little dog",
+    "sub": "larynx height and airflow",
+    "aim": "explore",
+    "why": "A panting game for feeling your larynx move and noticing your airflow. A big dog pants low and slow with a lowered larynx and an open throat; a little dog pants high and quick with a raised larynx and a small throat. It mainly trains larynx height (resonance); because it starts as pure breath, it also makes airflow easy to feel.",
+    "steps": [
+      "Rest a finger lightly on your larynx, the bump at the front of your neck.",
+      "Big dog: pant slowly through an open mouth with a deep, hollow, dark sound. Feel the larynx drop.",
+      "Little dog: pant quickly and lightly with a small, bright, high sound. Feel the larynx rise.",
+      "Switch between the two a few times, slowly, with no strain in the neck.",
+      {
+        "feminine": "Settle in the little-dog position and add gentle voice: a soft, light \"hee\".",
+        "masculine": "Settle in the big-dog position and add gentle voice: a soft, relaxed \"huh\"."
+      },
+      "Watch the resonance meter move, and keep the breathiness gauge in the zone once you add voice. Panting alone is unvoiced, so the gauge only reads when there is tone."
+    ]
+  },
+  {
+    "id": "b-sigh",
+    "title": "Sigh to clear tone",
+    "cue": "Sigh to clear tone",
+    "sub": "find where breathy ends",
+    "aim": "band",
+    "why": "You start very airy and let the tone clear, so you feel exactly where breathy turns into clear. Good for learning control in both directions.",
+    "steps": [
+      "Take an easy breath with relaxed shoulders.",
+      "Sigh out on \"haaa\" with lots of air and only a little tone. The gauge should sit high.",
+      "Over about three seconds, let the tone become clearer while the throat stays relaxed.",
+      "Stop changing when the gauge enters the zone, and hold \"ah\" there.",
+      "Repeat until you can land in the zone straight away."
+    ]
+  },
+  {
+    "id": "b-whisper",
+    "title": "Whisper to voice",
+    "cue": "Whisper to voice",
+    "sub": "add light airflow",
+    "aim": "band",
+    "why": "For a voice that feels pressed or heavy. A little airflow is part of a lighter vocal weight, which many people pair with feminine resonance. Too much air tires the voice, so the zone stops short of breathy.",
+    "steps": [
+      "Whisper \"hee\" a few times, quietly.",
+      "Whisper it again and slowly blend in voice, like turning up a dimmer switch.",
+      "Stop when the gauge reaches the zone: a clear pitch with a hint of air.",
+      "Keep the volume low. This is about the quality of the sound, not loudness."
+    ]
+  },
+  {
+    "id": "b-onset",
+    "title": "Clean, gentle onset",
+    "cue": "Clean onset \"uh-oh\"",
+    "sub": "less air leaking",
+    "aim": "band",
+    "why": "For a voice that leaks too much air, which makes it quieter and tires it faster. A clean, gentle start brings the vocal folds together without pushing.",
+    "steps": [
+      "Say \"uh-oh\" gently, like noticing a small mistake. Feel the tiny catch before each syllable.",
+      "Start an \"ee\" with that same tiny catch, and hold it.",
+      "Keep it soft: a light catch, never a cough or a hard click.",
+      "If the gauge is above the zone, use slightly less air and slightly more tone; if below, ease off the effort."
+    ]
+  },
+  {
+    "id": "b-hum",
+    "title": "Hum into a vowel",
+    "cue": "Hum into a vowel",
+    "sub": "balanced closure",
+    "aim": "band",
+    "why": "Humming, and humming through a straw, help the vocal folds close efficiently without pushing: the balanced point between breathy and pressed.",
+    "steps": [
+      "Hum \"mmm\" at a comfortable pitch until you feel a buzz on your lips and nose.",
+      "Optional: hum through a drinking straw for about 20 seconds, then take it away.",
+      "Open the hum into \"mmm-ah\" and keep the same easy buzz in the \"ah\".",
+      "Hold the \"ah\" with the gauge in the zone."
+    ]
+  },
+  {
+    "id": "b-scale",
+    "title": "Breathy, clear, pressed",
+    "cue": "Breathy, clear, pressed",
+    "sub": "know your range",
+    "aim": "band",
+    "why": "Making each quality on purpose shows you the whole range, so you can choose where to sit instead of drifting.",
+    "steps": [
+      "Hold \"ah\" very breathy: the gauge goes high.",
+      "Now clear: the gauge moves to the middle.",
+      "Now slightly pressed, like lifting something light: the gauge goes low. Never strain.",
+      "Move slowly between the three a few times.",
+      "Finish in the zone and hold it there."
+    ]
+  }
+]

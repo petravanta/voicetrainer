@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Practice words",
+  "description": "Short words that pair a sibilant with a vowel, for the word drills. Each becomes a drill with the id w-<word>.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["word", "sibilant", "vowel"],
+    "properties": {
+      "word": {"type": "string", "pattern": "^[a-z]+$", "description": "The word, in lowercase. Practice history refers to it, so never change one that has shipped."},
+      "sibilant": {"enum": ["s", "sh"], "description": "The sibilant the word starts with."},
+      "vowel": {"enum": ["i", "I", "e", "E", "ae", "a", "c", "V", "o", "U", "u", "r"], "description": "Vowel key from the formant table in src/dsp.js: i (ee as in heed), I (ih as in hid), e (ay as in hayed), E (eh as in head), ae (a as in had), a (ah as in hod), c (aw as in hawed), V (uh as in hud), o (oh as in hoed), U (oo as in hood), u (oo as in who'd), r (er as in heard)."}
+    }
+  }
+}

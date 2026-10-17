@@ -1,0 +1,25 @@
+name: Check data
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Match the schemas
+        run: |
+          for d in texts words breath control; do
+            npx --yes ajv-cli@5 validate --spec=draft2020 --all-errors -s data/schema/$d.schema.json -d data/$d.json
+          done
+      - name: Check ids and references
+        run: node scripts/check-data.js
