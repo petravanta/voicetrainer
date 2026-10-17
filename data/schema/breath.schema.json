@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Breath exercises",
+  "description": "Guided breath exercises with a live breathiness gauge, shown in file order.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "title", "cue", "sub", "aim", "why", "steps"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with b-. Practice history refers to it, so never change or reuse one that has shipped."},
+      "title": {"type": "string", "description": "Heading on the exercise."},
+      "cue": {"type": "string", "description": "Short name on the exercise card."},
+      "sub": {"type": "string", "description": "A few words under the name on the card."},
+      "aim": {"enum": ["band", "explore"], "description": "band: done after a few seconds with the gauge in the goal zone. explore: free practice with no finish."},
+      "why": {"type": "string", "description": "One or two sentences on what the exercise is for."},
+      "steps": {
+        "type": "array", "minItems": 1,
+        "items": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object", "additionalProperties": false, "required": ["feminine", "masculine"],
+             "properties": {"feminine": {"type": "string"}, "masculine": {"type": "string"}},
+             "description": "A step that depends on the training goal."}
+          ]
+        },
+        "description": "Steps shown in order. Use an object with feminine and masculine for a step that differs by goal."
+      }
+    }
+  }
+}

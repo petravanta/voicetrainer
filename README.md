@@ -12,7 +12,7 @@ Phones get a tab bar along the bottom; the screen stays awake while the micropho
 
 ## Saved data and themes
 
-Readings, practice history, settings and your own texts live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. Settings also hold the goal (feminine or masculine) and the theme (system, light or dark).
+Readings, practice history, settings and your own texts live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. Settings also hold the goal (feminine or masculine) and the theme (system, light or dark). The theme is shared with the switch in the header and with petravanta's other apps on this device.
 
 ## Features
 
@@ -51,11 +51,25 @@ node test/coach.test.js     # live coaching cues point the right way
 node test/reading.test.js   # syllable counting and tracking for reading along
 ```
 
+## Extending the app
+
+Practice content lives in plain JSON files under [`data/`](data/), separate from the code, so you can read it, review it and add to it in a pull request without touching JavaScript. `build.js` inlines them into the page. Each file has a schema that explains every field, and a check runs on every pull request.
+
+| Dataset | File | Schema | What it controls |
+| --- | --- | --- | --- |
+| Reading texts | [`data/texts.json`](data/texts.json) | [`texts.schema.json`](data/schema/texts.schema.json) | Built-in passages for reading practice |
+| Practice words | [`data/words.json`](data/words.json) | [`words.schema.json`](data/schema/words.schema.json) | Words pairing *s* or *sh* with a vowel, for the word drills |
+| Breath exercises | [`data/breath.json`](data/breath.json) | [`breath.schema.json`](data/schema/breath.schema.json) | Guided breath exercises: steps, why, and whether they finish in the goal zone |
+| Control exercises | [`data/control.json`](data/control.json) | [`control.schema.json`](data/schema/control.schema.json) | Move-one-part exercises (jaw, tongue, lips, larynx, pitch) |
+
+Vowels and sibilant targets (measured formant data in `src/dsp.js`) and prosody exercises (each has its own pitch check) stay in code. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add an entry.
+
 ## Layout
 
 - `src/dsp.js` – pitch (YIN), LPC formants, sibilant analysis, vowel/resonance scoring
 - `src/synth.js` – synthetic voice for demos, reference examples and tests
 - `src/app.js`, `src/index.html`, `src/style.css` – UI
+- `data/` – practice content (see *Extending the app*)
 - `build.js` – inlines everything into a single HTML file
 
 ## Notes

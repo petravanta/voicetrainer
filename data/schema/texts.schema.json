@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reading texts",
+  "description": "Built-in passages for reading practice. They appear under Built in, in file order; the first one opens by default.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "title", "body"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with b-. The reader remembers the last text by id, so never change or reuse one that has shipped."},
+      "title": {"type": "string", "minLength": 2, "description": "Name shown in the text picker. Credit the source for published passages."},
+      "body": {"type": "string", "minLength": 20, "description": "The passage. A blank line (\\n\\n) starts a new paragraph. Only use texts that are free to share."}
+    }
+  }
+}

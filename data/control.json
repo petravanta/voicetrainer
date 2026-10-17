@@ -1,0 +1,76 @@
+[
+  {
+    "id": "c-jaw",
+    "title": "Move only the jaw",
+    "cue": "Jaw only",
+    "sub": "jaw (F1) · \"ah\" to \"uh\"",
+    "kind": "jaw",
+    "vowel": "a",
+    "why": "The jaw reading (F1) follows how open the mouth is. Move only the jaw: the jaw bar should move while the tongue and lips/larynx bars barely change.",
+    "steps": [
+      "Hold a relaxed \"ah\" at a comfortable pitch until it says the starting point is set.",
+      "Keep the tongue lying flat and the lips loose. Slowly close the jaw about a finger-width, still voicing, then open it again.",
+      "Watch the jaw bar move while the tongue and lips/larynx bars stay near the middle.",
+      "Go back and forth slowly a few times."
+    ]
+  },
+  {
+    "id": "c-tongue",
+    "title": "Move only the tongue",
+    "cue": "Tongue only",
+    "sub": "tongue (F2) · \"ee\" to smiling \"oo\"",
+    "kind": "tongue",
+    "vowel": "i",
+    "why": "The tongue reading (F2) follows where the body of the tongue sits, front or back. Slide it while the smile and the jaw stay put.",
+    "steps": [
+      "Hold \"ee\" with a slight smile until the starting point is set.",
+      "Keep smiling and keep the jaw still. Slowly pull the tongue back, as if starting \"oo\" but without rounding the lips. It sounds odd; that is fine.",
+      "The tongue bar should swing a long way while the jaw and lips/larynx bars change much less.",
+      "Slide the tongue forward and back slowly."
+    ]
+  },
+  {
+    "id": "c-lips",
+    "title": "Move only the lips",
+    "cue": "Lips only",
+    "sub": "lips (F3) · smile to rounded",
+    "kind": "lips",
+    "vowel": "i",
+    "why": "Rounding and pushing the lips forward lengthens the front of the tract, which lowers the lips/larynx reading (F3), and the tongue reading (F2) a little. Spreading into a smile raises them.",
+    "steps": [
+      "Hold \"ee\" until the starting point is set.",
+      "Keep the tongue exactly where it is, high and forward. Slowly round and push the lips forward, like the French \"u\" or German \"ü\".",
+      "The lips/larynx bar should drop while the jaw bar holds steady. The tongue bar dips a little too; that is expected.",
+      "Alternate slowly between a smile and rounded lips."
+    ]
+  },
+  {
+    "id": "c-larynx",
+    "title": "Move only the larynx",
+    "cue": "Larynx only",
+    "sub": "all formants together",
+    "kind": "larynx",
+    "vowel": "i",
+    "why": "Raising the larynx shortens the whole tract, so all formants rise together; lowering it makes all of them fall. This is the main size control behind resonance.",
+    "steps": [
+      "Hold a quiet \"ee\" until the starting point is set.",
+      "Keep the jaw, lips and tongue still. Slowly raise the larynx (a small, light kitten voice, or the start of a swallow), then let it drop (the start of a yawn).",
+      "All three bars (jaw, tongue, lips/larynx) should move the same way together, because the whole tube got shorter or longer.",
+      "Pitch may rise with the larynx at first. That is normal, and the check ignores pitch here."
+    ]
+  },
+  {
+    "id": "c-pitch",
+    "title": "Change pitch, keep resonance",
+    "cue": "Pitch, not resonance",
+    "sub": "trust check",
+    "kind": "pitch",
+    "vowel": "a",
+    "why": "Pitch and resonance are separate. Glide the pitch on one steady vowel: pitch should move while the mouth and throat readings stay put. This shows the resonance feedback is not just measuring pitch.",
+    "steps": [
+      "Hold \"ah\" at a comfortable pitch until the starting point is set.",
+      "Keep the mouth shape exactly the same and slide the pitch up a few notes and back down, like a slow siren.",
+      "The pitch bar should move while the jaw, tongue and lips/larynx bars stay near the middle."
+    ]
+  }
+]

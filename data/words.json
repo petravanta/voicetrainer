@@ -1,0 +1,14 @@
+[
+  {"word": "see", "sibilant": "s", "vowel": "i"},
+  {"word": "sit", "sibilant": "s", "vowel": "I"},
+  {"word": "say", "sibilant": "s", "vowel": "e"},
+  {"word": "sat", "sibilant": "s", "vowel": "ae"},
+  {"word": "saw", "sibilant": "s", "vowel": "c"},
+  {"word": "sue", "sibilant": "s", "vowel": "u"},
+  {"word": "she", "sibilant": "sh", "vowel": "i"},
+  {"word": "shed", "sibilant": "sh", "vowel": "E"},
+  {"word": "shop", "sibilant": "sh", "vowel": "a"},
+  {"word": "shoe", "sibilant": "sh", "vowel": "u"},
+  {"word": "shirt", "sibilant": "sh", "vowel": "r"},
+  {"word": "sun", "sibilant": "s", "vowel": "V"}
+]

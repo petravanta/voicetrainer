@@ -1,6 +1,8 @@
 (function () {
   'use strict';
   const D = window.VTDSP, Synth = window.VTSynth;
+  // Practice words, breath and control exercises and reading texts live in data/*.json (see CONTRIBUTING.md); build.js inlines them here
+  const DATA = window.VTDATA;
   const $ = (id) => document.getElementById(id);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toFixed(d) : '--');
@@ -12,67 +14,11 @@
       { id: 's-s', type: 'sib', sib: 's', cue: 'sss', sub: 'as in "see"', title: 'Sustained "sss"' },
       { id: 's-sh', type: 'sib', sib: 'sh', cue: 'shh', sub: 'as in "she"', title: 'Sustained "shh"' },
     ],
-    words: [
-      ['see', 's', 'i'], ['sit', 's', 'I'], ['say', 's', 'e'], ['sat', 's', 'ae'], ['saw', 's', 'c'], ['sue', 's', 'u'],
-      ['she', 'sh', 'i'], ['shed', 'sh', 'E'], ['shop', 'sh', 'a'], ['shoe', 'sh', 'u'], ['shirt', 'sh', 'r'], ['sun', 's', 'V'],
-    ].map(([w, sib, v]) => ({ id: 'w-' + w, type: 'word', sib, vowel: v, cue: w, sub: `/${sib === 's' ? 's' : 'ʃ'}/ + ${D.VOWEL_BY_KEY[v].cue}`, title: `Say "${w}" a few times` })),
+    words: DATA.words.map(({ word: w, sibilant: sib, vowel: v }) => ({ id: 'w-' + w, type: 'word', sib, vowel: v, cue: w, sub: `/${sib === 's' ? 's' : 'ʃ'}/ + ${D.VOWEL_BY_KEY[v].cue}`, title: `Say "${w}" a few times` })),
   };
   // Breath exercises: guided steps plus a live breathiness gauge. aim 'band' completes after a few
   // seconds inside the goal zone; 'explore' is free practice.
-  DRILLS.breath = [
-    { id: 'b-dog', type: 'breath', aim: 'explore', cue: 'Big dog, little dog', sub: 'larynx height and airflow', title: 'Big dog, little dog',
-      why: 'A panting game for feeling your larynx move and noticing your airflow. A big dog pants low and slow with a lowered larynx and an open throat; a little dog pants high and quick with a raised larynx and a small throat. It mainly trains larynx height (resonance); because it starts as pure breath, it also makes airflow easy to feel.',
-      steps: (fem) => [
-        'Rest a finger lightly on your larynx, the bump at the front of your neck.',
-        'Big dog: pant slowly through an open mouth with a deep, hollow, dark sound. Feel the larynx drop.',
-        'Little dog: pant quickly and lightly with a small, bright, high sound. Feel the larynx rise.',
-        'Switch between the two a few times, slowly, with no strain in the neck.',
-        fem ? 'Settle in the little-dog position and add gentle voice: a soft, light "hee".' : 'Settle in the big-dog position and add gentle voice: a soft, relaxed "huh".',
-        'Watch the resonance meter move, and keep the breathiness gauge in the zone once you add voice. Panting alone is unvoiced, so the gauge only reads when there is tone.',
-      ] },
-    { id: 'b-sigh', type: 'breath', aim: 'band', cue: 'Sigh to clear tone', sub: 'find where breathy ends', title: 'Sigh to clear tone',
-      why: 'You start very airy and let the tone clear, so you feel exactly where breathy turns into clear. Good for learning control in both directions.',
-      steps: () => [
-        'Take an easy breath with relaxed shoulders.',
-        'Sigh out on "haaa" with lots of air and only a little tone. The gauge should sit high.',
-        'Over about three seconds, let the tone become clearer while the throat stays relaxed.',
-        'Stop changing when the gauge enters the zone, and hold "ah" there.',
-        'Repeat until you can land in the zone straight away.',
-      ] },
-    { id: 'b-whisper', type: 'breath', aim: 'band', cue: 'Whisper to voice', sub: 'add light airflow', title: 'Whisper to voice',
-      why: 'For a voice that feels pressed or heavy. A little airflow is part of a lighter vocal weight, which many people pair with feminine resonance. Too much air tires the voice, so the zone stops short of breathy.',
-      steps: () => [
-        'Whisper "hee" a few times, quietly.',
-        'Whisper it again and slowly blend in voice, like turning up a dimmer switch.',
-        'Stop when the gauge reaches the zone: a clear pitch with a hint of air.',
-        'Keep the volume low. This is about the quality of the sound, not loudness.',
-      ] },
-    { id: 'b-onset', type: 'breath', aim: 'band', cue: 'Clean onset "uh-oh"', sub: 'less air leaking', title: 'Clean, gentle onset',
-      why: 'For a voice that leaks too much air, which makes it quieter and tires it faster. A clean, gentle start brings the vocal folds together without pushing.',
-      steps: () => [
-        'Say "uh-oh" gently, like noticing a small mistake. Feel the tiny catch before each syllable.',
-        'Start an "ee" with that same tiny catch, and hold it.',
-        'Keep it soft: a light catch, never a cough or a hard click.',
-        'If the gauge is above the zone, use slightly less air and slightly more tone; if below, ease off the effort.',
-      ] },
-    { id: 'b-hum', type: 'breath', aim: 'band', cue: 'Hum into a vowel', sub: 'balanced closure', title: 'Hum into a vowel',
-      why: 'Humming, and humming through a straw, help the vocal folds close efficiently without pushing: the balanced point between breathy and pressed.',
-      steps: () => [
-        'Hum "mmm" at a comfortable pitch until you feel a buzz on your lips and nose.',
-        'Optional: hum through a drinking straw for about 20 seconds, then take it away.',
-        'Open the hum into "mmm-ah" and keep the same easy buzz in the "ah".',
-        'Hold the "ah" with the gauge in the zone.',
-      ] },
-    { id: 'b-scale', type: 'breath', aim: 'band', cue: 'Breathy, clear, pressed', sub: 'know your range', title: 'Breathy, clear, pressed',
-      why: 'Making each quality on purpose shows you the whole range, so you can choose where to sit instead of drifting.',
-      steps: () => [
-        'Hold "ah" very breathy: the gauge goes high.',
-        'Now clear: the gauge moves to the middle.',
-        'Now slightly pressed, like lifting something light: the gauge goes low. Never strain.',
-        'Move slowly between the three a few times.',
-        'Finish in the zone and hold it there.',
-      ] },
-  ];
+  DRILLS.breath = DATA.breath.map(b => ({ ...b, type: 'breath', steps: (fem) => b.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
   // Prosody: intonation patterns, checked on each spoken phrase from its pitch contour (semitones
   // around the phrase's own median, so they work at any pitch). check() returns {ok, value, text}.
   const rise = (n, top) => (wi, u) => (wi < n - 1 ? 1.02 - 0.03 * wi / Math.max(1, n - 1) : 0.99 + (top - 0.99) * u * u);
@@ -112,37 +58,7 @@
   ];
   // Control exercises: move one part of the tract and check that the matching formant (and only it)
   // moves, to build trust in what the feedback is tracking.
-  DRILLS.control = [
-    { id: 'c-jaw', type: 'iso', kind: 'jaw', vowel: 'a', cue: 'Jaw only', sub: 'jaw (F1) · "ah" to "uh"', title: 'Move only the jaw',
-      why: 'The jaw reading (F1) follows how open the mouth is. Move only the jaw: the jaw bar should move while the tongue and lips/larynx bars barely change.',
-      steps: ['Hold a relaxed "ah" at a comfortable pitch until it says the starting point is set.',
-        'Keep the tongue lying flat and the lips loose. Slowly close the jaw about a finger-width, still voicing, then open it again.',
-        'Watch the jaw bar move while the tongue and lips/larynx bars stay near the middle.',
-        'Go back and forth slowly a few times.'] },
-    { id: 'c-tongue', type: 'iso', kind: 'tongue', vowel: 'i', cue: 'Tongue only', sub: 'tongue (F2) · "ee" to smiling "oo"', title: 'Move only the tongue',
-      why: 'The tongue reading (F2) follows where the body of the tongue sits, front or back. Slide it while the smile and the jaw stay put.',
-      steps: ['Hold "ee" with a slight smile until the starting point is set.',
-        'Keep smiling and keep the jaw still. Slowly pull the tongue back, as if starting "oo" but without rounding the lips. It sounds odd; that is fine.',
-        'The tongue bar should swing a long way while the jaw and lips/larynx bars change much less.',
-        'Slide the tongue forward and back slowly.'] },
-    { id: 'c-lips', type: 'iso', kind: 'lips', vowel: 'i', cue: 'Lips only', sub: 'lips (F3) · smile to rounded', title: 'Move only the lips',
-      why: 'Rounding and pushing the lips forward lengthens the front of the tract, which lowers the lips/larynx reading (F3), and the tongue reading (F2) a little. Spreading into a smile raises them.',
-      steps: ['Hold "ee" until the starting point is set.',
-        'Keep the tongue exactly where it is, high and forward. Slowly round and push the lips forward, like the French "u" or German "ü".',
-        'The lips/larynx bar should drop while the jaw bar holds steady. The tongue bar dips a little too; that is expected.',
-        'Alternate slowly between a smile and rounded lips.'] },
-    { id: 'c-larynx', type: 'iso', kind: 'larynx', vowel: 'i', cue: 'Larynx only', sub: 'all formants together', title: 'Move only the larynx',
-      why: 'Raising the larynx shortens the whole tract, so all formants rise together; lowering it makes all of them fall. This is the main size control behind resonance.',
-      steps: ['Hold a quiet "ee" until the starting point is set.',
-        'Keep the jaw, lips and tongue still. Slowly raise the larynx (a small, light kitten voice, or the start of a swallow), then let it drop (the start of a yawn).',
-        'All three bars (jaw, tongue, lips/larynx) should move the same way together, because the whole tube got shorter or longer.',
-        'Pitch may rise with the larynx at first. That is normal, and the check ignores pitch here.'] },
-    { id: 'c-pitch', type: 'iso', kind: 'pitch', vowel: 'a', cue: 'Pitch, not resonance', sub: 'trust check', title: 'Change pitch, keep resonance',
-      why: 'Pitch and resonance are separate. Glide the pitch on one steady vowel: pitch should move while the mouth and throat readings stay put. This shows the resonance feedback is not just measuring pitch.',
-      steps: ['Hold "ah" at a comfortable pitch until the starting point is set.',
-        'Keep the mouth shape exactly the same and slide the pitch up a few notes and back down, like a slow siren.',
-        'The pitch bar should move while the jaw, tongue and lips/larynx bars stay near the middle.'] },
-  ];
+  DRILLS.control = DATA.control.map(c => ({ ...c, type: 'iso' }));
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
   const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90 }; // frames at ~60 per second
 
@@ -2697,14 +2613,7 @@
   // ---------------- reading practice ----------------
   // Built-in texts: the Rainbow Passage (Fairbanks, 1960) and the Grandfather Passage (Van Riper,
   // 1963), both widely treated as public domain, plus original or traditional texts.
-  const BUILTIN_TEXTS = [
-    { id: 'b-rainbow', title: 'The Rainbow Passage', body: 'When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon. There is, according to legend, a boiling pot of gold at one end. People look, but no one ever finds it. When a man looks for something beyond his reach, his friends say he is looking for the pot of gold at the end of the rainbow.\n\nThroughout the centuries people have explained the rainbow in various ways. Some have accepted it as a miracle without physical explanation. To the Hebrews it was a token that there would be no more universal floods. The Greeks used to imagine that it was a sign from the gods to foretell war or heavy rain. The Norsemen considered the rainbow as a bridge over which the gods passed from earth to their home in the sky. Others have tried to explain the phenomenon physically. Aristotle thought that the rainbow was caused by reflection of the sun\'s rays by the rain. Since then physicists have found that it is not reflection, but refraction by the raindrops which causes the rainbows.' },
-    { id: 'b-grandfather', title: 'The Grandfather Passage', body: 'You wish to know all about my grandfather. Well, he is nearly ninety-three years old. He dresses himself in an ancient black frock coat, usually minus several buttons; yet he still thinks as swiftly as ever. A long, flowing beard clings to his chin, giving those who observe him a pronounced feeling of the utmost respect. When he speaks, his voice is just a bit cracked and quivers a trifle. Twice each day he plays skillfully and with zest upon our small organ. Except in the winter when the ooze or snow or ice prevents, he slowly takes a short walk in the open air each day. We have often urged him to walk more and smoke less, but he always answers, "Banana oil!" Grandfather likes to be modern in his language.' },
-    { id: 'b-northwind', title: 'The North Wind and the Sun (Aesop, retold)', body: 'The North Wind and the Sun were arguing about which of them was stronger, when a traveller came along wrapped in a warm cloak. They agreed that whoever first made the traveller take off the cloak would be called the stronger.\n\nThe North Wind blew as hard as it could, but the harder it blew, the more tightly the traveller held the cloak around their shoulders, and at last the North Wind gave up. Then the Sun came out and shone warmly, and straight away the traveller took off the cloak. So the North Wind had to admit that the Sun was the stronger of the two.' },
-    { id: 'b-bright', title: 'Bright vowels (ee, ay, eh)', body: 'Please keep the green seeds in the tea tin. Lisa sees three bees in the tall trees.\n\nKate baked a cake on a rainy day. They stayed late to paint the gate grey.\n\nTen red pens fell under the bed. Every evening, Eve feels the sea breeze.' },
-    { id: 'b-sibilants', title: 'Sibilants (s and sh)', body: 'She sees six silver ships sailing south. Sam\'s sister sewed a soft silk scarf.\n\nSally sells sea shells by the seashore. Fresh fish is served on Sunday.\n\nSunshine sparkles on the shallow stream, and she sits by the shore to rest.' },
-    { id: 'b-everyday', title: 'Everyday phrases', body: 'Hi, it\'s so nice to see you again. How have you been?\n\nCould I get a small coffee with oat milk, please? Thanks so much.\n\nSorry, could you say that again? I\'ll be there in about ten minutes.\n\nHave a lovely evening, and see you next week!' },
-  ];
+  const BUILTIN_TEXTS = DATA.texts.map(t => ({ id: t.id, title: t.title, body: t.body }));
   const ADD_PRESETS = [
     { id: 'add-own', title: '', note: 'Paste or type anything you want to practise: a script for a phone call, a poem, a paragraph from a book. Blank lines start new paragraphs.' },
   ];
