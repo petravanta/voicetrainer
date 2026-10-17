@@ -2367,18 +2367,25 @@
     if (await Data.store.refresh()) { Data.d = Data.store.data; onDataChanged(); }
   });
   function onDataChanged() {
-    applyTheme(Data.setting('theme') || 'system');
+    applyTheme(themeChoice());
     const g = Data.setting('goal'); if (g && g !== state.goal) setGoal(g, true);
     Texts.sync();
     renderReadings(); renderPracticeHistory(); renderDrillGrid(); renderHome();
   }
 
   // ---------------- theme ----------------
+  // A choice made on this device (in any of petravanta's apps) wins over the one saved in Drive
+  function themeChoice() {
+    let t = null;
+    try { t = localStorage.getItem('petravanta.theme'); } catch (e) {}
+    return t === 'system' || t === 'light' || t === 'dark' ? t : Data.setting('theme') || 'system';
+  }
   function applyTheme(t) {
     if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
     else delete document.documentElement.dataset.theme;
     for (const k of ['system', 'light', 'dark']) { const b = $('theme-' + k); if (b) b.setAttribute('aria-checked', String(k === t)); }
-    try { localStorage.setItem('vt.theme', t); } catch (e) {} // applied before Drive loads on the next visit
+    // The key is shared by all of petravanta's apps; the head snippet applies it before Drive loads on the next visit
+    try { localStorage.setItem('petravanta.theme', t); } catch (e) {}
   }
 
   // ---------------- practice history ----------------
@@ -3107,14 +3114,16 @@
 
   function init() {
     let th = 'system';
-    try { th = localStorage.getItem('vt.theme') || 'system'; } catch (e) {}
+    try { th = localStorage.getItem('petravanta.theme') || localStorage.getItem('vt.theme') || 'system'; } catch (e) {}
     applyTheme(th);
     Data.init();
-    if (Data.setting('theme')) applyTheme(Data.setting('theme'));
+    applyTheme(themeChoice());
     const g = Data.setting('goal') || 'fem';
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
     for (const k of ['system', 'light', 'dark']) $('theme-' + k).addEventListener('click', () => { applyTheme(k); Data.setting('theme', k); });
+    // The shared theme switch in the header (general/shared/theme-switch.js)
+    document.addEventListener('petravanta:themechange', (e) => { applyTheme(e.detail.mode); Data.setting('theme', e.detail.mode); });
     $('btn-settings').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
     $('settings-voice').addEventListener('click', () => { $('settings-dlg').close(); $('btn-demo-set').click(); });
     $('home-goal').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
