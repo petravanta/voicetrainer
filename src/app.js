@@ -666,6 +666,7 @@
   let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9, breathBuf = [], breathShown = -1e9;
   function onFrame(fr) {
     frameCount++;
+    let frRes = NaN, frSib = NaN; // this frame's scores, for the per-word reading report
     drawSpecColumn(fr, an.fsd);
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
     if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
@@ -708,7 +709,7 @@
           vowel = cls.vowel; score = score100(cls.alpha); ok = true;
         }
         if (ok) {
-          if (!gated) addVowelToSession(vowel.key, score);
+          if (!gated) { addVowelToSession(vowel.key, score); frRes = score; }
           pushMeter(score, gated);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
@@ -727,7 +728,7 @@
       const sib = D.SIBILANTS[type];
       const score = score100(D.sibilantAlpha(fr.cog, sib));
       if (!gated) {
-        session.sibs[type].push(score);
+        session.sibs[type].push(score); frSib = score;
         if (take) take.sibs[type].push(score);
         if (session.sibs[type].length > 5000) session.sibs[type].splice(0, 1000);
       }
@@ -760,6 +761,7 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -2408,7 +2410,7 @@
   }
 
   // ---------------- readings ----------------
-  const Run = { on: false, text: null, maxIdx: 0, start: 0 };
+  const Run = { on: false, text: null, maxIdx: 0, start: 0, frames: [] };
   function startReading(id) {
     Reader.show();
     Reader.pick(id);
@@ -2417,7 +2419,7 @@
   }
   function beginRun() {
     const t = Reader.current; if (!t) return;
-    Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now();
+    Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now(); Run.frames = [];
     session = newSession();
     $('reader').classList.add('run');
     $('reader-finish').hidden = false;
@@ -2425,7 +2427,7 @@
     if (state.running !== 'mic') startMic();
   }
   function endRun() {
-    Run.on = false;
+    Run.on = false; Run.frames = [];
     $('reader').classList.remove('run');
     $('reader-finish').hidden = true;
   }
@@ -2443,6 +2445,8 @@
       sibS: st.sib.s ? round(st.sib.s.score) : null, sibSh: st.sib.sh ? round(st.sib.sh.score) : null,
       pitchMedian: st.pitch ? Math.round(st.pitch.median) : null, pitchP10: st.pitch ? Math.round(st.pitch.p10) : null, pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
       breath: round(st.breath),
+      // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
+      byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)]),
     };
     endRun();
     Reader.hide();
@@ -2465,7 +2469,7 @@
   function showReadingResult(rec, msg) {
     const box = $('rd-result'); box.hidden = false;
     if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
-    const prev = fullReadings(rec.text).filter(r => r.id !== rec.id);
+    const prev = fullReadings(rec.text).filter(r => r.id !== rec.id && r.at < rec.at);
     const last = prev.at(-1), best = prev.reduce((m, r) => (r.resonance != null && (m == null || better(r.resonance, m)) ? r.resonance : m), null);
     const delta = (v, o) => (v == null || o == null ? '' : `<small class="${better(v, o) ? 'up' : v === o ? '' : 'down'}">${v - o > 0 ? '+' : ''}${Math.round(v - o)} vs last</small>`);
     const [lo, hi] = target();
@@ -2480,7 +2484,9 @@
       </div>
       <p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>
       ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
+      ${wordReportHtml(rec)}
       <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
+    wireWordReport(box, rec);
     box.querySelectorAll('[data-weak]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === b.dataset.weak); if (def) openDrill(def); }));
     $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
     $('rd-close').onclick = () => { box.hidden = true; };
@@ -2490,6 +2496,80 @@
       Data.remove('readings', rec.id); box.hidden = true; renderReadings(); renderHome();
     };
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  // ---- word by word: pitch and resonance under each word of the passage ----
+  // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
+  function wordReportHtml(rec) {
+    const ws = rec.byWord;
+    if (!ws || !ws.some(w => w[1] != null || w[2] != null)) return '';
+    const [lo, hi] = target(), [plo, phi] = pitchBand();
+    const resOff = (r) => r != null && (Math.round(r) < lo || Math.round(r) > hi);
+    // pitch is off when it is on the far side of the goal band (above the band is fine for a feminine goal)
+    const pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
+    // one slot per word, wide enough for its label
+    const xs = [], wd = []; let acc = 6;
+    for (const w of ws) { const sw = Math.max(30, w[0].length * 7.4 + 12); xs.push(acc + sw / 2); wd.push(sw); acc += sw; }
+    const W = Math.ceil(acc + 6);
+    const ps = ws.map(w => w[1]).filter(v => v != null);
+    // octave slips can throw a word far off, so the scale follows most words and the rest sit on its edge
+    const pmin = Math.max(50, Math.min(plo, D.quantile(ps, 0.05)) - 15), pmax = Math.max(phi, D.quantile(ps, 0.95)) + 15;
+    const PT = 22, PH = 84, RT = PT + PH + 30, RH = 70, LT = RT + RH + 18, H = LT + 8;
+    const py = (v) => PT + (1 - (clamp(v, pmin, pmax) - pmin) / (pmax - pmin)) * PH, ry = (v) => RT + (1 - clamp(v, 0, 100) / 100) * RH;
+    const f1 = (v) => v.toFixed(1);
+    let svg = `<rect class="wr-band" x="0" y="${f1(py(phi))}" width="${W}" height="${f1(py(plo) - py(phi))}"/>`
+      + `<rect class="wr-band" x="0" y="${f1(ry(hi))}" width="${W}" height="${f1(ry(lo) - ry(hi))}"/>`
+      + `<line class="wr-axis" x1="0" x2="${W}" y1="${RT + RH}" y2="${RT + RH}"/>`;
+    // phrase highlights, shown when a stretch below is picked
+    const phrases = D.readingPhrases(ws.map(w => w[0]), ws.map(w => ({ p: w[1], r: w[2] })));
+    phrases.forEach((ph, k) => { svg += `<rect class="wr-hl" data-ph="${k}" x="${f1(xs[ph.a] - wd[ph.a] / 2)}" y="2" width="${f1(xs[ph.b] + wd[ph.b] / 2 - xs[ph.a] + wd[ph.a] / 2)}" height="${H - 4}" rx="6"/>`; });
+    // pitch line, broken where no pitch was heard
+    let run = [];
+    const flush = () => { if (run.length > 1) svg += `<polyline class="wr-pline" points="${run.join(' ')}"/>`; run = []; };
+    ws.forEach((w, i) => { if (w[1] != null) run.push(`${f1(xs[i])},${f1(py(w[1]))}`); else flush(); });
+    flush();
+    ws.forEach(([t, p, r], i) => {
+      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + Math.round(r) : 'no vowel scored'}`;
+      svg += `<g class="wr-w" data-i="${i}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
+        + `<rect class="wr-hit" x="${f1(xs[i] - wd[i] / 2)}" y="0" width="${f1(wd[i])}" height="${H}"/>`
+        + (p != null ? `<circle class="wr-dot${pitchOff(p) ? ' off' : ''}" cx="${f1(xs[i])}" cy="${f1(py(p))}" r="3.5"/>` : '')
+        + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}" x="${f1(xs[i] - 6)}" y="${f1(ry(r))}" width="12" height="${f1(Math.max(1.5, RT + RH - ry(r)))}" rx="2"/>` : '')
+        + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
+    });
+    svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
+    // the stretches furthest from the goal
+    const quote = (ph) => escapeHtml(ws.slice(ph.a, ph.b + 1).map(w => w[0]).join(' ').replace(/[.,;:!?]+$/, ''));
+    const weakRes = phrases.map((ph, k) => ({ ph, k, gap: ph.nr >= 2 ? gapOf(ph.r) : -1 })).filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 3);
+    const pGap = (p) => (p == null ? -1 : state.goal === 'fem' ? plo - p : p - phi);
+    const weakP = phrases.map((ph, k) => ({ ph, k, gap: pGap(ph.p) })).filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 2);
+    const item = (x, what) => `<li><button type="button" class="wr-jump" data-ph="${x.k}">“${quote(x.ph)}”</button> <span class="muted">${what}</span></li>`;
+    const list = weakRes.map(x => item(x, `resonance ${Math.round(x.ph.r)}`)).concat(weakP.map(x => item(x, `pitch ${Math.round(x.ph.p)} Hz`)));
+    return `<div class="wr"><div class="section-head"><h4>Word by word</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
+      ${list.length ? `<p class="small"><b>Stretches furthest from your goal</b> (tap one to find it):</p><ul class="wr-list small">${list.join('')}</ul>` : '<p class="small">Every phrase was on your goal for resonance and pitch.</p>'}
+      <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
+      <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
+      <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p>
+      <p class="small muted">The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only steady vowels get a resonance score, so short words often have none.</p></div>`;
+  }
+  function wireWordReport(box, rec) {
+    const svg = box.querySelector('.wr-svg'); if (!svg) return;
+    const scroll = box.querySelector('.wr-scroll'), read = box.querySelector('#wr-read');
+    const pick = (g) => {
+      svg.querySelectorAll('.wr-w.sel').forEach(x => x.classList.remove('sel'));
+      g.classList.add('sel');
+      const [t, p, r, s] = rec.byWord[+g.dataset.i];
+      read.innerHTML = `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · resonance ${r != null ? Math.round(r) : '--'}${s != null ? ` · /s/ ${Math.round(s)}` : ''}`;
+    };
+    svg.querySelectorAll('.wr-w').forEach(g => {
+      g.addEventListener('click', () => pick(g));
+      g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(g); } });
+    });
+    box.querySelectorAll('.wr-jump').forEach(b => b.addEventListener('click', () => {
+      svg.querySelectorAll('.wr-hl.on').forEach(x => x.classList.remove('on'));
+      const hl = svg.querySelector(`.wr-hl[data-ph="${b.dataset.ph}"]`); if (!hl) return;
+      hl.classList.add('on');
+      scroll.scrollTo({ left: Math.max(0, +hl.getAttribute('x') - 24), behavior: 'smooth' });
+      scroll.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }));
   }
   // a higher score is better for the feminine goal and a lower one for the masculine goal
   const better = (a, b) => (state.goal === 'fem' ? a > b : a < b);
@@ -2540,6 +2620,12 @@
         r.pitchMedian != null ? r.pitchMedian + ' Hz' : '--', r.breath != null ? Math.round(r.breath) : '--', r.cover + '%' + (r.partial ? ' (partial)' : '')];
       cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i >= 1) td.className = 'num'; tr.appendChild(td); });
       const td = document.createElement('td');
+      if (r.byWord) {
+        const rep = document.createElement('button');
+        rep.type = 'button'; rep.textContent = 'Report'; rep.className = 'hist-report';
+        rep.addEventListener('click', () => showReadingResult(r));
+        td.appendChild(rep);
+      }
       const del = document.createElement('button');
       del.type = 'button'; del.textContent = 'Delete';
       del.addEventListener('click', () => {
