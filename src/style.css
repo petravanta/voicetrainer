@@ -518,3 +518,27 @@ body[data-mode="readings"]:not(.reading-full) .sourcebar { display: none; }
   .topbar .save-state { font-size: 11px; }
 }
 a { color: var(--accent); }
+
+/* reading report: pitch and resonance word by word */
+.wr { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.wr h4 { margin: 0; }
+.wr-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.wr-jump { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; text-align: left; }
+.wr-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--warn); margin-right: 5px; vertical-align: -1px; }
+.wr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.wr-svg { display: block; }
+.wr-band { fill: var(--fem); opacity: 0.1; }
+[data-goal="masc"] .wr-band { fill: var(--masc); }
+.wr-axis { stroke: var(--line); }
+.wr-hl { fill: var(--accent); opacity: 0; transition: opacity 0.3s; }
+.wr-hl.on { opacity: 0.12; }
+.wr-pline { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; }
+.wr-dot { fill: var(--good); } .wr-dot.off { fill: var(--warn); }
+.wr-bar { fill: var(--good); } .wr-bar.off { fill: var(--warn); }
+.wr-word { fill: var(--ink); font: 12px var(--font-body); }
+.wr-word.off { fill: var(--warn); font-weight: 600; }
+.wr-lane { fill: var(--muted); font: 11px var(--font-mono); }
+.wr-hit { fill: transparent; }
+.wr-w { cursor: pointer; outline: none; }
+.wr-w.sel .wr-hit, .wr-w:focus-visible .wr-hit { fill: var(--accent); fill-opacity: 0.1; }
+#hist-table .hist-report { margin-right: 10px; }

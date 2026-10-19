@@ -40,6 +40,23 @@ check(pauses >= 2, `noticed ${pauses} long pauses (sentence breaks)`);
   const ok2 = q.length === 3 && q[0].t1 <= q[1].t0 + 1 && q[1].t1 - q[1].t0 > q[0].t1 - q[0].t0 && q[2].t1 <= 1016;
   if (!ok2) fails++; console.log((ok2 ? 'ok   ' : 'FAIL ') + 'words: spread by syllables inside one stretch');
 }
+// Reading report: frames tagged with the highlighted word become per-word pitch and resonance.
+{
+  const fr = [];
+  for (let k = 0; k < 10; k++) fr.push({ i: 0, f0: 200, res: 80, sib: NaN });
+  for (let k = 0; k < 10; k++) fr.push({ i: 1, f0: k < 5 ? 150 : 0, res: k === 0 ? 40 : NaN, sib: 70 });
+  fr.push({ i: 9, f0: 300, res: 90, sib: NaN }); // past the end of the passage: ignored
+  const w = D.wordReport(fr, 3);
+  check(w.length === 3 && w[0].p === 200 && w[0].r === 80 && w[0].s === null, 'report: pitch and resonance per word');
+  check(w[1].p === 150 && w[1].r === null && w[1].s === 70, 'report: one stray vowel frame is not a score');
+  check(w[2].p === null && w[2].r === null, 'report: a word with no voice has no numbers');
+  const texts = ['The', 'rainbow,', 'a', 'division', 'of', 'white', 'light.', 'It', 'is'];
+  const vals = texts.map((_, i) => ({ p: 180 + i, r: i < 2 ? 50 : 90 }));
+  const ph = D.readingPhrases(texts, vals);
+  check(ph.length === 3 && ph[0].a === 0 && ph[0].b === 1 && ph[1].a === 2 && ph[1].b === 6 && ph[2].b === 8, 'report: phrases split at punctuation');
+  check(ph[0].r === 50 && ph[1].r === 90 && ph[0].nr === 2, 'report: phrase resonance is the median of its words');
+  check(D.readingPhrases(Array(25).fill('la'), Array(25).fill({ p: null, r: null }), 10).length === 3, 'report: long unpunctuated text is cut into short phrases');
+}
 console.log(fails ? `\n${fails} failed` : '\nall reading checks passed');
 process.exit(fails ? 1 : 0);
 
