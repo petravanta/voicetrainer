@@ -2,7 +2,7 @@
   "name": "VoiceTrainer",
   "short_name": "VoiceTrainer",
   "description": "Voice training with live pitch and resonance feedback, readings and practice drills.",
-  "id": "./",
+  "id": "/voicetrainer/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
