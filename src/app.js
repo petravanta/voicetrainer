@@ -2079,34 +2079,85 @@
       deleted: [...del].slice(-2000),
     };
   }
-  /* ===== Drive store: petravanta's apps =====
-     Canonical copy: https://github.com/petravanta/general/blob/main/shared/drive-store.js (see STANDARDS.md, "Data lives in Google Drive").
-     Keeps an app's data in one JSON file in the user's Google Drive (drive.file scope: the app only sees files it created).
-     The browser keeps only sign-in details, and a copy of changes that haven't reached Drive yet (for example while offline);
-     that copy is deleted as soon as Drive has it. */
-  function DriveStore(o){
-    // o: {clientId, file:'App data.json', app:'app-id', key:'localStorage prefix', empty:()=>data, merge:(remote,local)=>data, onChange:()=>{}}
-    const API='https://www.googleapis.com', SCOPE='https://www.googleapis.com/auth/drive.file';
-    const get=k=>{try{return JSON.parse(localStorage.getItem(o.key+'.'+k)||'null')}catch(e){return null}};
-    const put=(k,v)=>{try{v==null?localStorage.removeItem(o.key+'.'+k):localStorage.setItem(o.key+'.'+k,JSON.stringify(v));return true}catch(e){return false}};
-    const S={token:null,exp:0,fileId:get('file'),known:!!get('known'),data:null,busy:false,err:null,last:null,timer:null,ask:0};
-    const t=get('token'); if(t&&t.exp>Date.now()){S.token=t.token;S.exp=t.exp}
-    const live=()=>!!S.token&&Date.now()<S.exp;
-    const note=()=>{try{o.onChange&&o.onChange()}catch(e){}};
+  /* ===== Google sign-in shared by petravanta's apps =====
+     Canonical copy: https://github.com/petravanta/general/blob/main/shared/google-token.js (see STANDARDS.md, "Staying connected to Google Drive").
+     Every app lives on petravanta.github.io and uses the same OAuth client, so a Drive token one app gets works in all of them.
+     This keeps that token where every app can see it (localStorage key petravanta.google), one per Google account, so
+     reconnecting in one app reconnects them all, and an app only ever uses the token of the account it connected with.
+     Google gives a static site no refresh token: a token lasts an hour, and getting a new one opens Google's window,
+     which browsers only allow right after a tap. With the account's email as a hint, that window closes by itself. */
+  const GoogleToken=(()=>{
+    const KEY='petravanta.google', SCOPE='https://www.googleapis.com/auth/drive.file';
+    const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')||{}}catch(e){return {}}};
+    const write=v=>{try{localStorage.setItem(KEY,JSON.stringify(v))}catch(e){}};
+    const subs=[];
+    // Another tab or app on this site got a token: let this one pick it up without a tap
+    window.addEventListener('storage',e=>{if(e.key===KEY) subs.forEach(f=>{try{f()}catch(_){}})});
     function gis(){return new Promise((res,rej)=>{
       if(window.google&&google.accounts&&google.accounts.oauth2) return res();
       const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.onload=res; s.onerror=()=>rej({code:'offline'}); document.head.appendChild(s)})}
-    // Asking for a token opens Google's window, so call this from a tap. For an account that already agreed, the window closes by itself.
-    function signIn(){return new Promise(async(res,rej)=>{
+    // A token for this account with time left on it, or null
+    function get(email){const t=email&&(read().tokens||{})[email]; return t&&t.exp>Date.now()?t:null}
+    // o: {clientId, hint:'email to suggest', prompt:'' | 'select_account' | 'consent'}. Call from a tap. Resolves {token, exp, email}.
+    function request(o){return new Promise(async(res,rej)=>{
       try{await gis()}catch(e){return rej(e)}
-      google.accounts.oauth2.initTokenClient({client_id:o.clientId,scope:SCOPE,error_callback:rej,
-        callback:r=>{if(r.error) return rej(r); S.token=r.access_token; S.exp=Date.now()+(Number(r.expires_in||3600)-60)*1000; put('token',{token:S.token,exp:S.exp}); S.known=true; put('known',true); res()}
-      }).requestAccessToken({prompt:S.known?'':'consent'});
+      google.accounts.oauth2.initTokenClient({client_id:o.clientId,scope:SCOPE,login_hint:o.hint||undefined,error_callback:rej,
+        callback:async r=>{
+          if(r.error) return rej(r);
+          const t={token:r.access_token,exp:Date.now()+(Number(r.expires_in||3600)-60)*1000};
+          // Which account it is, so the token is filed under the right one
+          let email='';
+          try{const j=await (await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',{headers:{Authorization:'Bearer '+t.token}})).json(); email=(j.user&&j.user.emailAddress)||''}catch(e){}
+          if(!email) email=o.hint||'';
+          if(email){
+            const v=read(), now=Date.now(); v.tokens=v.tokens||{};
+            for(const k in v.tokens) if(!(v.tokens[k].exp>now)) delete v.tokens[k];
+            v.tokens[email]=t; v.last=email; write(v);
+          }
+          res({...t,email});
+        }
+      }).requestAccessToken({prompt:o.prompt||''});
     })}
+    // Signing out on this browser. Google's permission stays, since the other apps and devices still use it.
+    function forget(email){const v=read(); if(v.tokens&&email) delete v.tokens[email]; write(v)}
+    return {get,request,forget,gis,onChange:f=>subs.push(f),get lastEmail(){return read().last||''}};
+  })();
+  /* ===== end Google sign-in ===== */
+  /* ===== Drive store: petravanta's apps =====
+     Canonical copy: https://github.com/petravanta/general/blob/main/shared/drive-store.js (see STANDARDS.md, "Data lives in Google Drive").
+     Needs GoogleToken (shared/google-token.js) inlined above it.
+     Keeps an app's data in one JSON file in the user's Google Drive (drive.file scope: the app only sees files it created).
+     The browser keeps a copy of the last data, so the app opens straight away even when the hour-long Google sign-in has run out,
+     and changes that haven't reached Drive yet (for example while offline). The first tap after that reconnects, merges with
+     Drive's copy and saves. */
+  function DriveStore(o){
+    // o: {clientId, file:'App data.json', app:'app-id', key:'localStorage prefix', empty:()=>data, merge:(remote,local)=>data,
+    //     onChange:()=>{}, onRemote:data=>{} (Drive's copy changed what the app shows)}
+    const API='https://www.googleapis.com';
+    const get=k=>{try{return JSON.parse(localStorage.getItem(o.key+'.'+k)||'null')}catch(e){return null}};
+    const put=(k,v)=>{try{v==null?localStorage.removeItem(o.key+'.'+k):localStorage.setItem(o.key+'.'+k,JSON.stringify(v));return true}catch(e){return false}};
+    const S={token:null,exp:0,email:get('email')||'',fileId:get('file'),known:!!get('known'),data:null,stale:false,busy:false,err:null,last:null,timer:null,ask:0};
+    // The app's own token from before tokens were shared; good until it runs out
+    const t=get('token'); if(t&&t.exp>Date.now()){S.token=t.token;S.exp=t.exp} put('token',null);
+    if(S.known){const c=get('copy')||get('pending'); if(c){S.data=c; S.stale=true}}
+    // Load Google's script now: if it only starts loading on the tap, the browser may block its window
+    if(o.clientId&&S.known) GoogleToken.gis().catch(()=>{});
+    const live=()=>{
+      const g=GoogleToken.get(S.email); if(g&&g.exp>S.exp){S.token=g.token;S.exp=g.exp}
+      return !!S.token&&Date.now()<S.exp;
+    };
+    const note=()=>{try{o.onChange&&o.onChange()}catch(e){}};
+    // Opens Google's window, so call this from a tap. For an account that already agreed, the window closes by itself.
+    // A first connect suggests the account the other apps use; after that, the account this app connected with.
+    async function signIn(){
+      const r=await GoogleToken.request({clientId:o.clientId,hint:S.email||(S.known?'':GoogleToken.lastEmail),prompt:S.known||GoogleToken.lastEmail?'':'consent'});
+      S.token=r.token; S.exp=r.exp; S.known=true; put('known',true);
+      if(r.email&&r.email!==S.email){S.email=r.email; put('email',r.email)}
+    }
     async function call(path,opt={}){
       if(!live()) throw {code:'expired'};
       let r; try{r=await fetch(API+path,{...opt,headers:{...(opt.headers||{}),Authorization:'Bearer '+S.token}})}catch(e){throw {code:'offline'}}
-      if(r.status===401){S.token=null; put('token',null); throw {code:'expired'}}
+      if(r.status===401){S.token=null; S.exp=0; GoogleToken.forget(S.email); throw {code:'expired'}}
       if(!r.ok) throw {code:'http',status:r.status};
       return r;
     }
@@ -2125,11 +2176,19 @@
         body:`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`})).json();
       S.fileId=j.id; put('file',j.id);
     }
+    // Data opened from this browser's copy may be behind Drive's: merge Drive's in before writing over it
+    async function catchUp(){
+      if(!S.stale) return;
+      const remote=await read(); S.stale=false;
+      if(!remote) return;
+      const before=JSON.stringify(S.data); S.data=o.merge(remote,S.data); put('copy',S.data);
+      if(JSON.stringify(S.data)!==before) try{o.onRemote&&o.onRemote(S.data)}catch(e){}
+    }
     async function flush(){
       clearTimeout(S.timer); if(!S.data||S.busy) return;
       if(!live()){note();return}
       S.busy=true; note();
-      try{await write(S.data); S.err=null; S.last=new Date(); put('pending',null)}
+      try{await catchUp(); await write(S.data); S.err=null; S.last=new Date(); put('pending',null)}
       catch(e){S.err=e.code==='expired'?null:e.code==='offline'?'offline':'error'}
       finally{S.busy=false; note()}
     }
@@ -2142,32 +2201,34 @@
         const remote=await read();
         let data=remote?o.merge(remote,o.empty()):o.empty();
         if(pending) data=o.merge(pending,data);
-        S.data=data; S.err=null; S.last=new Date();
+        S.data=data; S.stale=false; S.err=null; S.last=new Date(); put('copy',data);
         if(!remote||pending){await write(data); put('pending',null)}
         return data;
       }catch(e){
         // offline with unsaved changes: carry on from them; they go to Drive once the connection is back
-        if(e.code==='offline'&&pending){S.data=o.merge(pending,o.empty()); S.err='offline'; return S.data}
+        if(e.code==='offline'&&pending){S.data=o.merge(pending,o.empty()); S.stale=true; S.err='offline'; return S.data}
         S.err=e.code==='offline'?'offline':e.code==='expired'?null:'error'; throw e;
       }finally{S.busy=false; note()}
     }
     // Pick up changes made on another device
     async function refresh(){
       if(!live()||S.busy||!S.data) return false;
-      try{const r=await read(); if(!r) return false; const before=JSON.stringify(S.data); S.data=o.merge(r,S.data); return JSON.stringify(S.data)!==before}
+      try{const r=await read(); if(!r) return false; const before=JSON.stringify(S.data); S.data=o.merge(r,S.data); S.stale=false; put('copy',S.data); return JSON.stringify(S.data)!==before}
       catch(e){return false}
     }
-    function save(data){S.data=data; if(!put('pending',data)) {/* storage full or blocked: Drive still gets it */} clearTimeout(S.timer); S.timer=setTimeout(flush,1500); note()}
+    function save(data){S.data=data; put('copy',data); if(!put('pending',data)) {/* storage full or blocked: Drive still gets it */} clearTimeout(S.timer); S.timer=setTimeout(flush,1500); note()}
     function signOut(){
-      if(S.token&&window.google&&google.accounts&&google.accounts.oauth2) google.accounts.oauth2.revoke(S.token,()=>{});
-      S.token=null; S.data=null; ['token','known','file','pending'].forEach(k=>put(k,null)); S.known=false; note();
+      GoogleToken.forget(S.email);
+      S.token=null; S.exp=0; S.data=null; S.stale=false; S.email=''; ['known','file','pending','copy','email'].forEach(k=>put(k,null)); S.known=false; note();
     }
     // Tokens last an hour. Renew on a tap when it is close to running out or gone, then save anything waiting.
     document.addEventListener('click',e=>{
       if(!o.clientId||!S.known||e.target.closest('[data-drive]')) return;
-      if(S.exp-Date.now()>10*60000||Date.now()-S.ask<60000) return;
+      live(); if(S.exp-Date.now()>10*60000||Date.now()-S.ask<60000) return;
       S.ask=Date.now(); signIn().then(flush).catch(()=>note());
     },true);
+    // Another app or tab reconnected this account: carry on with its token
+    GoogleToken.onChange(()=>{if(S.known&&S.data&&live()) flush(); else note()});
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden') flush()});
     window.addEventListener('online',()=>flush());
     function status(){
@@ -2176,7 +2237,7 @@
       const waiting=!!get('pending');
       if(S.err==='offline') return 'Offline · changes save to Drive when you’re back online';
       if(S.err) return 'Couldn’t reach Google Drive · will retry';
-      if(!live()) return waiting?'Tap anywhere to reconnect Google Drive':'Google Drive sign-in expired';
+      if(!live()) return waiting?'Tap anywhere to save to Google Drive':'Tap anywhere to reconnect Google Drive';
       if(waiting) return 'Saving to Google Drive…';
       return 'Saved to Google Drive'+(S.last?' · '+S.last.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'');
     }
@@ -2193,15 +2254,17 @@
     store: null,
     init() {
       this.store = DriveStore({ clientId: GOOGLE_CLIENT_ID, file: 'VoiceTrainer data.json', app: 'voicetrainer', key: 'vt',
-        empty: emptyData, merge: mergeData, onChange: () => this.paintStatus() });
+        empty: emptyData, merge: mergeData, onChange: () => this.paintStatus(),
+        onRemote: d => { if (this.where === 'drive') { this.d = d; onDataChanged(); } } });
       let local = null;
       try { local = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch (e) {}
       this.d = mergeData(local || this.migrate(), emptyData());
-      // Drive sign-ins last about an hour, so a returning visitor reconnects with one tap
+      // Drive sign-ins last about an hour. After that, open with this browser's copy; the first tap reconnects and catches up with Drive
       if (this.store.configured && this.store.live()) this.connect(false);
+      else if (this.store.configured && this.store.data) { this.d = mergeData(this.store.data, emptyData()); this.where = 'drive'; }
       this.paintStatus();
     },
-    // Earlier versions kept your own texts and the goal in this browser; progress starts fresh (Peter, 2026-10-16)
+    // Earlier versions kept your own texts and the goal in this browser; progress starts fresh (petravanta, 2026-10-16)
     migrate() {
       const d = emptyData();
       try { d.texts = JSON.parse(localStorage.getItem('voicetrainer.texts.v1') || '[]').map(t => Object.assign({ upd: '' }, t)); } catch (e) {}
