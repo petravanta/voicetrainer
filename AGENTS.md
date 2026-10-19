@@ -6,3 +6,5 @@ Follow the shared standards in https://github.com/petravanta/general/blob/main/S
 - Practice content is data, not code: reading texts, practice words, breath and control exercises live in `data/*.json` with schemas in `data/schema/`, and `build.js` inlines them as `window.VTDATA`. Add or change entries there. Ids (and words) are stored in practice history; never rename or reuse one. Run `node scripts/check-data.js` after editing data.
 - Run every test in `test/` before pushing; the Pages workflow runs them too and won't deploy if one fails.
 - Canvas drawing reads the color tokens and redraws when `data-theme` changes; keep that working when adding new charts.
+
+- `pwa/` holds the install files (manifest, `sw.js`, icons); the Pages workflow copies them next to `index.html`, and only the standalone page links them (see general/STANDARDS.md, "Installing on a phone").
