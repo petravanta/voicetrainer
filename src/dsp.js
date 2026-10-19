@@ -633,10 +633,40 @@
     });
   }
 
+  // ---------- reading report ----------
+  // Per-word summary of a reading. frames: [{ i: word index, f0: Hz or 0, res: score or NaN, sib: score or NaN }].
+  // Returns one { p, r, s } per word (median pitch, resonance, sibilant score; null when too little was heard).
+  function wordReport(frames, nWords) {
+    const acc = Array.from({ length: nWords }, () => ({ p: [], r: [], s: [] }));
+    for (const f of frames) {
+      const a = acc[f.i]; if (!a) continue;
+      if (f.f0 > 0) a.p.push(f.f0);
+      if (Number.isFinite(f.res)) a.r.push(f.res);
+      if (Number.isFinite(f.sib)) a.s.push(f.sib);
+    }
+    const m = (arr, n) => (arr.length >= n ? median(arr) : null);
+    return acc.map(a => ({ p: m(a.p, 3), r: m(a.r, 2), s: m(a.s, 2) }));
+  }
+  // Split a passage into short phrases at punctuation (at most maxLen words each) and summarise each one
+  // from the per-word values: [{ a, b (word indices, inclusive), r, p (medians, null if none) }].
+  function readingPhrases(texts, words, maxLen = 10) {
+    const out = [];
+    let a = 0;
+    for (let i = 0; i < texts.length; i++) {
+      if (i === texts.length - 1 || /[.,;:!?]["')\]]*$/.test(texts[i]) || i - a + 1 >= maxLen) {
+        const ws = words.slice(a, i + 1);
+        const r = ws.map(w => w.r).filter(v => v != null), p = ws.map(w => w.p).filter(v => v != null);
+        out.push({ a, b: i, r: r.length ? median(r) : null, p: p.length ? median(p) : null, nr: r.length });
+        a = i + 1;
+      }
+    }
+    return out;
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, prosodyStats, NucleusTracker, Analyzer,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
