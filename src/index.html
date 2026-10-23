@@ -13,13 +13,13 @@
       <h1 class="brand"><button type="button" class="brand-btn" id="brand-home" aria-label="VoiceTrainer home"><svg viewBox="0 0 32 32" aria-hidden="true"><g fill="var(--accent)"><rect x="4" y="12" width="3" height="8" rx="1.5"/><rect x="10" y="7" width="3" height="18" rx="1.5"/><rect x="16" y="4" width="3" height="24" rx="1.5"/><rect x="22" y="9" width="3" height="14" rx="1.5"/></g><rect x="28" y="13" width="2.5" height="6" rx="1.25" fill="var(--ink)"/></svg>VoiceTrainer</button></h1>
       <span class="save-state" id="save-state" role="status"></span>
       <button type="button" class="btn sm" id="drive-resume" data-drive="1" hidden>Reconnect Drive</button>
-      <button type="button" class="btn sm ghost icon-btn" id="btn-settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg><span>Settings</span></button>
     </div>
     <nav class="tabs modes" id="modes" role="tablist" aria-label="Modes">
       <button type="button" role="tab" data-mode="home" aria-selected="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 7.5 8 3l5.5 4.5V13a.5.5 0 0 1-.5.5h-3.5V10h-3v3.5H3a.5.5 0 0 1-.5-.5z"/></svg><span>Home</span></button>
       <button type="button" role="tab" data-mode="readings" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4.2C6.5 3 4.5 2.7 2 3v9.5c2.5-.3 4.5 0 6 1.2 1.5-1.2 3.5-1.5 6-1.2V3c-2.5-.3-4.5 0-6 1.2zM8 4.2v9.5"/></svg><span>Readings</span></button>
       <button type="button" role="tab" data-mode="freestyle" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12a6 6 0 0 1 12 0M8 12l2.6-4.2"/></svg><span>Freestyle</span></button>
       <button type="button" role="tab" data-mode="practice" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.5"/></svg><span>Practice</span></button>
+      <button type="button" role="tab" data-mode="settings" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg><span>Settings</span></button>
     </nav>
   </div>
 </header>
@@ -257,32 +257,49 @@
     </div>
   </div>
 
-  <footer class="foot">
-    <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
-  </footer>
-</div>
-  <dialog id="settings-dlg" class="voice-dlg settings-dlg" aria-labelledby="settings-h">
-    <form method="dialog">
-      <h2 id="settings-h">Settings</h2>
+  <section class="settings" id="settings" data-for="settings" aria-labelledby="h-settings">
+    <div class="section-head"><h2 id="h-settings">Settings</h2></div>
+    <div class="panel set-card">
       <h3>Goal</h3>
+      <p class="vd-note">Every target in the app follows this: the resonance band, pitch band, vowel and hiss targets, the coach and the exercises.</p>
       <div class="vd-type" role="radiogroup" aria-label="Training goal">
         <button type="button" id="goal-fem" role="radio" aria-checked="true">Feminine</button>
         <button type="button" id="goal-masc" role="radio" aria-checked="false">Masculine</button>
       </div>
+    </div>
+    <div class="panel set-card">
+      <h3>Target pitch range</h3>
+      <p class="vd-note" id="pr-note"></p>
+      <div class="pr-fields">
+        <label class="field">From (Hz)<input type="number" id="pr-lo" min="60" max="400" step="5" inputmode="numeric"></label>
+        <label class="field">To (Hz)<input type="number" id="pr-hi" min="60" max="400" step="5" inputmode="numeric"></label>
+        <button type="button" class="btn" id="pr-reset">Reset to default</button>
+      </div>
+      <p class="vd-note" id="pr-msg" role="status"></p>
+    </div>
+    <div class="panel set-card">
       <h3>Theme</h3>
       <div class="vd-type theme-pick" role="radiogroup" aria-label="Theme">
         <button type="button" id="theme-system" role="radio" aria-checked="true">System</button>
         <button type="button" id="theme-light" role="radio" aria-checked="false">Light</button>
         <button type="button" id="theme-dark" role="radio" aria-checked="false">Dark</button>
       </div>
+    </div>
+    <div class="panel set-card">
       <h3>Google Drive</h3>
       <div id="drive-panel" class="drive-panel"></div>
+    </div>
+    <div class="panel set-card">
       <h3>Demo voice</h3>
       <p class="vd-note">The synthetic voice used by Play demo voice, Hear it and Compare.</p>
       <div class="btn-row"><button type="button" class="btn" id="settings-voice">Demo voice settings</button></div>
-      <div class="btn-row"><button type="submit" class="btn primary">Done</button></div>
-    </form>
-  </dialog>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
+  </footer>
+</div>
   <dialog id="speech-consent" class="voice-dlg" aria-labelledby="speech-consent-h">
     <form method="dialog">
       <h2 id="speech-consent-h">Send your speech for recognition?</h2>

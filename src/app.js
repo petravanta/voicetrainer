@@ -255,7 +255,11 @@
   // ---- pitch trace ----
   const pitchBuf = [], pitchT = [];
   const PITCH_RANGE = [60, 400];
-  function pitchBand() { return state.goal === 'fem' ? D.PITCH_BANDS.fem : D.PITCH_BANDS.masc; }
+  // the goal's typical band, unless you set your own range for this goal in Settings
+  const PITCH_MIN_SPAN = 10;
+  const validBand = (b) => Array.isArray(b) && b.length === 2 && b.every(Number.isFinite) && b[0] >= PITCH_RANGE[0] && b[1] <= PITCH_RANGE[1] && b[1] - b[0] >= PITCH_MIN_SPAN;
+  function customBand(goal = state.goal) { const c = typeof Data !== 'undefined' && Data.d ? (Data.setting('pitchRange') || {})[goal] : null; return validBand(c) ? c : null; }
+  function pitchBand() { return customBand() || D.PITCH_BANDS[state.goal === 'fem' ? 'fem' : 'masc']; }
   function drawPitch() {
     const cv = $('cv-pitch'); if (!cv || !C.ink) return;
     fitCanvas(cv);
@@ -2038,6 +2042,7 @@
     const rows = [
       ['Overall resonance', Number.isFinite(st.resonance) ? Math.round(st.resonance) : '--'],
       ['Median pitch', st.pitch ? `${Math.round(st.pitch.median)} Hz` : '--'],
+      ['Pitch in target', pitchInTarget(session.pitch)],
       ['Pitch range (10-90%)', st.pitch ? `${Math.round(st.pitch.p10)}-${Math.round(st.pitch.p90)} Hz` : '--'],
       ['Median breathiness', Number.isFinite(st.breath) ? `${Math.round(st.breath)} (${breathWord(st.breath)})` : '--'],
       ['Drills completed', session.drills.length],
@@ -2045,6 +2050,13 @@
     sum.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }
 
+  // share of voiced frames inside the target pitch band (above it counts for a feminine goal, below it for a masculine one)
+  function pitchInTarget(ps) {
+    const [lo, hi] = pitchBand(), v = (ps || []).filter(p => p > 0);
+    if (v.length < 10) return `-- <small class="muted">(${lo}-${hi} Hz)</small>`;
+    const ok = v.filter(p => (state.goal === 'fem' ? p >= lo : p <= hi)).length;
+    return `${Math.round(ok / v.length * 100)}% <small class="muted">(${lo}-${hi} Hz)</small>`;
+  }
   function resetSessionViews() {
     $('sess-vowels').innerHTML = '<p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p>';
     $('sess-sibs').innerHTML = '<p class="empty">Hold an "sss" or "shh" to measure how bright your sibilants are.</p>';
@@ -2350,6 +2362,7 @@
   function onDataChanged() {
     applyTheme(themeChoice());
     const g = Data.setting('goal'); if (g && g !== state.goal) setGoal(g, true);
+    renderPitchTarget();
     Texts.sync();
     renderReadings(); renderPracticeHistory(); renderDrillGrid(); renderHome();
   }
@@ -2467,7 +2480,7 @@
   function cancelRun() { if (Run.on) { endRun(); session = newSession(); resetSessionViews(); } }
   const fullReadings = (id) => Data.d.readings.filter(r => r.text === id && r.goal === state.goal && !r.partial);
   function showReadingResult(rec, msg) {
-    const box = $('rd-result'); box.hidden = false;
+    const box = $('rd-result'); box.hidden = false; box.rec = rec;
     if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
     const prev = fullReadings(rec.text).filter(r => r.id !== rec.id && r.at < rec.at);
     const last = prev.at(-1), best = prev.reduce((m, r) => (r.resonance != null && (m == null || better(r.resonance, m)) ? r.resonance : m), null);
@@ -2479,7 +2492,7 @@
       <div class="stats">
         ${stat('Resonance', rec.resonance != null ? Math.round(rec.resonance) : '--', delta(rec.resonance, last && last.resonance))}
         ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', delta(rec.sibS, last && last.sibS))}
-        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : '')}
+        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}<small>target ${pitchBand().join('-')} Hz</small>`)}
         ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
       </div>
       <p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>
@@ -2668,13 +2681,14 @@
   // ---------------- modes ----------------
   let mode = 'home';
   function setMode(m) {
-    if (!['home', 'readings', 'freestyle', 'practice'].includes(m)) m = 'home';
+    if (!['home', 'readings', 'freestyle', 'practice', 'settings'].includes(m)) m = 'home';
     mode = m;
     document.body.dataset.mode = m;
     for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(m);
     for (const b of document.querySelectorAll('#modes [data-mode]')) b.setAttribute('aria-selected', String(b.dataset.mode === m));
     if (m !== 'readings' && Reader.open) { cancelRun(); Reader.hide(); }
     if (m === 'home') renderHome();
+    if (m === 'settings') { paintDrive(); paintPitchRange(); }
     window.scrollTo(0, 0);
     // canvases in a section that was hidden have no size until now
     requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
@@ -2704,13 +2718,54 @@
     $('goal-fem').setAttribute('aria-checked', String(goal === 'fem'));
     $('goal-masc').setAttribute('aria-checked', String(goal === 'masc'));
     document.body.classList.toggle('goal-masc', goal === 'masc');
-    const [lo, hi] = pitchBand();
-    $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz`;
     if (!fromData && Data.setting('goal') !== goal) Data.setting('goal', goal);
     try { if (!localStorage.getItem(DemoVoice.KEY)) DemoVoice.v = null; } catch (e) {}
-    renderMeter(); drawPitch(); drawHistory(); renderSpecGoalHelp(); renderExampleNote(); if (state.coach) { state.coach.key = null; renderCoach(); } if (C.ink) drawSpecAxis();
-    if (state.drill && state.drill.result) renderDrillResult(state.drill.result);
-    renderDrillGrid(); renderReadings(); renderPracticeHistory(); renderHome();
+    renderMeter(); renderPitchTarget(); drawHistory(); renderSpecGoalHelp(); if (state.coach) { state.coach.key = null; renderCoach(); } if (C.ink) { drawSpecAxis(); drawVowelChart(); renderTractLive(); }
+    // an open exercise was set up for the other goal (zones, examples, checker): start it again for this one
+    if (state.drill) selectDrill(state.drill.def, true); else renderDrillGrid();
+    if (state.plan) renderPlan();
+    renderSession(); renderReadings(); renderPracticeHistory(); renderHome();
+    const rd = $('rd-result'); if (rd && !rd.hidden && rd.rec && rd.rec.goal !== goal) rd.hidden = true;
+  }
+  // everything that shows the target pitch band
+  function renderPitchTarget() {
+    const [lo, hi] = pitchBand();
+    $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz${customBand() ? ' (yours)' : ''}`;
+    drawPitch(); paintPitchRange();
+    if (Data.d) renderSession();
+    const rd = $('rd-result'); if (rd && !rd.hidden && rd.rec) showReadingResult(rd.rec);
+  }
+  // Settings: your own target pitch range, kept per goal; empty means the goal's typical band
+  function paintPitchRange() {
+    const lo = $('pr-lo'), hi = $('pr-hi'); if (!lo || !Data.d) return;
+    const [d0, d1] = D.PITCH_BANDS[state.goal], [b0, b1] = pitchBand(), own = customBand();
+    const goalName = state.goal === 'fem' ? 'feminine' : 'masculine';
+    $('pr-note').textContent = `The pitch band on the pitch track, in the session summary and in reading reports. The typical ${goalName} speaking range is ${d0}-${d1} Hz. ${own ? 'You are using your own range for this goal.' : 'Set your own if your voice or your aim differs.'}`;
+    if (document.activeElement !== lo) lo.value = b0;
+    if (document.activeElement !== hi) hi.value = b1;
+    $('pr-reset').disabled = !own;
+  }
+  function savePitchRange() {
+    const lo = Math.round(Number($('pr-lo').value)), hi = Math.round(Number($('pr-hi').value)), msg = $('pr-msg');
+    const b = [lo, hi];
+    if (!validBand(b)) {
+      msg.textContent = `Use whole numbers from ${PITCH_RANGE[0]} to ${PITCH_RANGE[1]} Hz, with "To" at least ${PITCH_MIN_SPAN} Hz above "From".`;
+      msg.classList.add('err'); return;
+    }
+    msg.textContent = ''; msg.classList.remove('err');
+    const all = Object.assign({}, Data.setting('pitchRange') || {});
+    const [d0, d1] = D.PITCH_BANDS[state.goal];
+    if (lo === d0 && hi === d1) delete all[state.goal]; else all[state.goal] = b;
+    Data.setting('pitchRange', all);
+    renderPitchTarget();
+  }
+  function resetPitchRange() {
+    const all = Object.assign({}, Data.setting('pitchRange') || {});
+    delete all[state.goal];
+    Data.setting('pitchRange', all);
+    const msg = $('pr-msg'); msg.textContent = 'Back to the typical range for this goal.'; msg.classList.remove('err');
+    $('pr-lo').blur(); $('pr-hi').blur();
+    renderPitchTarget();
   }
   function renderSpecGoalHelp() {
     const fem = state.goal === 'fem';
@@ -3190,9 +3245,10 @@
     for (const k of ['system', 'light', 'dark']) $('theme-' + k).addEventListener('click', () => { applyTheme(k); Data.setting('theme', k); });
     // The shared theme switch in the header (general/shared/theme-switch.js)
     document.addEventListener('petravanta:themechange', (e) => { applyTheme(e.detail.mode); Data.setting('theme', e.detail.mode); });
-    $('btn-settings').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
-    $('settings-voice').addEventListener('click', () => { $('settings-dlg').close(); $('btn-demo-set').click(); });
-    $('home-goal').addEventListener('click', () => { paintDrive(); $('settings-dlg').showModal(); });
+    $('settings-voice').addEventListener('click', () => $('btn-demo-set').click());
+    $('home-goal').addEventListener('click', () => setMode('settings'));
+    for (const id of ['pr-lo', 'pr-hi']) $(id).addEventListener('change', savePitchRange);
+    $('pr-reset').addEventListener('click', resetPitchRange);
     $('drive-resume').addEventListener('click', () => Data.connect(true));
     for (const b of document.querySelectorAll('#modes [data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
     for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => setMode(b.dataset.go));
