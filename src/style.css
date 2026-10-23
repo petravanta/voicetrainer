@@ -483,14 +483,19 @@ body[data-mode="readings"]:not(.reading-full) .sourcebar { display: none; }
 .vd-type button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
 .vd-type button[aria-checked="true"]#goal-fem { background: var(--fem); color: var(--surface); }
 .vd-type button[aria-checked="true"]#goal-masc { background: var(--masc); color: var(--surface); }
-.settings-dlg h3 { margin: 18px 0 8px; }
+.settings { display: grid; gap: 16px; max-width: 640px; }
+.set-card h3 { margin: 0 0 8px; }
+.set-card > .vd-note:first-of-type { margin: 0 0 12px; }
+.pr-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.pr-fields input { width: 7.5em; }
+#pr-msg.err { color: var(--warn); }
 .drive-panel { display: grid; gap: 8px; }
 .drive-panel .vd-note { margin: 0; }
 .dial-dots { display: none; }
 
 /* phones: modes in a bar along the bottom, Freestyle dials side by side to swipe through */
 @media (max-width: 860px) {
-  nav.modes { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; padding: 0 max(4px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(4px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
+  nav.modes { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; padding: 0 max(4px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(4px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
   nav.modes button { flex-direction: column; gap: 3px; padding: 8px 4px 9px; font-size: 12px; border-bottom: 0; border-top: 3px solid transparent; }
   nav.modes button[aria-selected="true"] { border-top-color: var(--accent); color: var(--accent); }
   nav.modes svg { width: 20px; height: 20px; }

@@ -12,7 +12,7 @@ Phones get a tab bar along the bottom; the screen stays awake while the micropho
 
 ## Saved data and themes
 
-Readings, practice history, settings and your own texts live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. Settings also hold the goal (feminine or masculine) and the theme (system, light or dark). The theme is shared with the switch in the header and with petravanta's other apps on this device.
+Readings, practice history, settings and your own texts live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. The Settings tab holds the goal (feminine or masculine; every target follows it), your own target pitch range per goal (or the typical band, with a reset), and the theme (system, light or dark). The theme is shared with the switch in the header and with petravanta's other apps on this device.
 
 ## Features
 
