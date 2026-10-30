@@ -28,5 +28,20 @@
     "id": "b-everyday",
     "title": "Everyday phrases",
     "body": "Hi, it's so nice to see you again. How have you been?\n\nCould I get a small coffee with oat milk, please? Thanks so much.\n\nSorry, could you say that again? I'll be there in about ten minutes.\n\nHave a lovely evening, and see you next week!"
+  },
+  {
+    "id": "b-counting",
+    "title": "Counting to twenty",
+    "body": "One, two, three, four, five.\n\nSix, seven, eight, nine, ten.\n\nEleven, twelve, thirteen, fourteen, fifteen.\n\nSixteen, seventeen, eighteen, nineteen, twenty."
+  },
+  {
+    "id": "b-mwords",
+    "title": "Hum into m-words (me, may, more)",
+    "body": "Mmm-me, mmm-may, mmm-my, mmm-mow, mmm-moo.\n\nMe, may, my, mow, moo. More, mood, melon, mellow, many, money.\n\nMay I make muffins on Monday morning? My mum mostly makes melon jam.\n\nMolly met me at the market at midday, and we made a map of the meadow."
+  },
+  {
+    "id": "b-fromee",
+    "title": "Speaking from ee",
+    "body": "Speaking from ee. Speaking from ee.\n\nShe sees me easily. We need three clean sheets.\n\nPlease leave the keys by the tree. Keep the green beans in the deep dish.\n\nEven in the evening the street feels peaceful, and the breeze is sweet."
   }
 ]

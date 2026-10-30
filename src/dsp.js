@@ -358,6 +358,9 @@
     tongue: { main: [1], thr: 0.10, others: [[0, 0.6], [2, 0.6]] },
     lips:   { main: [2], thr: 0.06, others: [[0, 0.5]] }, // rounding also lowers F2, so F2 is free
     larynx: { all: true, thr: 0.04 },
+    // resonance slide: the whole tract moves (dark to bright or back) while pitch holds within +-hold semitones.
+    // Read from F2 and F3 like tractShape's shared shift; F1 is unreliable at higher pitch, so it only must not go the other way.
+    slide:  { shift: [1, 2], thr: 0.07, hold: 1.5 },
     pitch:  { pitch: 3, still: 0.07 },
   };
   function isolation(kind, baseF, F, baseF0, f0) {
@@ -368,6 +371,10 @@
     if (r.pitch) {
       moved = Math.abs(semis) >= r.pitch;
       ok = moved && Math.max(...a) <= r.still;
+    } else if (r.shift) {
+      const [p, q] = r.shift, dir = Math.sign(dev[p]);
+      moved = Math.min(a[p], a[q]) >= r.thr && Math.sign(dev[q]) === dir;
+      ok = moved && Math.min(a[p], a[q]) >= 0.4 * Math.max(a[p], a[q]) && dev[0] * dir > -0.05 && Math.abs(semis) <= r.hold;
     } else if (r.all) {
       moved = Math.max(...a) >= r.thr;
       ok = a.every(x => x >= r.thr) && dev.every(x => Math.sign(x) === Math.sign(dev[0])) && Math.min(...a) >= 0.4 * Math.max(...a);

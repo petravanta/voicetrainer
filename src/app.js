@@ -1470,9 +1470,10 @@
     const tail = v.slice(-30), F = [0, 1, 2].map(i => D.median(tail.map(f => f.formants[i]))), f0 = D.median(tail.map(f => f.f0));
     const r = D.isolation(def.kind, base.F, F, base.f0, f0);
     const pc = (x) => `${x >= 0 ? '+' : ''}${Math.round(x * 100)}%`;
-    const text = `jaw ${pc(r.dev[0])}, tongue ${pc(r.dev[1])}, lips/larynx ${pc(r.dev[2])}${def.kind === 'pitch' ? `, pitch ${r.semis >= 0 ? '+' : ''}${r.semis.toFixed(1)} st` : ''}`;
+    const text = `jaw ${pc(r.dev[0])}, tongue ${pc(r.dev[1])}, lips/larynx ${pc(r.dev[2])}${def.kind === 'pitch' || def.kind === 'slide' ? `, pitch ${r.semis >= 0 ? '+' : ''}${r.semis.toFixed(1)} st` : ''}`;
     const any = Math.max(...r.dev.map(Math.abs)) >= 0.06;
-    return { ok: r.ok, big: r.ok ? '✓' : '✗', text: (r.ok ? 'isolated · ' : r.moved ? 'not isolated · ' : any ? 'the wrong part moved · ' : 'did not move enough · ') + text };
+    const pitchSlid = def.kind === 'slide' && Math.abs(r.semis) > D.ISO_RULES.slide.hold;
+    return { ok: r.ok, big: r.ok ? '✓' : '✗', text: (r.ok ? 'isolated · ' : pitchSlid ? 'pitch moved too · ' : r.moved ? 'not isolated · ' : any ? 'the wrong part moved · ' : 'did not move enough · ') + text };
   }
   function gradeBreath(frames) {
     const b = frames.filter(f => f.breath != null).map(f => f.breath);
@@ -1521,17 +1522,20 @@
   }
   // control exercises: hold the vowel, then make one movement (or the wrong one) and hold it
   const ISO_MOVES = {
-    jaw: [1.3, 1, 1], tongue: [1, 1.2, 1], lips: [1, 0.95, 0.9], larynx: [1.1, 1.1, 1.1], pitch: [1, 1, 1],
+    jaw: [1.3, 1, 1], tongue: [1, 1.2, 1], lips: [1, 0.95, 0.9], larynx: [1.1, 1.1, 1.1], pitch: [1, 1, 1], slide: null,
   };
   const ISO_WRONG = {
     jaw: { label: 'Tongue moved instead', F: [1, 1.18, 1] }, tongue: { label: 'Jaw moved instead', F: [1.3, 1.04, 1] },
     lips: { label: 'Jaw moved instead', F: [1.3, 1, 1] }, larynx: { label: 'Only the tongue moved', F: [1, 1.18, 1] },
     pitch: { label: 'Resonance moved too', F: [1.12, 1.12, 1.12] },
+    slide: { label: 'Pitch climbed with it', semis: 4 },
   };
   function isoExample(fs, def, fem, right) {
-    const v = D.VOWEL_BY_KEY[def.vowel], base = fem ? v.W : v.M, f0 = fem ? 200 : 115;
-    const k = right ? ISO_MOVES[def.kind] : ISO_WRONG[def.kind].F, moved = base.map((f, i) => f * k[i]);
-    const f1 = def.kind === 'pitch' ? f0 * Math.pow(2, 5 / 12) : f0;
+    const v = D.VOWEL_BY_KEY[def.vowel], f0 = fem ? 200 : 115;
+    // the slide goes from the typical masculine vowel to the typical feminine one; the wrong one lets pitch climb with it
+    const slide = def.kind === 'slide', base = slide ? v.M : fem ? v.W : v.M;
+    const moved = slide ? v.W : base.map((f, i) => f * (right ? ISO_MOVES[def.kind] : ISO_WRONG[def.kind].F)[i]);
+    const f1 = def.kind === 'pitch' ? f0 * Math.pow(2, 5 / 12) : slide && !right ? f0 * Math.pow(2, ISO_WRONG.slide.semis / 12) : f0;
     return Synth.concat([Synth.silence(fs, 0.1), Synth.voiced(fs, 1.0, f0, f0, base, { ramp: 0.05, seed: 3 }),
       Synth.voiced(fs, 1.8, f0, f1, moved, { from: base, trans: 0.6, ramp: 0.05, seed: 5 }), Synth.silence(fs, 0.1)]);
   }
@@ -1678,7 +1682,7 @@
 
   // ---------------- control exercises ----------------
   const ISO_ROWS = [['Jaw', 'opening (F1)'], ['Tongue', 'front/back (F2)'], ['Lips, larynx', '(F3)'], ['Pitch', 'semitones']];
-  const ISO_MAIN = { jaw: [0], tongue: [1], lips: [2], larynx: [0, 1, 2], pitch: [3] };
+  const ISO_MAIN = { jaw: [0], tongue: [1], lips: [2], larynx: [0, 1, 2], pitch: [3], slide: [1, 2] };
   function renderIsoPanel(d) {
     const p = $('drill-panel'), def = d.def, main = ISO_MAIN[def.kind];
     p.innerHTML = `
@@ -1751,19 +1755,23 @@
     renderTractRead($('tract-read-iso'), drawTract($('cv-tract-iso'), F, D.VOWEL_BY_KEY[def.vowel], null, base.F, demo ? 'Solid line: the demo voice (estimated)' : ''));
     const main = ISO_MAIN[def.kind];
     if (demo) {
-      cue.textContent = `Demo voice, ${demoLabel}: ${r.ok ? (def.kind === 'pitch' ? 'pitch moves while the formants hold still' : 'the right part moves on its own')
+      cue.textContent = `Demo voice, ${demoLabel}: ${r.ok ? (def.kind === 'pitch' ? 'pitch moves while the formants hold still' : def.kind === 'slide' ? 'resonance slides while the pitch holds' : 'the right part moves on its own')
+        : def.kind === 'slide' && Math.abs(r.semis) > D.ISO_RULES.slide.hold ? 'the pitch moved with it, so the check would not count it'
         : r.moved || Math.max(...r.dev.map(Math.abs)) >= 0.06 ? 'the wrong part moved, so the check would not count it' : 'holding its starting point'}.`;
       cue.classList.toggle('ok', r.ok);
       return;
     }
     if (main[0] < 3) d.best = Math.max(d.best, ...main.map(i => Math.abs(r.dev[i])));
     else d.best = Math.max(d.best, Math.abs(r.semis));
-    if (r.ok) cue.textContent = def.kind === 'pitch' ? 'Pitch moved and the formants held still. That is the separation you want.' : 'Isolated: the right formant is moving on its own.';
-    else if (r.moved) {
+    if (r.ok) cue.textContent = def.kind === 'pitch' ? 'Pitch moved and the formants held still. That is the separation you want.'
+      : def.kind === 'slide' ? 'Resonance moved and the pitch held. That is the separation you want.' : 'Isolated: the right formant is moving on its own.';
+    else if (def.kind === 'slide' && Math.abs(r.semis) > D.ISO_RULES.slide.hold) {
+      cue.textContent = `Pitch ${r.semis > 0 ? 'climbed' : 'dropped'} ${Math.abs(r.semis).toFixed(1)} semitones. Go back to your note and change only the brightness.`;
+    } else if (r.moved) {
       const a = r.dev.map(Math.abs), names = ['The jaw (F1)', 'The tongue (F2)', 'The lips or larynx (F3)'];
       const extra = def.kind === 'pitch' ? names[a.indexOf(Math.max(...a))]
-        : def.kind === 'larynx' ? null : names[[0, 1, 2].filter(i => !main.includes(i)).sort((x, y) => a[y] - a[x])[0]];
-      cue.textContent = def.kind === 'larynx' ? 'Only some formants moved. Keep the mouth still and let the whole throat do the work.'
+        : def.kind === 'larynx' || def.kind === 'slide' ? null : names[[0, 1, 2].filter(i => !main.includes(i)).sort((x, y) => a[y] - a[x])[0]];
+      cue.textContent = def.kind === 'larynx' || def.kind === 'slide' ? 'Only some formants moved. Keep the mouth still and let the whole throat do the work.'
         : `${extra} moved too. Keep it still and move more slowly.`;
     } else cue.textContent = 'Starting point set. Now make the movement slowly, keeping the sound going.';
     if (d.result) return;
@@ -1782,6 +1790,7 @@
     $('drill-msg').textContent = def.kind === 'pitch'
       ? `Done. Your pitch moved by up to ${d.best.toFixed(1)} semitones while the formants held still: the resonance reading follows your mouth and throat, not your pitch.`
       : def.kind === 'larynx' ? `Done. The jaw, tongue and lips readings all moved together, by up to ${pct}%: the feedback is tracking your larynx.`
+        : def.kind === 'slide' ? `Done. Your resonance moved by up to ${pct}% while your pitch stayed within ${D.ISO_RULES.slide.hold} semitones of where you started.`
         : `Done. The ${def.kind} reading (${['F1', 'F2', 'F3'][ISO_MAIN[def.kind][0]]}) moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
     $('drill-again').hidden = false;
     recordPractice(session.drills[session.drills.length - 1]);
