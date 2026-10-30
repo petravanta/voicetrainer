@@ -63,5 +63,18 @@ for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50],
   const s = D.prosodyStats(pts);
   check(s && s.span < 1 && s.sd < 1, `prosody: octave slips are folded back (span ${s && s.span.toFixed(2)})`);
 }
+// Resonance slide: a dark-to-bright "ee" on one note passes; the same slide with the pitch climbing fails.
+// Mirrors isoExample and gradeIso in app.js (starting point = first 40 voiced frames, end = last 30).
+for (const f0 of [115, 200]) {
+  const v = D.VOWEL_BY_KEY.i;
+  for (const [semis, want] of [[0, true], [4, false]]) {
+    const x = S.concat([S.silence(fs, 0.1), S.voiced(fs, 1.0, f0, f0, v.M, { ramp: 0.05, seed: 3 }),
+      S.voiced(fs, 1.8, f0, f0 * Math.pow(2, semis / 12), v.W, { from: v.M, trans: 0.6, ramp: 0.05, seed: 5 }), S.silence(fs, 0.1)]);
+    const vf = run(x, fs).filter(f => f.kind === 'voiced' && f.formants);
+    const med = (fr) => ({ F: [0, 1, 2].map(i => D.median(fr.map(f => f.formants[i]))), f0: D.median(fr.map(f => f.f0)) });
+    const a = med(vf.slice(0, 40)), b = med(vf.slice(-30)), r = D.isolation('slide', a.F, b.F, a.f0, b.f0);
+    check(vf.length > 70 && r.ok === want, `slide at ${f0} Hz, pitch ${semis ? '+' + semis + ' st' : 'held'}: ${r.ok ? 'passes' : 'fails'} (${r.dev.map(d => Math.round(d * 100) + '%').join(' ')}, ${r.semis.toFixed(1)} st)`);
+  }
+}
 console.log(fails ? `\n${fails} failed` : '\nall examples on target');
 process.exit(fails ? 1 : 0);
