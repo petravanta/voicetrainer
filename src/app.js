@@ -59,8 +59,10 @@
   // Control exercises: move one part of the tract and check that the matching formant (and only it)
   // moves, to build trust in what the feedback is tracking.
   DRILLS.control = DATA.control.map(c => ({ ...c, type: 'iso' }));
+  // Whisper exercises: resonance with no voice, read from the formants of the whispered sound.
+  DRILLS.whisper = DATA.whisper.map(w => ({ ...w, type: 'whisper', steps: (fem) => w.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
-  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90 }; // frames at ~60 per second
+  const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90, whIn: 120 }; // frames at ~60 per second
 
   // ---------------- state ----------------
   const state = {
@@ -88,6 +90,7 @@
     buildLut();
     clearSpec();
     drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
+    if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
   }
   function parseColor(s) {
     const c = document.createElement('canvas').getContext('2d');
@@ -521,6 +524,7 @@
     ensureCtx();
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
+    if (def.type === 'whisper') return playSamples(Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT), mode, def.kind === 'siren' ? 'whisper sliding up and down' : `typical ${fem ? 'feminine' : 'masculine'} whisper`);
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
   }
@@ -574,7 +578,7 @@
   function startDemoView(d, label) {
     if (!d) return;
     demoLabel = label ? label[0].toLowerCase() + label.slice(1) : 'demo';
-    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
+    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
     d.offTarget = null; // a "sounds closer to..." note from before the demo no longer applies
@@ -586,7 +590,7 @@
     const m = $('drill-msg');
     if (m && m.classList.contains('demo-msg')) { m.classList.remove('demo-msg'); m.textContent = d.result ? (d.msgBefore || '') : state.running ? 'Listening...' : ''; }
     d.offTarget = null;
-    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
+    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
   }
@@ -594,6 +598,7 @@
     const t = d.def.type;
     if (t === 'breath') updateBreath(d, force);
     else if (t === 'iso') updateIso(d, force);
+    else if (t === 'whisper') updateWhisper(d, force);
     else if (t === 'prosody' && !force) updateProsody(d);
   }
   function setExampleUi(mode) {
@@ -679,7 +684,7 @@
     const d = !gated && state.drill && !state.drill.result ? state.drill : null;
     const dd = exSrc && state.drill && state.drill.demoOn ? state.drill : null; // a demo is playing for this exercise
     // your own voice takes the panel back from the demo
-    if (!gated && state.drill && state.drill.demoOn && (fr.kind === 'voiced' || fr.kind === 'fricative')) endDemoView(state.drill);
+    if (!gated && state.drill && state.drill.demoOn && (fr.kind === 'voiced' || fr.kind === 'fricative' || (fr.whisperF && state.drill.def.type === 'whisper'))) endDemoView(state.drill);
     if (!gated && state.meterDemo && (fr.kind === 'voiced' || fr.kind === 'fricative')) {
       meterFrames = []; state.meter = NaN; state.meterDemo = false;
       $('res-desc').textContent = 'Hold a vowel or speak a sentence to see your own score.';
@@ -731,7 +736,7 @@
       const type = d && d.def.sib ? d.def.sib : fr.sib;
       const sib = D.SIBILANTS[type];
       const score = score100(D.sibilantAlpha(fr.cog, sib));
-      if (!gated) {
+      if (!gated && !(state.drill && state.drill.def.type === 'whisper')) { // a whispered vowel can read as a fricative
         session.sibs[type].push(score); frSib = score;
         if (take) take.sibs[type].push(score);
         if (session.sibs[type].length > 5000) session.sibs[type].splice(0, 1000);
@@ -758,6 +763,8 @@
     if (d && d.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) d.isoFr.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (dd && dd.def.type === 'prosody') dd.demoPts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
     if (dd && dd.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) dd.demoIso.push({ F: fr.formants, f0: fr.f0, n: frameCount });
+    if (d && d.def.type === 'whisper' && d.whFr) { d.whFr.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount }); if (d.whFr.length > 3600) d.whFr.shift(); }
+    if (dd && dd.def.type === 'whisper' && dd.demoWh) dd.demoWh.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount });
     if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
@@ -831,7 +838,7 @@
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
@@ -856,6 +863,7 @@
     if (!d) return;
     if (d.def.type === 'breath') return renderBreathPanel(d);
     if (d.def.type === 'iso') return renderIsoPanel(d);
+    if (d.def.type === 'whisper') return renderWhisperPanel(d);
     if (d.def.type === 'prosody') return renderProsodyPanel(d);
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
@@ -1302,6 +1310,7 @@
     const def = d.def;
     if (def.type === 'breath') return updateBreath(d);
     if (def.type === 'iso') return updateIso(d);
+    if (def.type === 'whisper') return updateWhisper(d);
     if (def.type === 'prosody') return updateProsody(d);
     let prog;
     if (def.type === 'vowel') prog = d.vowelFr.length / NEED.vowel;
@@ -1500,6 +1509,7 @@
       { label: 'Very breathy', make: (fs) => breathExample(fs, fem, 0.85), grade: gradeBreath },
       { label: 'Pressed', make: (fs) => breathExample(fs, fem, 0), grade: gradeBreath },
     ];
+    if (def.type === 'whisper') return whisperProofItems(def);
     if (def.type === 'iso') return [
       { label: 'Right movement', make: (fs) => isoExample(fs, def, fem, true), grade: (fr) => gradeIso(def, fr) },
       { label: ISO_WRONG[def.kind].label, make: (fs) => isoExample(fs, def, fem, false), grade: (fr) => gradeIso(def, fr) },
@@ -1784,6 +1794,173 @@
         : `Done. The ${def.kind} reading (${['F1', 'F2', 'F3'][ISO_MAIN[def.kind][0]]}) moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
     $('drill-again').hidden = false;
     recordPractice(session.drills[session.drills.length - 1]);
+  }
+
+  // ---------------- whisper exercises ----------------
+  // No voice, so pitch is out of the way: the analyzer reads the formants of the whisper's airflow
+  // noise (dsp whisperFormants, frames carry whisperF). A siren counts slides of the whisper's
+  // brightness (F2 and F3 together); a hold scores a whispered vowel on the usual 0-100 scale.
+  const NEED_LEGS = 4; // up, down, up, down
+  function renderWhisperPanel(d) {
+    const p = $('drill-panel'), def = d.def, [lo, hi] = target(), siren = def.kind === 'siren';
+    p.innerHTML = `
+      <p class="eyebrow"><span>Whisper exercise</span><span>${siren ? 'slide up and down' : 'hold in the zone'}</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      <ol class="breath-steps"></ol>
+      <div class="btn-row"><button type="button" class="btn" id="ex-play">Play example</button></div>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>${siren ? 'Whisper brightness' : 'Whispered resonance'}</span><span id="wh-num" class="trend"></span></p>
+        <p class="coach-cue" id="wh-cue"></p>
+        ${siren ? '<canvas id="cv-siren" height="150"></canvas>' : `<div class="gauge">
+          <span class="g-label">darker <small>to brighter</small></span>
+          <span class="g-track"><span class="g-band" style="left:${lo}%;width:${hi - lo}%"></span><span class="g-mark" id="wh-mark" hidden></span></span>
+          <span class="g-need" id="wh-need"></span></div>`}
+        <p class="coach-why">${siren
+          ? 'The line is how bright your whisper is (tongue F2 and lips/larynx F3 together), in percent around its middle. Only whispering counts; a sound with tone in it is left out.'
+          : `Zone ${lo}-${hi} on the same scale as voiced vowels (0 typical masculine, 100 typical feminine), read from the tongue (F2) and lips/larynx (F3) of the whisper. A whisper raises the formants a little and the app allows for that, but speakers differ, so compare within one setup.`}</p>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
+      <p class="drill-msg" id="drill-msg"></p>
+      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div class="proof" id="proof" hidden></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    p.querySelector('.drill-help').textContent = def.why;
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    $('drill-again').addEventListener('click', () => selectDrill(def));
+    d.whFr = []; d.demoWh = []; d.legs = 0; d.span = 0; d.whScores = []; d.eased = {}; d.whc = null;
+    renderProof($('proof'), def);
+    $('drill-msg').textContent = '';
+    updateWhisper(d, true);
+  }
+  // a new tip has to hold for a moment before it replaces the old one (no flicker)
+  function whisperCueKey(d, key) {
+    const now = performance.now(), c = d.whc || (d.whc = { key: null, pending: null, at: 0 });
+    if (key !== c.pending) { c.pending = key; c.at = now; }
+    if (c.key === null || d.demoOn || now - c.at >= 800) c.key = key;
+    return c.key;
+  }
+  const whisperLike = (fit) => fit.rms < 0.12 && fit.alpha > -1.5 && fit.alpha < 2.5;
+  function updateWhisper(d, force) {
+    if (!force && frameCount % 6) return;
+    const def = d.def, cue = $('wh-cue'); if (!cue) return;
+    const demo = !!d.demoOn, fr = (demo ? d.demoWh : d.whFr) || [], fem = state.goal === 'fem';
+    const recent = fr.filter(f => frameCount - f.n < 30); // about the last half second
+    const wh = recent.filter(f => f.F), toned = recent.filter(f => f.voiced).length;
+    const who = demo ? `Demo voice, ${demoLabel}: ` : '';
+    const idle = demo ? (exSrc ? `Demo playing (${demoLabel}). Its reading appears here as it sounds.` : 'That was the demo voice. Whisper yourself to carry on.')
+      : !state.running ? `Start the microphone, then whisper ${def.kind === 'siren' ? 'a long "hoo"' : '"kee"'}.` : `Whisper ${def.kind === 'siren' ? 'a long "hoo", then slide it up and down' : '"kee" and hold the "ee"'}.`;
+    let key = wh.length >= 5 ? 'on' : toned >= 5 ? 'voiced' : 'idle';
+    if (def.kind === 'siren') {
+      const b = fr.filter(f => f.F).map(f => D.whisperBrightness(f.F)), s = D.sirenLegs(b);
+      d.sirenB = b;
+      drawSiren(d);
+      if (key === 'on') key = s.legs === 0 ? 'start' : s.dir > 0 ? 'up' : 'down';
+      const text = {
+        idle, voiced: `${who}that has tone in it. Whisper with no voice at all, so only the resonance moves.`,
+        start: `${who}${demo ? 'a whisper, getting ready to slide.' : 'Good, that is a whisper. Now slide it up: larynx rising, tongue drifting forward toward "ee".'}`,
+        up: `${who}${demo ? 'sliding up.' : 'Going up. Now let it slide back down.'}`,
+        down: `${who}${demo ? 'sliding down.' : 'Coming down. Now slide it up again.'}`,
+      }[whisperCueKey(d, key)];
+      cue.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+      cue.classList.toggle('ok', s.legs > 0 && key !== 'voiced' && key !== 'idle');
+      $('wh-num').textContent = b.length ? `${demo ? 'demo voice · ' : ''}${Math.min(s.legs, NEED_LEGS)} of ${NEED_LEGS} slides · range ${Math.round((Math.exp(s.span) - 1) * 100)}%` : '';
+      if (demo || d.result) return;
+      d.legs = Math.max(d.legs, s.legs); d.span = Math.max(d.span, s.span);
+      const bar = $('drill-prog'); if (bar) bar.style.width = clamp(d.legs / NEED_LEGS * 100, 0, 100) + '%';
+      if (d.legs >= NEED_LEGS) finishWhisper(d, Math.round((Math.exp(d.span) - 1) * 100), 'whisper');
+      return;
+    }
+    // hold: the whispered vowel on the 0-100 scale
+    const v = D.VOWEL_BY_KEY[def.vowel], [lo, hi] = target();
+    let score = NaN;
+    if (key === 'on') {
+      const F = [0, 1, 2].map(i => D.median(wh.map(f => f.F[i]))), fit = D.whisperFit(F, v);
+      if (!whisperLike(fit)) key = 'vowel';
+      else { score = score100(fit.alpha); key = onTarget(score) ? 'ok' : score < lo ? 'dark' : 'bright'; }
+    }
+    const shown = whisperCueKey(d, key);
+    const text = {
+      idle, voiced: `${who}that has tone in it. Whisper with no voice at all.`,
+      vowel: `${who}${demo ? `not a clear whispered "${v.cue}".` : `That does not sound like a whispered "${v.cue}" (as in "${v.word}") yet. Keep the tongue high and forward.`}`,
+      ok: `${who}${demo ? 'in the zone.' : fem ? 'In the zone. Keep this small, bright space.' : 'In the zone. Keep this relaxed, darker space.'}`,
+      dark: `${who}${demo ? 'darker than the zone.' : 'Darker than the zone. Smile slightly, bring the tongue forward and let the larynx lift a little.'}`,
+      bright: `${who}${demo ? 'brighter than the zone.' : 'Brighter than the zone. Relax the lips, let the larynx ease down and the tongue sit a little lower.'}`,
+    }[shown];
+    cue.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    cue.classList.toggle('ok', shown === 'ok');
+    const mark = $('wh-mark');
+    if (Number.isFinite(score)) {
+      const x = ease(d, 'w', score);
+      mark.hidden = false; mark.style.left = clamp(x, 0, 100) + '%'; mark.classList.toggle('ok', key === 'ok');
+      $('wh-num').textContent = `${demo ? 'demo voice · ' : ''}${Math.round(score)}`;
+      $('wh-need').textContent = key === 'ok' ? '✓' : key === 'dark' ? 'brighter →' : '← darker';
+      $('wh-need').className = 'g-need ' + (key === 'ok' ? 'ok' : 'off');
+    } else if (key === 'idle' && d.eased.w == null) { mark.hidden = true; $('wh-need').textContent = ''; $('wh-num').textContent = ''; }
+    if (demo || d.result) return;
+    if (Number.isFinite(score)) d.whScores.push(score);
+    if (key === 'ok') d.inZone += 6;
+    const prog = d.inZone / NEED.whIn;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
+    $('drill-msg').textContent = prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.whIn / 60).toFixed(1)} seconds.` : '';
+    if (prog >= 1) finishWhisper(d, Math.round(D.median(d.whScores)), 'sound');
+  }
+  function finishWhisper(d, score, kind) {
+    const def = d.def;
+    d.result = { id: def.id, score, at: Date.now() };
+    state.lastScores[def.id] = score;
+    session.drills.push({ id: def.id, label: def.cue, score, at: d.result.at, kind });
+    renderDrillGrid(); renderSession();
+    $('drill-msg').textContent = def.kind === 'siren'
+      ? `Done: two full slides up and down, across ${score}% of brightness, with no voice. Try it again a little wider, or move on to the whispered "kee".`
+      : `Done: two seconds in the zone, whispered. Your median was ${score}. Now say "kee" with a light voice and keep the same space.`;
+    $('drill-again').hidden = false;
+    recordPractice(session.drills[session.drills.length - 1]);
+  }
+  // the siren's brightness line, in percent around the middle of what you have whispered so far
+  function drawSiren(d) {
+    const cv = $('cv-siren'); if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, ax = 34 * dpr;
+    const b = (d.sirenB || []).slice(-480), mid = b.length ? D.median(b) : 0;
+    const y = (pc) => h / 2 - clamp(pc, -30, 30) / 30 * (h / 2 - 8 * dpr);
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = dpr;
+    for (const pc of [-20, 0, 20]) { g.beginPath(); g.moveTo(ax, y(pc)); g.lineTo(w, y(pc)); g.stroke(); g.fillText((pc > 0 ? '+' : '') + pc + '%', ax - 5 * dpr, y(pc) + 4 * dpr); }
+    if (b.length < 2) { g.textAlign = 'center'; g.fillText(d.demoOn ? 'Demo playing' : 'Whisper a long "hoo"', (w + ax) / 2, h / 2 - 6 * dpr); return; }
+    if (d.demoOn) { g.textAlign = 'left'; g.fillText('demo voice', ax + 6 * dpr, 12 * dpr); }
+    const x = (i) => ax + 6 * dpr + i / (b.length - 1) * (w - ax - 12 * dpr);
+    g.strokeStyle = C.accent; g.lineWidth = 2.4 * dpr; g.lineJoin = 'round';
+    g.beginPath(); b.forEach((v, i) => { const py = y((Math.exp(v - mid) - 1) * 100); i ? g.lineTo(x(i), py) : g.moveTo(x(i), py); }); g.stroke();
+  }
+  // graded demos: the same checks as above, run on synthesized whispers
+  function gradeWhisper(def, frames) {
+    const wh = frames.filter(f => f.whisperF), toned = frames.filter(f => f.kind === 'voiced').length;
+    if (wh.length < 20) return toned > 20 ? { ok: false, big: '✗', text: 'voiced, not whispered: not counted' } : { ok: false, text: 'could not be measured' };
+    if (def.kind === 'siren') {
+      const s = D.sirenLegs(wh.map(f => D.whisperBrightness(f.whisperF))), ok = s.legs >= NEED_LEGS;
+      return { ok, big: Math.min(s.legs, NEED_LEGS), text: `${Math.min(s.legs, NEED_LEGS)} of ${NEED_LEGS} slides · range ${Math.round((Math.exp(s.span) - 1) * 100)}%` };
+    }
+    const v = D.VOWEL_BY_KEY[def.vowel], sc = [], Fs = [];
+    for (const f of wh) { const fit = D.whisperFit(f.whisperF, v); if (whisperLike(fit)) { sc.push(score100(fit.alpha)); Fs.push(f.whisperF); } }
+    if (sc.length < 20) return { ok: false, big: '✗', text: `not a clear whispered "${v.cue}"` };
+    const m = D.median(sc), ok = onTarget(m), goalName = state.goal === 'fem' ? 'feminine' : 'masculine';
+    return { ok, big: Math.round(m), text: `${ok ? 'in' : 'outside'} the ${goalName} target zone · F2, F3 ${[1, 2].map(i => Math.round(D.median(Fs.map(f => f[i])))).join(' · ')} Hz` };
+  }
+  function whisperProofItems(def) {
+    const fem = state.goal === 'fem', mk = (goal, o) => (fs) => Synth.whisperExample(fs, def, goal, D.VOWELS, D.WHISPER_SHIFT, o), grade = (fr) => gradeWhisper(def, fr);
+    if (def.kind === 'siren') return [
+      { label: 'Up and down twice', make: mk(state.goal), grade },
+      { label: 'Flat whisper', make: mk(state.goal, { wrong: 'flat' }), grade },
+      { label: 'Voiced, not whispered', make: mk(state.goal, { wrong: 'voiced' }), grade },
+    ];
+    return [
+      { label: `Typical ${fem ? 'feminine' : 'masculine'} whisper`, make: mk(state.goal), grade },
+      { label: `Typical ${fem ? 'masculine' : 'feminine'} whisper`, make: mk(fem ? 'masc' : 'fem'), grade },
+      { label: 'Voiced, not whispered', make: mk(state.goal, { wrong: 'voiced' }), grade },
+    ];
   }
 
   function finishDrill(d) {
@@ -2392,7 +2569,7 @@
   }
 
   // ---------------- practice history ----------------
-  const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'control' ? '' : '');
+  const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'whisper' ? '%' : '');
   function recordPractice(entry) {
     if (!entry) return;
     Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score });
@@ -3274,7 +3451,7 @@
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem', true);

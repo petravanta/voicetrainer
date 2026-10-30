@@ -5,7 +5,7 @@ const src = (f) => fs.readFileSync(path.join(__dirname, 'src', f), 'utf8');
 let page = src('index.html');
 // Catalog content from data/*.json (see CONTRIBUTING.md), inlined so the page works as one file
 const data = {};
-for (const n of ['texts', 'words', 'breath', 'control']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
+for (const n of ['texts', 'words', 'breath', 'control', 'whisper']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
 page = page.split('/*DATA*/').join(JSON.stringify(data).replace(/<\/script/gi, '<\\/script'));
 for (const [mark, file] of [['/*STYLE*/', 'style.css'], ['/*DSP*/', 'dsp.js'], ['/*SYNTH*/', 'synth.js'], ['/*APP*/', 'app.js']]) {
   page = page.split(mark).join(src(file).replace(/<\/script/gi, '<\\/script'));
