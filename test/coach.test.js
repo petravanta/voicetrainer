@@ -39,6 +39,8 @@ check(D.coachSibilant(7900, D.SIBILANTS.s, 'fem').onTarget, 's at 7.9 kHz, femin
     ['lips', sc([1, 0.92, 0.87]), 120, true], ['lips', sc([1.2, 1, 0.95]), 120, false],
     ['larynx', sc([1.08, 1.08, 1.08]), 120, true], ['larynx', sc([1, 0.7, 1]), 120, false],
     ['pitch', b, 160, true], ['pitch', sc([1, 0.8, 1]), 160, false],
+    ['slide', sc([1.2, 1.15, 1.1]), 125, true], ['slide', sc([0.85, 0.88, 0.9]), 115, true],
+    ['slide', sc([1.2, 1.15, 1.1]), 152, false], ['slide', sc([1, 1.2, 1]), 120, false], ['slide', sc([1.03, 1.03, 1.03]), 120, false], ['slide', sc([0.85, 1.15, 1.1]), 120, false],
   ];
   for (const [kind, F, f0, want] of cases) {
     const got = D.isolation(kind, b, F, 120, f0).ok;
