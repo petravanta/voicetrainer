@@ -89,5 +89,23 @@
       "Move slowly between the three a few times.",
       "Finish in the zone and hold it there."
     ]
+  },
+  {
+    "id": "b-trill",
+    "title": "Straw or lip-trill siren",
+    "cue": "Straw or lip-trill siren",
+    "sub": "easy warm-up",
+    "aim": "explore",
+    "why": "Humming through a straw, or a lip trill (a \"brrr\" with loose lips), makes the voice work easily and without pushing. Many voice teachers use it as a warm-up before resonance work, and to release tension after it.",
+    "steps": [
+      "Put a drinking straw between your lips and hum through it at a comfortable pitch. No air should leak from your nose or the corners of your mouth. Or let your lips flutter in a loose \"brrr\".",
+      "Slide the pitch slowly up and back down, like a gentle siren, for about 20 seconds. Keep it quiet and easy.",
+      "Rest, then do a few more sirens. If the trill stops, add a little more air or support your cheeks lightly with your fingers.",
+      {
+        "feminine": "Take the straw away and say a light, bright \"hee\" with the same easy feeling.",
+        "masculine": "Take the straw away and say a relaxed, full \"huh\" with the same easy feeling."
+      },
+      "The gauges only read once the straw is gone: through a straw the sound does not show your mouth shape, so use this as a warm-up, not a test."
+    ]
   }
 ]
