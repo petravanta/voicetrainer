@@ -12,7 +12,7 @@
       "title": {"type": "string", "description": "Heading on the exercise."},
       "cue": {"type": "string", "description": "Short name on the exercise card."},
       "sub": {"type": "string", "description": "A few words under the name on the card."},
-      "kind": {"enum": ["jaw", "tongue", "lips", "larynx", "pitch"], "description": "Which movement is checked. Each kind has its own scoring rule in src/dsp.js (ISO_RULES), so a new kind is a code change."},
+      "kind": {"enum": ["jaw", "tongue", "lips", "larynx", "pitch", "slide"], "description": "Which movement is checked. Each kind has its own scoring rule in src/dsp.js (ISO_RULES), so a new kind is a code change."},
       "vowel": {"enum": ["i", "I", "e", "E", "ae", "a", "c", "V", "o", "U", "u", "r"], "description": "Vowel key from the formant table in src/dsp.js: i (ee as in heed), I (ih as in hid), e (ay as in hayed), E (eh as in head), ae (a as in had), a (ah as in hod), c (aw as in hawed), V (uh as in hud), o (oh as in hoed), U (oo as in hood), u (oo as in who'd), r (er as in heard)."},
       "why": {"type": "string", "description": "One or two sentences on what the exercise shows."},
       "steps": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Steps shown in order."}
