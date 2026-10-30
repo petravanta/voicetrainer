@@ -464,6 +464,58 @@
     return Math.log(cog / sib.M) / Math.log(sib.W / sib.M);
   }
 
+  // ---------- whispered sound ----------
+  // A whisper has no tone, but the vocal tract still shapes the airflow noise, so its formants can be
+  // read with LPC (noise excitation has no harmonics to mislead it, so a longer window and a higher
+  // order work). Returns [F1, F2, F3] in Hz, or null for frames that do not look like a whispered
+  // vowel: an /s/, a sound with almost no energy below 1.2 kHz (/sh/, /f/), or formants out of range.
+  function whisperFormants(y, fs, order, cog) {
+    if (cog > 5200) return null;
+    const ps = powerSpectrum(y, y.length), bin = fs / y.length;
+    let low = 0, tot = 0;
+    for (let k = Math.ceil(250 / bin); k < ps.length; k++) { tot += ps[k]; if (k * bin < 1200) low += ps[k]; }
+    if (!(tot > 0) || low / tot < 0.06) return null;
+    // noise can split one formant into two wide poles; then try a lower and a higher order and
+    // keep the fit whose first three formants are sharpest
+    let best = null;
+    for (const p of [order, order - 2, order + 2]) {
+      const fm = formants(y, fs, p, 50).slice(0, 3);
+      if (fm.length < 3) continue;
+      const w = Math.max(...fm.map(q => q.bw));
+      if (!best || w < best.w) best = { w, F: fm.map(q => q.f) };
+      if (w < 330) break;
+    }
+    const F = best && best.F;
+    return F && F[0] < 1300 && F[1] > 600 && F[2] < 4300 ? F : null;
+  }
+  // Whispered vowels have higher formants than voiced ones, F1 most (e.g. Kallail & Emanuel 1984;
+  // Jovičić 1998). F1 is also the hardest to read without a tone, so whisper scores use only F2 and
+  // F3, after taking off an approximate whisper shift. Speakers differ, so treat the score as a
+  // trend within one setup rather than an exact match to the voiced scale.
+  const WHISPER_SHIFT = [1.25, 1.05, 1.03];
+  const WHISPER_WEIGHTS = [0, 1, 0.8];
+  function whisperFit(F, v) {
+    return fitVowel(F.map((f, i) => f / WHISPER_SHIFT[i]), v, WHISPER_WEIGHTS);
+  }
+  // Brightness of a whisper: the log of the geometric mean of F2 and F3. It rises as the tract gets
+  // shorter or the tongue moves forward, which is what a whisper siren slides up and down.
+  function whisperBrightness(F) { return 0.5 * (Math.log(F[1]) + Math.log(F[2])); }
+  // Counts the legs of a siren in a brightness series: alternating rises and falls of at least
+  // `step` (natural log units, 0.12 is about 13%), with hysteresis so small wobbles do not count.
+  const SIREN_STEP = 0.12;
+  function sirenLegs(vals, step = SIREN_STEP) {
+    let lo = Infinity, hi = -Infinity, dir = 0, ext = 0, legs = 0;
+    for (const v of vals) {
+      lo = Math.min(lo, v); hi = Math.max(hi, v);
+      if (dir === 0) {
+        if (v - lo >= step) { dir = 1; legs = 1; ext = v; } else if (hi - v >= step) { dir = -1; legs = 1; ext = v; }
+      } else if (dir === 1) {
+        if (v > ext) ext = v; else if (ext - v >= step) { dir = -1; legs++; ext = v; }
+      } else if (v < ext) ext = v; else if (v - ext >= step) { dir = 1; legs++; ext = v; }
+    }
+    return { legs, span: vals.length ? hi - lo : 0, dir };
+  }
+
   // ---------- streaming analyzer ----------
   class Analyzer {
     constructor(sampleRate) {
@@ -480,6 +532,8 @@
       this.hist = [];   // recent formant frames for smoothing
       this.pitchHist = [];
       this.gap = 0;
+      this.whist = []; // recent whispered-vowel formant frames
+      this.wgap = 0;
     }
 
     analyze(buf) {
@@ -562,7 +616,19 @@
         out.kind = 'other';
         this.softReset();
       }
+      if (voiced) this.whist.length = 0;
+      else this.whisperFrame(y, out);
       return out;
+    }
+
+    // smoothed formants of a whisper (median of the last few frames), as out.whisperF
+    whisperFrame(y, out) {
+      const F = whisperFormants(y, this.fsd, this.lpcOrder + 2, out.cog);
+      if (!F) { if (++this.wgap > 3) this.whist.length = 0; return; }
+      this.wgap = 0;
+      this.whist.push(F);
+      if (this.whist.length > 9) this.whist.shift();
+      if (this.whist.length >= 4) out.whisperF = [0, 1, 2].map(i => median(this.whist.map(h => h[i])));
     }
 
     spectrumColumn(y) {
@@ -574,7 +640,7 @@
     }
 
     softReset() { if (++this.gap > 2) { this.hist.length = 0; this.pitchHist.length = 0; } }
-    reset() { this.gap = 3; this.hist.length = 0; this.pitchHist.length = 0; }
+    reset() { this.gap = 3; this.hist.length = 0; this.pitchHist.length = 0; this.whist.length = 0; }
   }
 
 
@@ -667,6 +733,7 @@
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, prosodyStats, NucleusTracker, Analyzer,
+    whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "wh-siren",
+    "title": "Whisper siren",
+    "cue": "Whisper siren",
+    "sub": "slide brightness, no voice",
+    "kind": "siren",
+    "vowel": "u",
+    "why": "Without voice, pitch is out of the way, so you hear only resonance. A whisper sounds \"higher\" as the larynx rises and the tongue comes forward, and \"lower\" as they drop back. Sliding that up and down teaches resonance as its own movement, with no strain on the vocal folds.",
+    "steps": [
+      "Whisper a long, airy \"hoo\" like wind, with no tone at all.",
+      "Slide the whisper up, as if the wind whistles higher: let the larynx rise and the tongue drift forward toward \"ee\". Then slide it back down.",
+      "Go up and down slowly, twice. The line should climb and fall; the app counts each slide of about 13% or more.",
+      {
+        "feminine": "Finish by stopping at the bright top and notice how the throat feels there.",
+        "masculine": "Finish by settling at the dark bottom and notice how the throat feels there."
+      }
+    ]
+  },
+  {
+    "id": "wh-kee",
+    "title": "Whispered \"kee\"",
+    "cue": "Whispered \"kee\"",
+    "sub": "small, bright space · no voice",
+    "kind": "hold",
+    "vowel": "i",
+    "why": "The /k/ lifts the back of the tongue, and \"ee\" keeps the tongue high and forward, which makes a small, bright space. Whispering it takes pitch and effort out, so you can find the resonance on its own and then carry it into voice.",
+    "steps": [
+      "Whisper \"kee\" a few times, with no tone, as if telling a secret.",
+      {
+        "feminine": "Make it small and bright: a slight smile, tongue high and forward, larynx lifted a little.",
+        "masculine": "Make it darker: lips relaxed, tongue a little lower, larynx easing down, while it still sounds like \"ee\"."
+      },
+      "Hold the whispered \"ee\" until the gauge stays in the zone for about two seconds in total.",
+      "Then say \"kee\" with a light voice and try to keep the same space."
+    ]
+  }
+]
