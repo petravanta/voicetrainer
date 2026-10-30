@@ -1,6 +1,6 @@
 # Contributing
 
-The easiest way to help is to add practice content: reading texts, practice words, breath exercises or control exercises. They're plain JSON files in [`data/`](data/), and you don't need to know any JavaScript.
+The easiest way to help is to add practice content: reading texts, practice words, breath exercises, control exercises or whisper exercises. They're plain JSON files in [`data/`](data/), and you don't need to know any JavaScript.
 
 ## Add an entry
 
@@ -51,7 +51,7 @@ A short word that starts with *s* or *sh*, plus the vowel it carries. The vowel 
 
 ## Data or code?
 
-Anything you can describe with the existing fields is data. A new vowel or sibilant target needs measured formant data in `src/dsp.js`, a new kind of control exercise needs a scoring rule there, and prosody exercises each have their own pitch check in `src/app.js`, so those are code changes. Open an issue or a pull request for that.
+Anything you can describe with the existing fields is data. A new vowel or sibilant target needs measured formant data in `src/dsp.js`, a new kind of control exercise needs a scoring rule there, a new kind of whisper exercise needs its own check in `src/app.js`, and prosody exercises each have their own pitch check in `src/app.js`, so those are code changes. Open an issue or a pull request for that.
 
 ## Checking locally
 
