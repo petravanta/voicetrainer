@@ -284,7 +284,44 @@
     return concat([example(fs, def, 'masc', VOWELS, SIBILANTS), silence(fs, 0.35), example(fs, def, 'fem', VOWELS, SIBILANTS)]);
   }
 
-  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison };
+  // ---------- whispers ----------
+  // Whispered vowel: turbulent airflow noise (no tone) through the formants, which are wider than in
+  // a voiced vowel. track(t) gives [F1, F2, F3] at time t (seconds), so a whisper can glide.
+  function whispered(fs, dur, track, opts = {}) {
+    const n = Math.round(fs * dur), x = new Float32Array(n), rand = rng(opts.seed || 41);
+    let lp = 0;
+    for (let i = 0; i < n; i++) { lp += 0.5 * (rand() * 2 - 1 - lp); x[i] = lp; }
+    const bws = [160, 190, 240, 300, 360];
+    const tracks = [0, 1, 2].map(k => (t) => track(t)[k]);
+    tracks.push((t) => track(t)[2] * 1.22 + 250, (t) => track(t)[2] * 1.38 + 500);
+    tracks.forEach((tr, k) => { if (tr(0) < fs / 2 - 100) trackResonate(x, fs, tr, bws[k]); });
+    return normalize(x, opts.level || 0.2, fs, opts.ramp || 0.05);
+  }
+  // Reference whispers for the whisper exercises (def: {kind:'siren'|'hold', vowel}) at the typical
+  // formants of `goal`, raised by the usual whisper shift (shift = [k1, k2, k3]).
+  // o.wrong: 'flat' = a siren that does not move; 'voiced' = the same sound with tone.
+  function whisperExample(fs, def, goal, VOWELS, shift, o = {}) {
+    const V = VOWELS.find(v => v.key === def.vowel), base = (goal === 'fem' ? V.W : V.M).map((f, i) => f * shift[i]);
+    const lead = silence(fs, 0.12);
+    if (def.kind === 'siren') {
+      // the whole tract shortens and lengthens: up and down twice, about 13% to either side
+      const dur = 5.2, k = (t) => (o.wrong === 'flat' ? 1 : Math.exp(-0.13 * Math.cos(4 * Math.PI * t / dur)));
+      if (o.wrong === 'voiced') {
+        const unshift = base.map((f, i) => f / shift[i]);
+        return concat([lead, voiced(fs, dur, goal === 'fem' ? 190 : 110, goal === 'fem' ? 190 : 110, unshift, { ramp: 0.06 }), lead]);
+      }
+      return concat([lead, whispered(fs, dur, (t) => base.map(f => f * k(t)), { seed: 43 }), lead]);
+    }
+    // "kee" three times: a /k/ burst, then the whispered vowel
+    const one = () => {
+      const k = burst(fs, 0.035, 2600, 0.06, 47);
+      if (o.wrong === 'voiced') return concat([k, voiced(fs, 0.6, goal === 'fem' ? 205 : 115, goal === 'fem' ? 190 : 105, base.map((f, i) => f / shift[i]), { ramp: 0.03 })]);
+      return concat([k, whispered(fs, 0.65, () => base, { seed: 45, ramp: 0.03 })]);
+    };
+    return concat([lead, one(), silence(fs, 0.3), one(), silence(fs, 0.3), one(), lead]);
+  }
+
+  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
