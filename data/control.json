@@ -72,5 +72,20 @@
       "Keep the mouth shape exactly the same and slide the pitch up a few notes and back down, like a slow siren.",
       "The pitch bar should move while the jaw, tongue and lips/larynx bars stay near the middle."
     ]
+    },
+  {
+    "id": "c-slide",
+    "title": "Resonance slide at one pitch",
+    "cue": "Dark to bright",
+    "sub": "resonance slide · pitch holds",
+    "kind": "slide",
+    "vowel": "i",
+    "why": "The core resonance skill is moving the size of the tract without dragging the pitch along. Slide from a dark, big \"ee\" to a bright, small one on a single note: the tongue and lips/larynx readings should rise together while the pitch bar stays put.",
+    "steps": [
+      "Pick a comfortable note. Hold a dark, open-throated \"ee\" (like the start of a yawn) until it says the starting point is set.",
+      "Stay on exactly the same note. Slowly brighten: let the larynx rise and the sound get smaller, like a small dog's whimper or a kitten, without letting the pitch climb.",
+      "The tongue and lips/larynx bars should move up together, with the jaw bar following a little or holding, while the pitch bar stays near the middle.",
+      "Slide back down to dark, then try stepping: dark, middle, bright, holding each step briefly. Going bright to dark on one note counts too."
+    ]
   }
 ]
