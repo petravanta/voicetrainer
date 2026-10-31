@@ -720,6 +720,20 @@
     const m = (arr, n) => (arr.length >= n ? median(arr) : null);
     return acc.map(a => ({ p: m(a.p, 3), r: m(a.r, 2), s: m(a.s, 2) }));
   }
+  // ---------- vowel map ----------
+  // The vowels of a passage, each on its own: byKey maps a vowel key to the steady frames classified as
+  // that vowel, [[F1, F2, F3, score], ...]. Returns [{ k, F: median formants, s: median score, n }] for each
+  // vowel heard in at least minN frames, in the order of VOWELS. Consonants never reach this: only
+  // steady voiced frames whose formants fit a vowel are scored.
+  function vowelMap(byKey, minN = 8) {
+    const out = [];
+    for (const v of VOWELS) {
+      const fr = (byKey || {})[v.key];
+      if (!fr || fr.length < minN) continue;
+      out.push({ k: v.key, F: [0, 1, 2].map(i => median(fr.map(f => f[i]))), s: median(fr.map(f => f[3])), n: fr.length });
+    }
+    return out;
+  }
   // Split a passage into short phrases at punctuation (at most maxLen words each) and summarise each one
   // from the per-word values: [{ a, b (word indices, inclusive), r, p (medians, null if none) }].
   function readingPhrases(texts, words, maxLen = 10) {
@@ -739,7 +753,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
