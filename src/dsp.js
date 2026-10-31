@@ -406,25 +406,52 @@
   }
   // Counts syllable nuclei in a stream of analyzer frames: every voiced onset, plus
   // energy peaks inside a voiced stretch separated by a dip of at least `dipDb`.
+  // Room sound, a mic switching on, or a stray periodic burst must not count as a syllable, so
+  //  - for the first `armMs` after a reset (or a gap in the frames, e.g. the mic restarting) it only
+  //    listens and learns the room's level; nothing counts yet,
+  //  - an onset counts only once voicing has held for `holdMs` at least `floorDb` above that level.
+  // The room level keeps following the quiet frames, dropping quickly and rising slowly.
   class NucleusTracker {
-    constructor(dipDb = 3, minGapMs = 110) { this.dip = dipDb; this.gap = minGapMs; this.reset(); }
-    reset() { this.count = 0; this.inNuc = false; this.peak = -200; this.valley = -200; this.lastT = -1e9; this.silentMs = 0; this.lastFrameT = null; }
+    constructor(dipDb = 3, minGapMs = 110, opts = {}) {
+      this.dip = dipDb; this.gap = minGapMs;
+      this.armMs = opts.armMs != null ? opts.armMs : 350;
+      this.holdMs = opts.holdMs != null ? opts.holdMs : 45;
+      this.floorDb = opts.floorDb != null ? opts.floorDb : 10;
+      this.reset();
+    }
+    reset() { this.count = 0; this.heard = 0; this.inNuc = false; this.peak = -200; this.valley = -200; this.lastT = -1e9; this.silentMs = 0; this.lastFrameT = null; this.arm(); }
+    arm() { this.armLeft = this.armMs; this.armE = []; this.floor = null; this.cand = null; this.inNuc = false; this.valley = -200; }
+    get armed() { return this.armLeft <= 0; }
+    mark() { this.heard = 0; } // `heard` counts nuclei since the last reset or mark
     push(fr, tMs) {
-      const dt = this.lastFrameT == null ? 16 : Math.min(100, tMs - this.lastFrameT);
+      if (this.lastFrameT != null && tMs - this.lastFrameT > 500) this.arm(); // frames stopped for a while: listen afresh
+      const dt = this.lastFrameT == null ? 16 : Math.min(100, Math.max(0, tMs - this.lastFrameT));
       this.lastFrameT = tMs;
       const e = 20 * Math.log10(fr.rms + 1e-9);
-      if (fr.kind === 'voiced') {
-        this.silentMs = 0;
+      if (fr.kind === 'silence') this.silentMs += dt; else this.silentMs = 0;
+      if (this.armLeft > 0) {
+        this.armLeft -= dt;
+        this.armE.push(e);
+        if (this.armLeft <= 0) { const s = this.armE.slice().sort((a, b) => a - b); this.floor = s[Math.floor(s.length * 0.3)]; this.armE = []; }
+        return false;
+      }
+      if (fr.kind !== 'voiced') this.floor = e < this.floor ? 0.7 * this.floor + 0.3 * e : this.floor + Math.min(e - this.floor, 0.05);
+      const loud = e > this.floor + this.floorDb;
+      if (fr.kind === 'voiced' && loud) {
         if (!this.inNuc) {
-          if (e > this.valley + this.dip && tMs - this.lastT > this.gap) { this.count++; this.inNuc = true; this.peak = e; this.lastT = tMs; return true; }
-          this.valley = Math.min(this.valley, e);
+          if (this.cand == null) {
+            if (e > this.valley + this.dip && tMs - this.lastT > this.gap) this.cand = { t: tMs, e };
+            else this.valley = Math.min(this.valley, e);
+          }
+          if (this.cand && tMs - this.cand.t >= this.holdMs) {
+            this.count++; this.heard++; this.inNuc = true; this.peak = Math.max(e, this.cand.e); this.lastT = this.cand.t; this.cand = null; return true;
+          }
         } else {
           this.peak = Math.max(this.peak, e);
           if (e < this.peak - this.dip) { this.inNuc = false; this.valley = e; }
         }
       } else {
-        this.inNuc = false; this.valley = -200;
-        if (fr.kind === 'silence') this.silentMs += dt; else this.silentMs = 0;
+        this.inNuc = false; this.valley = -200; this.cand = null;
       }
       return false;
     }
