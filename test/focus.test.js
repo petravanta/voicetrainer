@@ -46,5 +46,19 @@ const one = D.focusSpots(texts, words, fem).find(x => x.a <= 13 && x.b >= 13);
 check(one.r === 40 && one.ri.length === 1, `a spot with one off word reports that word (got ${one.r})`);
 check(D.spotStats(one, [{ r: 90 }, { r: 70 }, { r: 90 }]).r === 70 && D.spotStats(one, [{ r: 90 }, { r: null }, { r: 80 }]).r === 85, 'a try is scored on the same word, or the whole spot if that word had no score');
 
+// tries compared with the reading, word by word
+{
+  const before = [{ r: 60, p: 200 }, { r: 50, p: 200 }, { r: 80, p: 200 }, { r: 55, p: 200 }, { r: null, p: 200 }];
+  const t1 = [{ r: 70, p: 200 }, { r: 52, p: 200 }, { r: 82, p: 200 }, { r: 40, p: 200 }, { r: 70, p: 200 }];
+  const t2 = [{ r: 78, p: 200 }, { r: 60, p: 200 }, { r: 81, p: 200 }, { r: 54, p: 200 }, { r: null, p: 200 }];
+  const c = D.compareTries(before, [t1, t2], 'resonance', fem);
+  check(c.words.map(w => w.state).join() === 'reached,better,on,same,none', `word states (got ${c.words.map(w => w.state).join()})`);
+  check(c.improved === 2 && c.reached === 1 && c.worse === 0 && c.off === 2, `counts: 2 improved, 1 reached, 2 still off (got ${c.improved}/${c.reached}/${c.off})`);
+  check(c.best === 1 && c.gaps[2] < c.gaps[1] && c.gaps[1] < c.gaps[0], `the second try is the closest (gaps ${c.gaps.map(Math.round)})`);
+  check(D.compareTries(before, [t1], 'resonance', fem).words[3].state === 'worse', 'a word that moved away from the goal is worse');
+  const pc = D.compareTries([{ r: 40, p: 140 }], [[{ r: 40, p: 170 }]], 'pitch', fem);
+  check(pc.words[0].state === 'reached' && pc.gaps[1] === 0, 'a pitch spot ignores resonance');
+}
+
 if (fails) { console.log(`${fails} failed`); process.exit(1); }
 console.log('all focus checks passed');
