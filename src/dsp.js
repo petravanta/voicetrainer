@@ -750,10 +750,71 @@
     return out;
   }
 
+  // ---------- focus spots ----------
+  // The stretches of a reading where practice pays off most. Each word's shortfall is how far it sits
+  // outside the goal: resonance points short of the goal band (below it for a feminine goal, above it for a
+  // masculine one) plus pitch on the far side of the pitch band, 5 points per semitone. A stretch's gain is
+  // the sum over its words, so a run of words that are all a little off can outrank one word that is far
+  // off (and one stray word, often the highlight drifting, counts for less). Stretches are the phrases of
+  // readingPhrases trimmed to their off words, then widened back to minLen words so they read naturally.
+  // words: [{ p, r }]; opts: { goal: 'fem' | 'masc', res: [lo, hi], pitch: [lo, hi], n, minLen }
+  // Returns [{ a, b, gain, rGain, pGain, ri, pi, r, p, why: 'resonance' | 'pitch' | 'both' }], biggest gain first.
+  const ST_POINTS = 5;
+  function wordShortfall(w, opts) {
+    const fem = opts.goal !== 'masc', [lo, hi] = opts.res, [plo, phi] = opts.pitch;
+    const r = w && w.r != null ? Math.max(0, fem ? lo - w.r : w.r - hi) : 0;
+    const p = w && w.p > 0 ? ST_POINTS * Math.max(0, 12 * Math.log2(fem ? plo / w.p : w.p / phi)) : 0;
+    return { r, p };
+  }
+  function clipStats(words) {
+    const r = words.map(w => w && w.r).filter(v => v != null), p = words.map(w => w && w.p).filter(v => v > 0);
+    return { r: r.length ? median(r) : null, p: p.length ? median(p) : null, nr: r.length, np: p.length };
+  }
+  // The numbers of a spot: the median over the words that were off in the reading (ri, pi: indices within
+  // the spot), so a try is compared on the same words; the whole spot when none of those words were scored.
+  function spotStats(sp, clipWords) {
+    const all = clipStats(clipWords), pick = (idx, k) => {
+      const v = (idx || []).map(i => clipWords[i] && clipWords[i][k]).filter(x => x != null && (k !== 'p' || x > 0));
+      return v.length ? median(v) : all[k];
+    };
+    return { r: pick(sp.ri, 'r'), p: pick(sp.pi, 'p') };
+  }
+  function focusSpots(texts, words, opts) {
+    const n = opts.n || 3, minLen = opts.minLen || 3;
+    const sf = words.map(w => wordShortfall(w, opts)), g = sf.map(x => x.r + x.p);
+    const out = [];
+    for (const ph of readingPhrases(texts, words)) {
+      let a = ph.a, b = ph.b;
+      while (a < b && !(g[a] > 0)) a++;
+      while (b > a && !(g[b] > 0)) b--;
+      if (!(g[a] > 0)) continue; // the whole phrase is on the goal
+      while (b - a + 1 < minLen && (a > ph.a || b < ph.b)) {
+        if (b < ph.b) b++;
+        if (b - a + 1 < minLen && a > ph.a) a--;
+      }
+      let rGain = 0, pGain = 0;
+      const ri = [], pi = [];
+      for (let i = a; i <= b; i++) { rGain += sf[i].r; pGain += sf[i].p; if (sf[i].r > 0) ri.push(i - a); if (sf[i].p > 0) pi.push(i - a); }
+      const sp = { a, b, gain: rGain + pGain, rGain, pGain, ri, pi, why: rGain >= 2 * pGain ? 'resonance' : pGain >= 2 * rGain ? 'pitch' : 'both' };
+      out.push(Object.assign(sp, spotStats(sp, words.slice(a, b + 1))));
+    }
+    return out.sort((x, y) => y.gain - x.gain).slice(0, n);
+  }
+  // Several readings of one passage, word by word ([[word, Hz, resonance, ...], ...] each), merged into
+  // one: the median of each word's values over the readings that have one. Readings of a different
+  // length (the text was edited since) are left out.
+  function mergeWordReports(lists) {
+    const len = lists.length ? lists[lists.length - 1].length : 0, use = lists.filter(l => l && l.length === len);
+    return Array.from({ length: len }, (_, i) => {
+      const p = use.map(l => l[i][1]).filter(v => v > 0), r = use.map(l => l[i][2]).filter(v => v != null);
+      return { text: use[use.length - 1][i][0], p: p.length ? median(p) : null, r: r.length ? median(r) : null };
+    });
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
