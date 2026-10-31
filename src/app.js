@@ -2617,7 +2617,7 @@
     const st = last ? D.clipStats(wordObjs(last.byWord.slice(a, b + 1))) : { r: null, p: null };
     const why = kind === 'spotpitch' ? 'pitch' : st.p != null && D.wordShortfall(st, focusOpts()).p > 0 ? 'both' : 'resonance';
     setMode('readings');
-    startSpots(t.id, t.title, texts, [{ a, b, r: st.r, p: st.p, why }], 0);
+    startSpots(t.id, t.title, texts, [{ a, b, r: st.r, p: st.p, why }], 0, last ? wordObjs(last.byWord) : null);
   }
   function drillById(id) { for (const [tab, list] of Object.entries(DRILLS)) { const d = list.find(x => x.id === id); if (d) return Object.assign(d, { tab }); } return null; }
   function openDrill(def) {
@@ -2861,7 +2861,7 @@
   }
   function wireFocus(box, rec, spots) {
     const texts = rec.byWord ? rec.byWord.map(w => w[0]) : [];
-    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(rec.text, rec.title, texts, spots, +b.dataset.spot)));
+    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(rec.text, rec.title, texts, spots, +b.dataset.spot, wordObjs(rec.byWord))));
   }
   // the weak spots of the last few readings of a passage together, for the History panel
   function renderUsualSpots(id) {
@@ -2875,16 +2875,17 @@
     box.innerHTML = `<div class="section-head"><h4>Spots that keep coming up</h4>${spots.length ? `<button type="button" class="btn sm" data-spot="0">Practise ${spots.length > 1 ? 'all' : 'it'}</button>` : ''}</div>`
       + (spots.length ? `<p class="small muted">Each word's middle value over your last ${use.length} readings of this passage, so one off day does not count for much.</p><ul class="fs-list">${spotItems(texts, spots, use, false)}</ul>`
         : `<p class="small">Over your last ${use.length} readings every phrase was on your goal.</p>`);
-    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(id, last.title, texts, spots, +b.dataset.spot)));
+    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(id, last.title, texts, spots, +b.dataset.spot, merged)));
   }
-  // A practice of one or more spots in the reader: Spot.cur = { textId, title, texts, spots, k, tries }
+  // A practice of one or more spots in the reader: Spot.cur = { textId, title, texts, words (the reading's
+  // [{ p, r }] per word), spots, k, tries: [{ st, words }] }
   const Spot = { cur: null };
-  function startSpots(textId, title, texts, spots, k) {
+  function startSpots(textId, title, texts, spots, k, words) {
     if (!spots.length) return;
     cancelRun();
     Reader.show(); Reader.setFull(true);
     if (Texts.all().some(t => t.id === textId)) Reader.pick(textId);
-    Spot.cur = { textId, title, texts, spots, k: k || 0, tries: [] };
+    Spot.cur = { textId, title, texts, words: words || texts.map(() => ({ p: null, r: null })), spots, k: k || 0, tries: [] };
     loadSpot();
   }
   function loadSpot() {
@@ -2905,25 +2906,73 @@
   }
   function finishSpot() {
     const S = Spot.cur, sp = S.spots[S.k];
-    const st = D.spotStats(sp, D.wordReport(Run.frames, Reader.words.length));
+    const wr = D.wordReport(Run.frames, Reader.words.length), st = D.spotStats(sp, wr);
     endRun(); session = newSession(); resetSessionViews();
     if (st.r == null && st.p == null) { S.msg = 'Not enough voice was heard to score that try. Read it again a little louder.'; paintSpot(); return; }
-    S.tries.push(st);
+    S.tries.push({ st, words: wr });
     const pitchSpot = sp.why === 'pitch', score = pitchSpot ? st.p : st.r;
     if (score != null) recordPractice({ id: spotId(S.textId, sp), label: `“${clipQuote(S.texts, sp)}”`, kind: pitchSpot ? 'spotpitch' : 'spot', score: Math.round(score * 10) / 10 });
-    const short = (x) => { const f = D.wordShortfall(x, focusOpts()); return (sp.why === 'pitch' ? 0 : f.r) + (sp.why === 'resonance' ? 0 : f.p); };
-    S.msg = short(st) === 0 ? 'On your goal. Once more to make it stick, or on to the next spot.' : short(st) < short(sp) ? 'Closer than in the reading. Again?' : 'Not closer yet. Listen to it read, then try again.';
+    S.msg = '';
     paintSpot();
+  }
+  // how a word is off, in plain words: resonance dark or bright, pitch low or high
+  function offWord(w, why) {
+    const fem = state.goal === 'fem', f = D.wordShortfall(w, focusOpts()), out = [];
+    if (why !== 'pitch' && f.r > 0) out.push(`${fem ? 'dark' : 'bright'} (${Math.round(w.r)})`);
+    if (why !== 'resonance' && f.p > 0) out.push(`${fem ? 'low' : 'high'} (${Math.round(w.p)} Hz)`);
+    return out.join(' and ');
+  }
+  // the verdict after a try: overall, then which words moved, then what is left
+  function spotVerdict(c, sp, texts) {
+    const n = c.gaps.length - 1, last = c.gaps[n], first = c.gaps[0], q = (w, i) => `“${escapeHtml(texts[sp.a + i].replace(/[.,;:!?"]+$/g, '').replace(/^["“]/, ''))}”`;
+    const list = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs.at(-1));
+    let head;
+    if (last == null) head = 'This try had no numbers for the words that were off. Read it again a little louder.';
+    else if (last === 0) head = n > 1 && c.gaps.slice(1, -1).every(g => g === 0) ? 'On your goal again. That is how it sticks.' : 'All on your goal this time.';
+    else if (first == null) head = 'Scored. There were no numbers for these words in the reading, so compare your tries with each other.';
+    else if (last < first * 0.85) head = `Closer than in the reading${c.best === n - 1 && n > 1 ? ', and your closest try yet' : c.best !== n - 1 ? `, though try ${c.best + 1} was closer` : ''}.`;
+    else if (last > first * 1.15) head = 'Further from your goal than in the reading. Tap Hear it read, then try again slowly.';
+    else head = 'About the same as in the reading.';
+    const reached = [], moved = [];
+    c.words.forEach((w, i) => {
+      if (w.state === 'reached') reached.push(q(w, i));
+      else if (w.state === 'better') moved.push(`${q(w, i)} moved closer but is still ${offWord(w.last, sp.why)}`);
+      else if (w.state === 'worse') moved.push(`${q(w, i)} moved away and is ${offWord(w.last, sp.why)}`);
+      else if (w.gap1 > 0) moved.push(`${q(w, i)} is still ${offWord(w.last, sp.why)}`);
+    });
+    const parts = [head];
+    if (reached.length) parts.push(`${list(reached)} reached your goal.`);
+    if (moved.length) parts.push(moved.join('; ') + '.');
+    return parts.join(' ');
+  }
+  // bars for the reading and each try: how far from the goal, shorter is better
+  function spotBars(c) {
+    const W = 28, G = 8, H = 56, T = 4, n = c.gaps.length, max = Math.max(5, ...c.gaps.filter(g => g != null));
+    let svg = '';
+    c.gaps.forEach((g, i) => {
+      const x = i * (W + G), lab = i ? String(i) : 'R';
+      const h = g == null ? 0 : Math.max(2, g / max * (H - T));
+      const cls = i === 0 ? 'rd' : g === 0 ? 'ok' : g != null && c.gaps[0] != null && g < c.gaps[0] * 0.85 ? 'up' : g != null && c.gaps[0] != null && g > c.gaps[0] * 1.15 ? 'down' : '';
+      svg += g === 0 ? `<text class="rs-check" x="${x + W / 2}" y="${H - 4}" text-anchor="middle">✓</text>` : `<rect class="rs-bar ${cls}" x="${x}" y="${(H - h).toFixed(1)}" width="${W}" height="${h.toFixed(1)}" rx="3"><title>${i ? 'Try ' + i : 'In the reading'}: ${g == null ? 'no number' : Math.round(g) + ' points from your goal'}</title></rect>`;
+      svg += `<text class="rs-blab" x="${x + W / 2}" y="${H + 13}" text-anchor="middle">${lab}</text>`;
+    });
+    const w = n * (W + G) - G;
+    return `<svg class="rs-bars" width="${w}" height="${H + 16}" viewBox="0 0 ${w} ${H + 16}" role="img" aria-label="Distance from your goal in the reading and each try"><line class="rs-base" x1="0" x2="${w}" y1="${H}" y2="${H}"/>${svg}</svg>`;
   }
   function paintSpot() {
     const S = Spot.cur, box = $('reader-spot'); if (!S) return;
-    const sp = S.spots[S.k], val = (x) => [sp.why !== 'pitch' && x.r != null ? Math.round(x.r) : null, sp.why !== 'resonance' && x.p != null ? Math.round(x.p) + ' Hz' : null].filter(v => v != null).join(' · ') || '--';
-    const opts = focusOpts(), short = (x) => { const f = D.wordShortfall(x, opts); return (sp.why === 'pitch' ? 0 : f.r) + (sp.why === 'resonance' ? 0 : f.p); };
-    const tries = S.tries.map((t, i) => `<span class="rs-try ${short(t) === 0 ? 'ok' : short(t) < short(sp) ? 'up' : ''}">Try ${i + 1} <b>${val(t)}</b></span>`).join('');
+    const sp = S.spots[S.k], why = sp.why, before = S.words.slice(sp.a, sp.b + 1);
+    const c = D.compareTries(before, S.tries.map(t => t.words), why, focusOpts());
+    const fmt = (w) => (w ? [why !== 'pitch' ? (w.r != null ? Math.round(w.r) : '–') : null, why !== 'resonance' ? (w.p > 0 ? Math.round(w.p) + ' Hz' : '–') : null].filter(v => v != null).join(' · ') : '–');
+    const ARROW = { reached: '✓', better: '↑', worse: '↓', same: '=', on: '✓', none: '' };
+    const chips = c.words.map((w, i) => `<li class="rs-w ${w.state}${w.gap1 > 0 ? ' off' : ''}"><b>${escapeHtml(S.texts[sp.a + i])}</b><span>${fmt(w.before)}${S.tries.length ? ` → ${fmt(w.last)} <i aria-hidden="true">${ARROW[w.state]}</i>` : ''}</span></li>`).join('');
+    const showMsg = S.msg || (Run.on ? (S.tries.length ? `Try ${S.tries.length + 1}: read the line, then pause.` : 'Read the line aloud. It scores itself when you reach the end and pause, or press Finish.') : '');
     box.hidden = false;
     box.innerHTML = `<div class="rs-head"><b>Focus spot${S.spots.length > 1 ? ` ${S.k + 1} of ${S.spots.length}` : ''}</b><span class="muted small">${escapeHtml(spotWhat(sp))}</span></div>
-      <div class="rs-scores"><span class="rs-try">In the reading <b>${val(sp)}</b></span>${tries}</div>
-      <p class="small rs-msg">${escapeHtml(S.msg || (Run.on ? 'Read the line aloud. It scores itself when you reach the end and pause, or press Finish.' : ''))}</p>
+      <div class="rs-body">${S.tries.length ? `<figure class="rs-fig">${spotBars(c)}<figcaption class="small muted">Distance from your goal: R is the reading, then each try. Shorter is better.</figcaption></figure>` : ''}
+      <div class="rs-cmp"><p class="small muted rs-cap">${S.tries.length ? `Each word: in the reading → try ${S.tries.length}` : 'Each word in the reading'} (${why === 'pitch' ? 'pitch' : why === 'resonance' ? 'resonance' : 'resonance · pitch'})</p><ul class="rs-words">${chips}</ul></div></div>
+      ${S.tries.length && !Run.on && !S.msg ? `<p class="rs-verdict">${spotVerdict(c, sp, S.texts)}</p>` : ''}
+      <p class="small rs-msg">${escapeHtml(showMsg)}</p>
       <div class="btn-row">${Run.on ? '' : '<button type="button" class="btn sm primary" id="rs-again">Again</button>'}${S.spots.length > 1 ? `<button type="button" class="btn sm" id="rs-next">${S.k + 1 < S.spots.length ? 'Next spot' : 'First spot'}</button>` : ''}<button type="button" class="btn sm ghost" id="rs-done">Done</button></div>`;
     const again = $('rs-again'); if (again) again.onclick = () => { S.msg = ''; beginRun(); paintSpot(); };
     const next = $('rs-next'); if (next) next.onclick = () => { cancelRun(); S.k = (S.k + 1) % S.spots.length; loadSpot(); };
