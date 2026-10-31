@@ -8,7 +8,8 @@ for (const [w, n] of Object.entries(words)) check(D.countSyllables(w) === n, `"$
 
 const fs = 48000, V = D.VOWELS;
 // 24 syllables: joined by silence (stops), by fricatives, and by voiced dips (two vowels in one breath)
-const parts = [];
+// a moment of quiet first: the tracker spends its first ~350 ms learning the room
+const parts = [S.silence(fs, 0.5)];
 let n = 0;
 for (let i = 0; i < 8; i++) {
   const v = V[i % V.length];
