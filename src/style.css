@@ -547,3 +547,39 @@ a { color: var(--accent); }
 .wr-w { cursor: pointer; outline: none; }
 .wr-w.sel .wr-hit, .wr-w:focus-visible .wr-hit { fill: var(--accent); fill-opacity: 0.1; }
 #hist-table .hist-report { margin-right: 10px; }
+
+/* vowel map: each vowel of a passage on the F1/F2 plane, with its own score */
+.vm { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.vm h4 { margin: 0; }
+.vm-chart { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 4px; max-width: 560px; }
+.session-grid .vm-chart { margin-bottom: 12px; }
+.vm-svg { display: block; width: 100%; height: auto; }
+.vm-grid { stroke: var(--line); stroke-width: 1; }
+.vm-tick { fill: var(--muted); font: 10px var(--font-mono); }
+.vm-axis { stroke: var(--muted); stroke-width: 1; opacity: 0.6; }
+.vm-goal { stroke: var(--fem); stroke-width: 6; stroke-linecap: round; opacity: 0.3; }
+[data-goal="masc"] .vm-goal { stroke: var(--masc); }
+.vm-m { fill: var(--panel); stroke: var(--masc); stroke-width: 1.5; }
+.vm-w { fill: var(--fem); }
+.vm-pull { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 3; }
+.vm-dot { fill: var(--good); stroke: var(--panel); stroke-width: 1.5; }
+.vm-you.off .vm-dot { fill: var(--warn); }
+.vm-lab { fill: var(--ink); font: 600 12px var(--font-body); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.vm-you { cursor: pointer; outline: none; }
+.vm-you:focus-visible .vm-dot, .vm-you:hover .vm-dot { stroke: var(--ink); }
+.vm-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 4px 4px 2px; }
+.vm-key-goal { display: inline-block; width: 16px; height: 6px; border-radius: 3px; background: var(--fem); opacity: 0.35; }
+[data-goal="masc"] .vm-key-goal { background: var(--masc); }
+.vm-key-you { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--good); }
+.vm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vm-row { width: 100%; display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 2.6em; grid-template-areas: "cue track val" "cue words words"; align-items: center; column-gap: 10px; border: 0; background: none; padding: 4px 2px; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
+.vm-row:hover, .vm-row:focus-visible { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.vm-row .vm-cue { grid-area: cue; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vm-row .track { grid-area: track; position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, color-mix(in srgb, var(--masc) 30%, transparent), color-mix(in srgb, var(--fem) 30%, transparent)); }
+.vm-row .mark { position: absolute; top: -4px; width: 10px; height: 18px; margin-left: -5px; border-radius: 3px; background: var(--good); }
+.vm-row.off .mark { background: var(--warn); }
+.vm-row .val { grid-area: val; font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.vm-row.off .val { color: var(--warn); font-weight: 600; }
+.vm-row .vm-words { grid-area: words; }
+.vm-row .vm-words:empty { display: none; }
+@media (max-width: 560px) { .vm-row { grid-template-columns: 5.5em minmax(0, 1fr) 2.4em; } }

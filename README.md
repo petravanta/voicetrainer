@@ -4,8 +4,8 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 
 ## Modes
 
-- **Readings**: read a prepared passage aloud; press Finish for a result card (resonance, /s/ brightness, pitch, breathiness, change since last time) and the weakest vowels to practise. Each reading is saved with one trend per passage; readings under 70% of the text are kept as partial and left out of the trend.
-- **Freestyle**: every live dial (resonance meter, vowel space, spectrogram, vocal tract, pitch). Nothing is saved. On a phone the dials sit side by side and you swipe between them.
+- **Readings**: read a prepared passage aloud; press Finish for a result card (resonance, /s/ brightness, pitch, breathiness, change since last time) and the weakest vowels to practise. **Your vowels** maps every vowel you held steadily on the F1/F2 vowel chart against the typical masculine and feminine values, with its own score and the words it was heard in (consonants are left out). Each reading is saved with one trend per passage; readings under 70% of the text are kept as partial and left out of the trend.
+- **Freestyle**: every live dial (resonance meter, vowel space, spectrogram, vocal tract, pitch), and a vowel map of the session that fills in as you talk. Nothing is saved. On a phone the dials sit side by side and you swipe between them.
 - **Practice**: one exercise at a time with the live coach. Every finished exercise is saved, with last, best and a trend line per exercise.
 
 Phones get a tab bar along the bottom; the screen stays awake while the microphone runs.
