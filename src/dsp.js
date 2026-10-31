@@ -800,6 +800,36 @@
     }
     return out.sort((x, y) => y.gain - x.gain).slice(0, n);
   }
+  // How the tries of a focus spot compare with the reading, word by word. before: [{ p, r }] for the
+  // spot's words in the reading; tries: [[{ p, r }], ...] the same words in each try; why: the spot's
+  // problem ('resonance', 'pitch' or 'both'), so only that shortfall counts. A word's gap is its shortfall
+  // (wordShortfall); a change under `same` points is no change. Each attempt's gap is the mean over the
+  // words it has a number for, so tries that scored different words still compare.
+  // Returns { words: [{ before, last, gap0, gap1, state }], gaps: [reading, try 1, ...], best (try index),
+  //   improved, reached, worse, off } where state is 'reached' (was off, now on the goal), 'better',
+  //   'worse', 'same' (still off by about as much), 'on' (on the goal both times) or 'none' (no number).
+  function compareTries(before, tries, why, opts, same = 2) {
+    const gapOf = (w) => {
+      if (!w) return null;
+      const want = (why !== 'pitch' && w.r != null) || (why !== 'resonance' && w.p > 0);
+      if (!want) return null;
+      const f = wordShortfall(w, opts);
+      return (why === 'pitch' ? 0 : f.r) + (why === 'resonance' ? 0 : f.p);
+    };
+    const mean = (ws) => { const g = ws.map(gapOf).filter(v => v != null); return g.length ? g.reduce((a, b) => a + b, 0) / g.length : null; };
+    const gaps = [mean(before), ...tries.map(mean)];
+    let best = -1;
+    tries.forEach((t, i) => { const g = gaps[i + 1]; if (g != null && (best < 0 || g < gaps[best + 1])) best = i; });
+    const last = tries[tries.length - 1] || [];
+    const words = before.map((w, i) => {
+      const g0 = gapOf(w), g1 = gapOf(last[i]);
+      const state = g0 == null || g1 == null ? 'none' : g0 === 0 && g1 === 0 ? 'on' : g1 === 0 ? 'reached'
+        : g1 < g0 - same ? 'better' : g1 > g0 + same ? 'worse' : 'same';
+      return { before: w, last: last[i] || null, gap0: g0, gap1: g1, state };
+    });
+    const n = (st) => words.filter(w => st.includes(w.state)).length;
+    return { words, gaps, best, improved: n(['reached', 'better']), reached: n(['reached']), worse: n(['worse']), off: words.filter(w => w.gap1 > 0).length };
+  }
   // Several readings of one passage, word by word ([[word, Hz, resonance, ...], ...] each), merged into
   // one: the median of each word's values over the readings that have one. Readings of a different
   // length (the text was edited since) are left out.
@@ -814,7 +844,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
