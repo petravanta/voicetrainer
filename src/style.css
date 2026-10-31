@@ -524,6 +524,29 @@ body[data-mode="readings"]:not(.reading-full) .sourcebar { display: none; }
 }
 a { color: var(--accent); }
 
+/* focus spots: the bits of a passage worth practising on their own */
+.fs { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.fs h4 { margin: 0; }
+.rd-usual { margin-bottom: 12px; }
+.fs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fs-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.fs-text { display: grid; gap: 2px; min-width: 0; }
+.fs-text q { font-weight: 600; }
+.fs-btns { display: flex; gap: 6px; flex-shrink: 0; }
+@media (max-width: 560px) { .fs-item { flex-direction: column; align-items: stretch; } .fs-btns { justify-content: flex-end; } }
+.reader-spot { max-width: 1080px; width: 100%; margin: 0 auto; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--panel); }
+.reader-spot .rs-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.reader-spot .rs-scores { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.9rem; color: var(--muted); }
+.reader-spot .rs-try b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+.reader-spot .rs-try.up b { color: var(--good); }
+.reader-spot .rs-try.ok b { color: var(--good); font-weight: 700; }
+.reader-spot .rs-msg { margin: 0; }
+.reader-spot .rs-msg:empty { display: none; }
+.reader-spot .btn-row { margin: 0; }
+.reader.spot #reader-edit { display: none; }
+/* the spot panel is one more row above the passage */
+.reader.spot, .sheet-ui .reader.spot:not(.full) { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
+
 /* reading report: pitch and resonance word by word */
 .wr { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .wr h4 { margin: 0; }

@@ -2576,7 +2576,7 @@
   }
 
   // ---------------- practice history ----------------
-  const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'whisper' ? '%' : '');
+  const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'whisper' ? '%' : kind === 'spotpitch' ? ' Hz' : '');
   function recordPractice(entry) {
     if (!entry) return;
     Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score });
@@ -2603,9 +2603,21 @@
       const li = document.createElement('li');
       li.innerHTML = `<button type="button" class="pr-name"></button><span class="pr-n">${list.length}×</span><span class="pr-last">last ${vals.length ? f(vals.at(-1)) : '--'}</span><span class="pr-best">best ${vals.length ? f(Math.max(...vals)) : '--'}</span>${kind === 'sound' ? sparkline(vals.slice(-20), 0, 100) : sparkline(vals.slice(-20), Math.min(...vals), Math.max(...vals))}`;
       const nb = li.querySelector('.pr-name'); nb.textContent = def ? def.cue : list[0].label;
-      nb.addEventListener('click', () => { if (def) openDrill(def); });
+      nb.addEventListener('click', () => { if (def) openDrill(def); else if (id.startsWith('spot:')) openSpot(id, kind); });
       ul.appendChild(li);
     }
+  }
+  // a focus spot from Practice progress: the passage's words, and its numbers in the latest reading
+  function openSpot(id, kind) {
+    const m = /^spot:(.+):(\d+)-(\d+)$/.exec(id); if (!m) return;
+    const t = Texts.all().find(x => x.id === m[1]); if (!t) return;
+    const texts = t.body.split(/\s+/).filter(Boolean), a = +m[2], b = +m[3];
+    if (b >= texts.length) return;
+    const last = fullReadings(t.id).filter(r => r.byWord && r.byWord.length === texts.length).at(-1);
+    const st = last ? D.clipStats(wordObjs(last.byWord.slice(a, b + 1))) : { r: null, p: null };
+    const why = kind === 'spotpitch' ? 'pitch' : st.p != null && D.wordShortfall(st, focusOpts()).p > 0 ? 'both' : 'resonance';
+    setMode('readings');
+    startSpots(t.id, t.title, texts, [{ a, b, r: st.r, p: st.p, why }], 0);
   }
   function drillById(id) { for (const [tab, list] of Object.entries(DRILLS)) { const d = list.find(x => x.id === id); if (d) return Object.assign(d, { tab }); } return null; }
   function openDrill(def) {
@@ -2618,6 +2630,7 @@
   // ---------------- readings ----------------
   const Run = { on: false, text: null, maxIdx: 0, start: 0, frames: [] };
   function startReading(id) {
+    endSpots();
     Reader.show();
     Reader.pick(id);
     Reader.setFull(true);
@@ -2639,6 +2652,7 @@
   }
   function finishReading() {
     if (!Run.on) return;
+    if (Spot.cur) return finishSpot();
     const t = Run.text, st = sessionStats(session);
     const cover = Reader.words.length ? clamp((Run.maxIdx + 1) / Reader.words.length, 0, 1) : 0;
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
@@ -2682,6 +2696,7 @@
     const delta = (v, o) => (v == null || o == null ? '' : `<small class="${better(v, o) ? 'up' : v === o ? '' : 'down'}">${v - o > 0 ? '+' : ''}${Math.round(v - o)} vs last</small>`);
     const [lo, hi] = target();
     const weak = Object.entries(rec.vowels || {}).filter(([, s]) => Math.round(s) < lo || Math.round(s) > hi).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
+    const spots = spotsFor(rec);
     const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}</h3><span class="muted small">${rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
       <div class="stats">
@@ -2692,10 +2707,12 @@
       </div>
       <p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>
       ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
+      ${focusHtml(rec, spots)}
       ${vowelMapHtml(rec)}
-      ${wordReportHtml(rec)}
+      ${wordReportHtml(rec, spots)}
       <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
     wireWordReport(box, rec);
+    wireFocus(box, rec, spots);
     box.querySelectorAll('[data-weak], [data-vm]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === (b.dataset.weak || b.dataset.vm)); if (def) openDrill(def); }));
     $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
     $('rd-close').onclick = () => { box.hidden = true; };
@@ -2767,7 +2784,7 @@
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
   // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
-  function wordReportHtml(rec) {
+  function wordReportHtml(rec, spots) {
     const ws = rec.byWord;
     if (!ws || !ws.some(w => w[1] != null || w[2] != null)) return '';
     const [lo, hi] = target(), [plo, phi] = pitchBand();
@@ -2788,8 +2805,7 @@
       + `<rect class="wr-band" x="0" y="${f1(ry(hi))}" width="${W}" height="${f1(ry(lo) - ry(hi))}"/>`
       + `<line class="wr-axis" x1="0" x2="${W}" y1="${RT + RH}" y2="${RT + RH}"/>`;
     // phrase highlights, shown when a stretch below is picked
-    const phrases = D.readingPhrases(ws.map(w => w[0]), ws.map(w => ({ p: w[1], r: w[2] })));
-    phrases.forEach((ph, k) => { svg += `<rect class="wr-hl" data-ph="${k}" x="${f1(xs[ph.a] - wd[ph.a] / 2)}" y="2" width="${f1(xs[ph.b] + wd[ph.b] / 2 - xs[ph.a] + wd[ph.a] / 2)}" height="${H - 4}" rx="6"/>`; });
+    (spots || []).forEach((ph, k) => { svg += `<rect class="wr-hl" data-ph="${k}" x="${f1(xs[ph.a] - wd[ph.a] / 2)}" y="2" width="${f1(xs[ph.b] + wd[ph.b] / 2 - xs[ph.a] + wd[ph.a] / 2)}" height="${H - 4}" rx="6"/>`; });
     // pitch line, broken where no pitch was heard
     let run = [];
     const flush = () => { if (run.length > 1) svg += `<polyline class="wr-pline" points="${run.join(' ')}"/>`; run = []; };
@@ -2804,19 +2820,114 @@
         + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    // the stretches furthest from the goal
-    const quote = (ph) => escapeHtml(ws.slice(ph.a, ph.b + 1).map(w => w[0]).join(' ').replace(/[.,;:!?]+$/, ''));
-    const weakRes = phrases.map((ph, k) => ({ ph, k, gap: ph.nr >= 2 ? gapOf(ph.r) : -1 })).filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 3);
-    const pGap = (p) => (p == null ? -1 : state.goal === 'fem' ? plo - p : p - phi);
-    const weakP = phrases.map((ph, k) => ({ ph, k, gap: pGap(ph.p) })).filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 2);
-    const item = (x, what) => `<li><button type="button" class="wr-jump" data-ph="${x.k}">“${quote(x.ph)}”</button> <span class="muted">${what}</span></li>`;
-    const list = weakRes.map(x => item(x, `resonance ${Math.round(x.ph.r)}`)).concat(weakP.map(x => item(x, `pitch ${Math.round(x.ph.p)} Hz`)));
     return `<div class="wr"><div class="section-head"><h4>Word by word</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
-      ${list.length ? `<p class="small"><b>Stretches furthest from your goal</b> (tap one to find it):</p><ul class="wr-list small">${list.join('')}</ul>` : '<p class="small">Every phrase was on your goal for resonance and pitch.</p>'}
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p>
       <p class="small muted">The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only steady vowels get a resonance score, so short words often have none.</p></div>`;
+  }
+  // ---- focus spots: the bits of a passage where practice pays off most ----
+  // Each spot can be read on its own in the reader, again and again, with a score after every try.
+  const focusOpts = (n = 3) => ({ goal: state.goal, res: target(), pitch: pitchBand(), n });
+  const wordObjs = (bw) => bw.map(w => ({ p: w[1], r: w[2] }));
+  const clipQuote = (texts, sp) => texts.slice(sp.a, sp.b + 1).join(' ').replace(/[.,;:!?]+$/, '');
+  const spotId = (textId, sp) => `spot:${textId}:${sp.a}-${sp.b}`;
+  const spotsFor = (rec, n) => (rec && rec.byWord ? D.focusSpots(rec.byWord.map(w => w[0]), wordObjs(rec.byWord), focusOpts(n)) : []);
+  const overlaps = (x, y) => x.a <= y.b && x.b >= y.a;
+  // earlier full readings of the same passage, with the same words, newest last
+  const priorReadings = (rec, k = 5) => fullReadings(rec.text).filter(r => r.id !== rec.id && r.at < rec.at && r.byWord && r.byWord.length === rec.byWord.length).slice(-k);
+  const timesWeak = (sp, recs) => recs.filter(r => spotsFor(r).some(x => overlaps(x, sp))).length;
+  // what is off in a spot, with the goal beside it
+  function spotWhat(sp) {
+    const [lo, hi] = target(), [plo, phi] = pitchBand(), fem = state.goal === 'fem', out = [];
+    if (sp.why !== 'pitch' && sp.r != null) out.push(`resonance ${Math.round(sp.r)} (goal ${fem ? lo + '+' : 'under ' + hi})`);
+    if (sp.why !== 'resonance' && sp.p != null) out.push(`pitch ${Math.round(sp.p)} Hz (goal ${fem ? plo + '+' : 'under ' + phi})`);
+    return out.join(', ');
+  }
+  function spotItems(texts, spots, recs, showBtn) {
+    return spots.map((sp, k) => {
+      const n = recs.length ? timesWeak(sp, recs) : 0;
+      return `<li class="fs-item"><div class="fs-text"><q>${escapeHtml(clipQuote(texts, sp))}</q><span class="small muted">${escapeHtml(spotWhat(sp))}${n ? ` · weak in ${n} of your last ${recs.length} reading${recs.length > 1 ? 's' : ''}` : ''}</span></div>`
+        + `<div class="fs-btns">${showBtn ? `<button type="button" class="btn sm ghost wr-jump-btn" data-ph="${k}">Show</button>` : ''}<button type="button" class="btn sm" data-spot="${k}">Practise</button></div></li>`;
+    }).join('');
+  }
+  function focusHtml(rec, spots) {
+    if (!rec.byWord || !rec.byWord.some(w => w[1] != null || w[2] != null)) return '';
+    if (!spots.length) return `<div class="fs"><h4>Focus spots</h4><p class="small">Every phrase was on your goal for resonance and pitch. Nothing to single out this time.</p></div>`;
+    const texts = rec.byWord.map(w => w[0]);
+    return `<div class="fs"><div class="section-head"><h4>Focus spots</h4><button type="button" class="btn sm primary" data-spot="0">Practise ${spots.length > 1 ? 'all ' + spots.length : 'it'}</button></div>
+      <p class="small muted">The bits of the passage where getting to your goal gains the most: how far each word was from it, added up over the phrase. Practise one on its own, a few times, and see the score after every try.</p>
+      <ul class="fs-list">${spotItems(texts, spots, priorReadings(rec), true)}</ul></div>`;
+  }
+  function wireFocus(box, rec, spots) {
+    const texts = rec.byWord ? rec.byWord.map(w => w[0]) : [];
+    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(rec.text, rec.title, texts, spots, +b.dataset.spot)));
+  }
+  // the weak spots of the last few readings of a passage together, for the History panel
+  function renderUsualSpots(id) {
+    const box = $('rd-usual'); if (!box) return;
+    const recs = fullReadings(id).filter(r => r.byWord), last = recs.at(-1);
+    const use = last ? recs.filter(r => r.byWord.length === last.byWord.length).slice(-5) : [];
+    box.hidden = use.length < 2;
+    if (box.hidden) { box.innerHTML = ''; return; }
+    const merged = D.mergeWordReports(use.map(r => r.byWord)), texts = merged.map(w => w.text);
+    const spots = D.focusSpots(texts, merged, focusOpts());
+    box.innerHTML = `<div class="section-head"><h4>Spots that keep coming up</h4>${spots.length ? `<button type="button" class="btn sm" data-spot="0">Practise ${spots.length > 1 ? 'all' : 'it'}</button>` : ''}</div>`
+      + (spots.length ? `<p class="small muted">Each word's middle value over your last ${use.length} readings of this passage, so one off day does not count for much.</p><ul class="fs-list">${spotItems(texts, spots, use, false)}</ul>`
+        : `<p class="small">Over your last ${use.length} readings every phrase was on your goal.</p>`);
+    box.querySelectorAll('[data-spot]').forEach(b => b.addEventListener('click', () => startSpots(id, last.title, texts, spots, +b.dataset.spot)));
+  }
+  // A practice of one or more spots in the reader: Spot.cur = { textId, title, texts, spots, k, tries }
+  const Spot = { cur: null };
+  function startSpots(textId, title, texts, spots, k) {
+    if (!spots.length) return;
+    cancelRun();
+    Reader.show(); Reader.setFull(true);
+    if (Texts.all().some(t => t.id === textId)) Reader.pick(textId);
+    Spot.cur = { textId, title, texts, spots, k: k || 0, tries: [] };
+    loadSpot();
+  }
+  function loadSpot() {
+    const S = Spot.cur, sp = S.spots[S.k];
+    S.tries = []; S.msg = '';
+    $('reader-form').hidden = true; $('reader-text').hidden = false; $('reader').classList.remove('editing');
+    Reader.render({ id: S.textId, title: S.title, body: S.texts.slice(sp.a, sp.b + 1).join(' ') });
+    $('reader').classList.add('spot');
+    beginRun();
+    paintSpot();
+  }
+  function endSpots() {
+    if (!Spot.cur) return;
+    Spot.cur = null;
+    $('reader').classList.remove('spot');
+    $('reader-spot').hidden = true;
+    if (Run.on) cancelRun();
+  }
+  function finishSpot() {
+    const S = Spot.cur, sp = S.spots[S.k];
+    const st = D.spotStats(sp, D.wordReport(Run.frames, Reader.words.length));
+    endRun(); session = newSession(); resetSessionViews();
+    if (st.r == null && st.p == null) { S.msg = 'Not enough voice was heard to score that try. Read it again a little louder.'; paintSpot(); return; }
+    S.tries.push(st);
+    const pitchSpot = sp.why === 'pitch', score = pitchSpot ? st.p : st.r;
+    if (score != null) recordPractice({ id: spotId(S.textId, sp), label: `“${clipQuote(S.texts, sp)}”`, kind: pitchSpot ? 'spotpitch' : 'spot', score: Math.round(score * 10) / 10 });
+    const short = (x) => { const f = D.wordShortfall(x, focusOpts()); return (sp.why === 'pitch' ? 0 : f.r) + (sp.why === 'resonance' ? 0 : f.p); };
+    S.msg = short(st) === 0 ? 'On your goal. Once more to make it stick, or on to the next spot.' : short(st) < short(sp) ? 'Closer than in the reading. Again?' : 'Not closer yet. Listen to it read, then try again.';
+    paintSpot();
+  }
+  function paintSpot() {
+    const S = Spot.cur, box = $('reader-spot'); if (!S) return;
+    const sp = S.spots[S.k], val = (x) => [sp.why !== 'pitch' && x.r != null ? Math.round(x.r) : null, sp.why !== 'resonance' && x.p != null ? Math.round(x.p) + ' Hz' : null].filter(v => v != null).join(' · ') || '--';
+    const opts = focusOpts(), short = (x) => { const f = D.wordShortfall(x, opts); return (sp.why === 'pitch' ? 0 : f.r) + (sp.why === 'resonance' ? 0 : f.p); };
+    const tries = S.tries.map((t, i) => `<span class="rs-try ${short(t) === 0 ? 'ok' : short(t) < short(sp) ? 'up' : ''}">Try ${i + 1} <b>${val(t)}</b></span>`).join('');
+    box.hidden = false;
+    box.innerHTML = `<div class="rs-head"><b>Focus spot${S.spots.length > 1 ? ` ${S.k + 1} of ${S.spots.length}` : ''}</b><span class="muted small">${escapeHtml(spotWhat(sp))}</span></div>
+      <div class="rs-scores"><span class="rs-try">In the reading <b>${val(sp)}</b></span>${tries}</div>
+      <p class="small rs-msg">${escapeHtml(S.msg || (Run.on ? 'Read the line aloud. It scores itself when you reach the end and pause, or press Finish.' : ''))}</p>
+      <div class="btn-row">${Run.on ? '' : '<button type="button" class="btn sm primary" id="rs-again">Again</button>'}${S.spots.length > 1 ? `<button type="button" class="btn sm" id="rs-next">${S.k + 1 < S.spots.length ? 'Next spot' : 'First spot'}</button>` : ''}<button type="button" class="btn sm ghost" id="rs-done">Done</button></div>`;
+    const again = $('rs-again'); if (again) again.onclick = () => { S.msg = ''; beginRun(); paintSpot(); };
+    const next = $('rs-next'); if (next) next.onclick = () => { cancelRun(); S.k = (S.k + 1) % S.spots.length; loadSpot(); };
+    $('rs-done').onclick = () => { $('reader-close').click(); };
   }
   function wireWordReport(box, rec) {
     const svg = box.querySelector('.wr-svg'); if (!svg) return;
@@ -2831,7 +2942,7 @@
       g.addEventListener('click', () => pick(g));
       g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(g); } });
     });
-    box.querySelectorAll('.wr-jump').forEach(b => b.addEventListener('click', () => {
+    box.querySelectorAll('.wr-jump, .wr-jump-btn').forEach(b => b.addEventListener('click', () => {
       svg.querySelectorAll('.wr-hl.on').forEach(x => x.classList.remove('on'));
       const hl = svg.querySelector(`.wr-hl[data-ph="${b.dataset.ph}"]`); if (!hl) return;
       hl.classList.add('on');
@@ -2871,6 +2982,7 @@
   }
   function renderReadingHistory() {
     const id = $('rd-hist-pick').value;
+    renderUsualSpots(id);
     const items = Data.d.readings.filter(r => r.text === id && r.goal === state.goal);
     const full = items.filter(r => !r.partial);
     $('rd-hist-title').textContent = 'History';
@@ -3109,6 +3221,8 @@
       const pause = this.tracker.silentMs > 450;
       if (pause && !this.wasPause) this.resync();
       this.wasPause = pause;
+      // a focus spot scores itself once the last word is reached and the voice stops
+      if (Run.on && Spot.cur && this.idx >= this.words.length - 1 && this.tracker.silentMs > 900 && Run.frames.some(f => f.f0 > 0)) finishSpot();
     },
     resync() {
       const w = this.words;
@@ -3423,6 +3537,7 @@
       $('reader-stage').focus({ preventScroll: true });
     },
     hide() {
+      endSpots();
       this.stopListen();
       this.open = false;
       this.layout();
@@ -3451,7 +3566,7 @@
         window.speechSynthesis.addEventListener('voiceschanged', () => this.fillVoices());
       } else $('reader-listen').hidden = true;
       $('reader-restart').addEventListener('click', () => this.restart());
-      $('reader-pick').addEventListener('change', (e) => { this.pick(e.target.value); if (Run.on) { if (this.current && this.current.id === e.target.value) beginRun(); else cancelRun(); } });
+      $('reader-pick').addEventListener('change', (e) => { endSpots(); this.pick(e.target.value); if (Run.on) { if (this.current && this.current.id === e.target.value) beginRun(); else cancelRun(); } });
       for (const k of ['voice', 'pace', 'tap']) $('rmode-' + k).addEventListener('click', () => this.setMode(k));
       $('reader-wpm').addEventListener('input', (e) => { $('reader-wpm-out').textContent = e.target.value; });
       const size = (d) => { this.size = clamp(this.size + d, 1.2, 3.6); $('reader-text').style.setProperty('--rsize', this.size + 'rem'); };
