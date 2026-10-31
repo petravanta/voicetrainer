@@ -536,10 +536,28 @@ a { color: var(--accent); }
 @media (max-width: 560px) { .fs-item { flex-direction: column; align-items: stretch; } .fs-btns { justify-content: flex-end; } }
 .reader-spot { max-width: 1080px; width: 100%; margin: 0 auto; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--panel); }
 .reader-spot .rs-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
-.reader-spot .rs-scores { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.9rem; color: var(--muted); }
-.reader-spot .rs-try b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
-.reader-spot .rs-try.up b { color: var(--good); }
-.reader-spot .rs-try.ok b { color: var(--good); font-weight: 700; }
+.reader-spot .rs-body { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-start; }
+.reader-spot .rs-fig { margin: 0; display: grid; gap: 2px; max-width: 220px; }
+.rs-bars { display: block; overflow: visible; }
+.rs-base { stroke: var(--line); }
+.rs-bar { fill: var(--muted); opacity: 0.55; }
+.rs-bar.rd { fill: var(--warn); opacity: 0.8; }
+.rs-bar.up { fill: var(--good); opacity: 0.85; }
+.rs-bar.down { fill: var(--warn); opacity: 0.45; }
+.rs-check { fill: var(--good); font-size: 18px; font-weight: 700; }
+.rs-blab { fill: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+.reader-spot .rs-cmp { flex: 1 1 260px; min-width: 0; display: grid; gap: 4px; }
+.reader-spot .rs-cap { margin: 0; }
+.rs-words { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.rs-w { display: grid; gap: 1px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 0.85rem; }
+.rs-w b { font-weight: 600; }
+.rs-w span { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.rs-w i { font-style: normal; font-weight: 700; }
+.rs-w.off { border-color: var(--warn); }
+.rs-w.reached, .rs-w.on { border-color: var(--good); }
+.rs-w.reached i, .rs-w.better i, .rs-w.on i { color: var(--good); }
+.rs-w.worse i { color: var(--warn); }
+.reader-spot .rs-verdict { margin: 0; font-size: 0.92rem; }
 .reader-spot .rs-msg { margin: 0; }
 .reader-spot .rs-msg:empty { display: none; }
 .reader-spot .btn-row { margin: 0; }
