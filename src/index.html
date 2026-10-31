@@ -145,6 +145,7 @@
     <div class="rd-history panel" id="rd-history">
       <div class="section-head"><h3 id="rd-hist-title">History</h3><select id="rd-hist-pick" aria-label="Passage to show"></select></div>
       <p id="rd-hist-empty" class="empty">No readings of this passage yet.</p>
+      <div id="rd-usual" class="fs rd-usual" hidden></div>
       <figure class="chart" id="rd-chart-wrap" hidden>
         <figcaption>Resonance per reading <small>0 masculine avg, 100 feminine avg; the band is your target</small></figcaption>
         <canvas id="cv-hist" height="200"></canvas>
@@ -243,6 +244,7 @@
       <span>Breath <b id="rh-breath">--</b></span>
       <span id="rh-hint" class="rh-hint"></span>
     </div>
+    <div id="reader-spot" class="reader-spot" aria-live="polite" hidden></div>
     <div class="reader-track" id="reader-track" aria-hidden="true"><div class="track-inner" id="track-inner"></div></div>
     <div class="reader-stage" id="reader-stage" tabindex="-1">
       <div id="reader-text" class="reader-text"></div>
