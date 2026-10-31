@@ -3267,8 +3267,9 @@
         if (i !== this.idx) this.go(i, true);
       }
       // a pause: snap to the start of the next sentence or clause if we are close to it
+      // (only after some speech since the last snap, so silence before you start never moves it)
       const pause = this.tracker.silentMs > 450;
-      if (pause && !this.wasPause) this.resync();
+      if (pause && !this.wasPause && this.tracker.heard > 0) this.resync();
       this.wasPause = pause;
       // a focus spot scores itself once the last word is reached and the voice stops
       if (Run.on && Spot.cur && this.idx >= this.words.length - 1 && this.tracker.silentMs > 900 && Run.frames.some(f => f.f0 > 0)) finishSpot();
@@ -3287,7 +3288,7 @@
       i = clamp(i, 0, this.words.length - 1);
       this.idx = i;
       if (Run.on) Run.maxIdx = Math.max(Run.maxIdx, i);
-      if (!fromVoice) { this.base = this.cum[i] - this.tracker.count; }
+      if (!fromVoice) { this.base = this.cum[i] - this.tracker.count; this.tracker.mark(); }
       this.paint();
     },
     paint() {
