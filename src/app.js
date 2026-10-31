@@ -77,7 +77,7 @@
   let session = newSession();
   let take = null; // what the current recording or listening run contained, for the guided exercise
   function newSession() {
-    return { start: Date.now(), vowels: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], breath: [], drills: [] };
+    return { start: Date.now(), vowels: {}, vf: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], breath: [], drills: [] };
   }
   const target = () => (state.goal === 'fem' ? [75, 100] : [0, 25]);
 
@@ -675,7 +675,7 @@
   let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9, breathBuf = [], breathShown = -1e9;
   function onFrame(fr) {
     frameCount++;
-    let frRes = NaN, frSib = NaN; // this frame's scores, for the per-word reading report
+    let frRes = NaN, frSib = NaN, frVowel = null; // this frame's scores, for the per-word reading report
     drawSpecColumn(fr, an.fsd);
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
     if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
@@ -718,7 +718,7 @@
           vowel = cls.vowel; score = score100(cls.alpha); ok = true;
         }
         if (ok) {
-          if (!gated) { addVowelToSession(vowel.key, score); frRes = score; }
+          if (!gated) { addVowelToSession(vowel.key, score, F); frRes = score; frVowel = vowel.key; }
           pushMeter(score, gated);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
@@ -772,7 +772,7 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
-    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib });
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: frVowel });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -790,9 +790,14 @@
     while (meterFrames.length > 1 && now - meterFrames[0].t > AVG_MS) meterFrames.shift();
     state.meter = D.median(meterFrames.map(m => m.s));
   }
-  function addVowelToSession(key, score) {
+  function addVowelToSession(key, score, F) {
     (session.vowels[key] = session.vowels[key] || []).push(score);
     if (session.vowels[key].length > 3000) session.vowels[key].splice(0, 1000);
+    if (F) { // formants too, for the vowel map
+      const vf = (session.vf[key] = session.vf[key] || []);
+      vf.push([F[0], F[1], F[2], score]);
+      if (vf.length > 3000) vf.splice(0, 1000);
+    }
     session.all.push(score);
     if (session.all.length > 20000) session.all.splice(0, 5000);
     if (take) { (take.vowels[key] = take.vowels[key] || []).push(score); take.all.push(score); }
@@ -2204,7 +2209,7 @@
     for (const k of ['s', 'sh']) if (s.sibs[k].length >= 8) sib[k] = { score: D.median(s.sibs[k]), n: s.sibs[k].length };
     const p = s.pitch;
     return {
-      vowels, sib,
+      vowels, sib, map: D.vowelMap(s.vf),
       resonance: s.all.length >= 20 ? D.median(s.all) : NaN,
       pitch: p.length >= 30 ? { median: D.median(p), p10: D.quantile(p, 0.1), p90: D.quantile(p, 0.9) } : null,
       breath: s.breath && s.breath.length >= 30 ? D.median(s.breath) : NaN,
@@ -2219,6 +2224,8 @@
       vb.innerHTML = '';
       for (const k of keys) { const v = D.VOWEL_BY_KEY[k]; vb.appendChild(barRow(v.cue.split(' ')[0], v.word, st.vowels[k].score)); }
     }
+    const vm = $('sess-vmap');
+    if (vm) { vm.hidden = !st.map.length; if (st.map.length) vm.innerHTML = vowelMapSvg(st.map.map(m => ({ k: m.k, F: m.F, s: m.s, n: m.n }))); }
     const sb = $('sess-sibs');
     if (Object.keys(st.sib).length) {
       sb.innerHTML = '';
@@ -2645,6 +2652,8 @@
       pitchMedian: st.pitch ? Math.round(st.pitch.median) : null, pitchP10: st.pitch ? Math.round(st.pitch.p10) : null, pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
       breath: round(st.breath),
       // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
+      // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
+      vmap: readingVowelMap(st.map, Run.frames, Reader.words),
       byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)]),
     };
     endRun();
@@ -2683,10 +2692,11 @@
       </div>
       <p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>
       ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
+      ${vowelMapHtml(rec)}
       ${wordReportHtml(rec)}
       <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
     wireWordReport(box, rec);
-    box.querySelectorAll('[data-weak]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === b.dataset.weak); if (def) openDrill(def); }));
+    box.querySelectorAll('[data-weak], [data-vm]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === (b.dataset.weak || b.dataset.vm)); if (def) openDrill(def); }));
     $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
     $('rd-close').onclick = () => { box.hidden = true; };
     $('rd-discard').onclick = (e) => {
@@ -2695,6 +2705,65 @@
       Data.remove('readings', rec.id); box.hidden = true; renderReadings(); renderHome();
     };
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  // ---- vowel map: each vowel of the passage on its own, placed on the F1/F2 plane ----
+  // The words each vowel was heard in come from the reading highlight, so they show where to look.
+  function readingVowelMap(map, frames, words) {
+    const r1 = (x) => Math.round(x * 10) / 10;
+    return Object.fromEntries(map.map(m => {
+      const cnt = new Map();
+      for (const f of frames) if (f.k === m.k && words[f.i]) { const w = words[f.i].text.replace(/^[^\p{L}']+|[^\p{L}']+$/gu, '').toLowerCase(); if (w) cnt.set(w, (cnt.get(w) || 0) + 1); }
+      const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(e => e[0]);
+      return [m.k, [Math.round(m.F[0]), Math.round(m.F[1]), Math.round(m.F[2]), r1(m.s), m.n, top]];
+    }));
+  }
+  // items: [{ k, F: [F1, F2, F3], s: score, n, words? }]
+  function vowelMapSvg(items) {
+    const W = 360, H = 250, L = 38, R = 12, T = 12, B = 26;
+    const x = (f2) => L + (Math.log(VC.f2[1]) - Math.log(clamp(f2, VC.f2[0], VC.f2[1]))) / (Math.log(VC.f2[1]) - Math.log(VC.f2[0])) * (W - L - R);
+    const y = (f1) => T + (Math.log(clamp(f1, VC.f1[0], VC.f1[1])) - Math.log(VC.f1[0])) / (Math.log(VC.f1[1]) - Math.log(VC.f1[0])) * (H - T - B);
+    const f1 = (v) => v.toFixed(1), [lo, hi] = target(), fem = state.goal === 'fem';
+    let g = '';
+    for (const f of [800, 1000, 1500, 2000, 2500, 3000]) g += `<line class="vm-grid" x1="${f1(x(f))}" x2="${f1(x(f))}" y1="${T}" y2="${H - B}"/><text class="vm-tick" x="${f1(x(f))}" y="${H - 8}" text-anchor="middle">${f >= 1000 ? f / 1000 + 'k' : f}</text>`;
+    for (const f of [300, 400, 500, 600, 800, 1000]) g += `<line class="vm-grid" x1="${L}" x2="${W - R}" y1="${f1(y(f))}" y2="${f1(y(f))}"/><text class="vm-tick" x="${L - 5}" y="${f1(y(f) + 4)}" text-anchor="end">${f}</text>`;
+    // a point on the masculine-to-feminine line of vowel v, at score a (0..100), on the same log scale as the score
+    const along = (v, a, i) => Math.exp(Math.log(v.M[i]) + a / 100 * (Math.log(v.W[i]) - Math.log(v.M[i])));
+    let refs = '', you = '';
+    for (const it of items) {
+      const v = D.VOWEL_BY_KEY[it.k], off = Math.round(it.s) < lo || Math.round(it.s) > hi, cue = v.cue.split(' ')[0];
+      const mx = x(v.M[1]), my = y(v.M[0]), wx = x(v.W[1]), wy = y(v.W[0]);
+      const gx0 = x(along(v, lo, 1)), gy0 = y(along(v, lo, 0)), gx1 = x(along(v, hi, 1)), gy1 = y(along(v, hi, 0));
+      refs += `<line class="vm-axis" x1="${f1(mx)}" y1="${f1(my)}" x2="${f1(wx)}" y2="${f1(wy)}"/>`
+        + `<line class="vm-goal" x1="${f1(gx0)}" y1="${f1(gy0)}" x2="${f1(gx1)}" y2="${f1(gy1)}"/>`
+        + `<circle class="vm-m" cx="${f1(mx)}" cy="${f1(my)}" r="3.5"/><circle class="vm-w" cx="${f1(wx)}" cy="${f1(wy)}" r="3.5"/>`;
+      const ux = x(it.F[1]), uy = y(it.F[0]), tx = fem ? wx : mx, ty = fem ? wy : my;
+      const tip = `${cue} (${v.word}): resonance ${Math.round(it.s)}, F1 ${Math.round(it.F[0])} Hz, F2 ${Math.round(it.F[1])} Hz, F3 ${Math.round(it.F[2])} Hz${it.words && it.words.length ? ', heard in ' + it.words.join(', ') : ''}`;
+      you += `<g class="vm-you${off ? ' off' : ''}" data-vm="${it.k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
+        + `<line class="vm-pull" x1="${f1(ux)}" y1="${f1(uy)}" x2="${f1(tx)}" y2="${f1(ty)}"/>`
+        + `<circle class="vm-dot" cx="${f1(ux)}" cy="${f1(uy)}" r="6"/>`
+        + `<text class="vm-lab" x="${f1(ux + 8)}" y="${f1(uy - 7)}">${escapeHtml(cue)}</text></g>`;
+    }
+    return `<svg class="vm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Your vowels on the vowel chart: tongue front to back across, jaw closed to open down">${g}<text class="vm-tick" x="${W - R}" y="${T + 10}" text-anchor="end">F2 (tongue front ← back)</text><text class="vm-tick" x="${L + 4}" y="${H - B - 4}">F1 (jaw) ↓</text>${refs}${you}</svg>
+      <p class="small muted vm-key"><span class="dot masc"></span>typical masculine <span class="dot fem"></span>typical feminine <span class="vm-key-goal"></span>your goal zone <span class="vm-key-you"></span>you</p>`;
+  }
+  // the vowel section of a reading result: map plus one row per vowel, weakest first
+  function vowelMapHtml(rec) {
+    const vm = rec.vmap, [lo, hi] = target();
+    const rows = vm ? Object.entries(vm).map(([k, a]) => ({ k, F: a.slice(0, 3), s: a[3], n: a[4], words: a[5] || [] }))
+      : Object.entries(rec.vowels || {}).map(([k, s]) => ({ k, s, words: [] }));
+    if (!rows.length) return '';
+    rows.sort((a, b) => gapOf(b.s) - gapOf(a.s) || a.s - b.s);
+    const list = rows.map(r => {
+      const v = D.VOWEL_BY_KEY[r.k], off = Math.round(r.s) < lo || Math.round(r.s) > hi;
+      return `<li><button type="button" class="vm-row${off ? ' off' : ''}" data-vm="${r.k}"><span class="vm-cue"><b>${escapeHtml(v.cue.split(' ')[0])}</b> <small class="muted">${escapeHtml(v.word)}</small></span>`
+        + `<span class="track"><span class="mark" style="left:${clamp(r.s, 0, 100)}%"></span></span><span class="val">${Math.round(r.s)}</span>`
+        + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
+    }).join('');
+    return `<div class="vm"><div class="section-head"><h4>Your vowels</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
+      <p class="small muted">Each vowel you held steadily, scored on its own (consonants are left out). ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}</p>
+      ${vm ? `<div class="vm-chart">${vowelMapSvg(rows)}</div>` : ''}
+      <ul class="vm-list">${list}</ul>
+      <p class="small muted">Tap a vowel to practise it. Short vowels in quick speech are rarely held long enough to score, so some may be missing.</p></div>`;
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
   // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
@@ -3451,6 +3520,7 @@
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
+    $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp();
     readTheme();
