@@ -1272,16 +1272,22 @@
 
   // Saved lyrics (Sing tab): lyrics loaded from a search are kept on this device, most recently used first,
   // so a song can be sung again without searching (or while offline). The list is plain data; app.js stores it.
-  // Entry: { key, src, id, title, artist, album, duration, timed, text, at }. Capped by count and by total text size.
+  // Entry: { key, src, id, title, artist, album, duration, timed, text, at, video }. Capped by count and by total text size.
+  // video: the YouTube video attached to the song, { id, start, offset } (offset = lyric timing set against it), or null.
   const LYRICS_CACHE_MAX = 40, LYRICS_CACHE_CHARS = 600000;
   const lyricsKey = (r) => [r.src || '', String(r.artist || '').trim().toLowerCase(), String(r.title || '').trim().toLowerCase()].join('|');
+  function videoClean(v) {
+    if (!v || typeof v !== 'object' || typeof v.id !== 'string' || !/^[\w-]{11}$/.test(v.id)) return null;
+    const num = (x, lo, hi) => (Number.isFinite(+x) ? Math.max(lo, Math.min(hi, +x)) : 0);
+    return { id: v.id, start: Math.round(num(v.start, 0, 86400)), offset: Math.round(num(v.offset, -3600, 3600) * 100) / 100 };
+  }
   function lyricsCacheClean(list) {
     if (!Array.isArray(list)) return [];
     const str = (v) => (typeof v === 'string' ? v : ''), seen = new Set(), out = [];
     for (const e of list) {
       if (!e || typeof e !== 'object' || !str(e.text).trim() || !str(e.title).trim()) continue;
       const row = { key: '', src: str(e.src), id: e.id == null ? null : e.id, title: str(e.title), artist: str(e.artist), album: str(e.album),
-        duration: Number.isFinite(+e.duration) && +e.duration > 0 ? Math.round(+e.duration) : null, timed: !!e.timed, text: str(e.text), at: +e.at || 0 };
+        duration: Number.isFinite(+e.duration) && +e.duration > 0 ? Math.round(+e.duration) : null, timed: !!e.timed, text: str(e.text), at: +e.at || 0, video: videoClean(e.video) };
       row.key = lyricsKey(row);
       if (seen.has(row.key)) continue;
       seen.add(row.key); out.push(row);
@@ -1289,15 +1295,19 @@
     return out.sort((a, b) => b.at - a.at);
   }
   // Add (or refresh) a row; it moves to the front. Oldest entries go when the list is over either cap.
+  // A row without a video property keeps the video already attached to that song; video: null removes it.
   function lyricsCachePut(list, row, now = Date.now(), max = LYRICS_CACHE_MAX, chars = LYRICS_CACHE_CHARS) {
     const [e] = lyricsCacheClean([{ ...row, at: now }]);
     const rest = lyricsCacheClean(list);
     if (!e) return rest;
+    if (row.video === undefined) { const had = rest.find(r => r.key === e.key); if (had) e.video = had.video; }
     const out = [e, ...rest.filter(r => r.key !== e.key)];
     let total = 0, n = 0;
     for (; n < out.length && n < max; n++) { total += out[n].text.length; if (n > 0 && total > chars) break; }
     return out.slice(0, Math.max(1, n));
   }
+  // Attach a video to a saved song (null removes it), leaving the list's order alone. Unknown keys change nothing.
+  const lyricsCacheVideo = (list, key, video) => lyricsCacheClean(list).map(r => (r.key === key ? { ...r, video: videoClean(video) } : r));
   const lyricsCacheDrop = (list, key) => lyricsCacheClean(list).filter(r => r.key !== key);
   const lyricsCacheGet = (list, row) => lyricsCacheClean(list).find(r => r.key === lyricsKey(row)) || null;
   // Entries whose title, artist or album hold every word typed (accents and case ignored); all of them for an empty query.
@@ -1321,7 +1331,7 @@
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
-    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, ownSongMissing,
+    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
