@@ -3325,6 +3325,10 @@
       const ta = $('sg-lyrics');
       try { ta.value = localStorage.getItem(SING_KEY) || ''; } catch (e) {}
       ta.addEventListener('input', () => { try { localStorage.setItem(SING_KEY, ta.value); } catch (e) {} this.parse(); });
+      $('sg-find').addEventListener('submit', (e) => { e.preventDefault(); this.search(); });
+      $('sg-results').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-k]'); if (b) this.pick(+b.dataset.k);
+      });
       $('sg-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) this.load(f); e.target.value = ''; });
       $('sg-track-clear').addEventListener('click', () => this.unload());
       $('sg-start').addEventListener('click', () => this.start());
@@ -3344,6 +3348,52 @@
         e.preventDefault(); this.tap();
       });
       this.parse();
+    },
+    // Lyrics search on LRCLIB. Only the typed query leaves the device; manual paste always works.
+    found: [], seq: 0, ctl: null,
+    async search() {
+      const q = $('sg-q').value, url = D.lyricsSearchUrl(q), msg = $('sg-find-msg'), list = $('sg-results'), go = $('sg-find-go');
+      if (!url) { msg.textContent = 'Type an artist and a song title first.'; $('sg-q').focus(); return; }
+      if (this.ctl) this.ctl.abort();
+      const seq = ++this.seq, ctl = this.ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 12000);
+      msg.textContent = 'Searching LRCLIB…'; go.disabled = true; list.hidden = true; list.innerHTML = '';
+      let rows = null, why = '';
+      try {
+        const r = await fetch(url, { signal: ctl.signal, headers: { Accept: 'application/json' }, credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (r.status === 429) why = 'The lyrics service is busy right now. Wait a minute and search again, or paste the lyrics.';
+        else if (!r.ok) why = `The lyrics service answered with an error (${r.status}). Try again later, or paste the lyrics.`;
+        else rows = D.lyricsResults(await r.json());
+      } catch (e) {
+        if (seq !== this.seq) return; // a newer search replaced this one
+        why = navigator.onLine === false ? 'You seem to be offline. Paste the lyrics instead, or search again once you are connected.'
+          : e && e.name === 'AbortError' ? 'The lyrics service took too long to answer. Try again, or paste the lyrics.'
+          : "Couldn't reach the lyrics service. Check your connection and try again, or paste the lyrics.";
+      } finally { clearTimeout(timer); }
+      if (seq !== this.seq) return;
+      go.disabled = false; this.ctl = null;
+      if (!rows) { msg.textContent = why; return; }
+      this.found = rows;
+      if (!rows.length) { msg.textContent = `No lyrics found for "${q.trim()}". Try the artist and title spelled another way, or paste them.`; return; }
+      const mmss = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      msg.textContent = `${rows.length} result${rows.length > 1 ? 's' : ''}. Pick one to load its lyrics${rows.some(r => r.timed) ? '; timed ones scroll by themselves' : ''}.`;
+      list.innerHTML = rows.map((r, k) => `<li><button type="button" data-k="${k}"><span class="t">${escapeHtml(r.title)}</span>`
+        + `<span class="a">${escapeHtml([r.artist, r.album, r.duration ? mmss(r.duration) : ''].filter(Boolean).join(' · '))}</span>`
+        + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button></li>`).join('');
+      list.hidden = false;
+    },
+    pick(k) {
+      const r = this.found[k]; if (!r) return;
+      const ta = $('sg-lyrics'), prev = ta.value, msg = $('sg-find-msg');
+      ta.value = r.text; ta.dispatchEvent(new Event('input'));
+      $('sg-results').hidden = true;
+      let note = `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''}.`;
+      if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
+        note += ` Your song file is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
+      msg.innerHTML = escapeHtml(note) + (prev.trim() && prev !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '')
+        + ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-more">Other results</button>';
+      const undo = $('sg-undo');
+      if (undo) undo.addEventListener('click', () => { ta.value = prev; ta.dispatchEvent(new Event('input')); msg.textContent = 'Your earlier lyrics are back.'; $('sg-results').hidden = false; });
+      $('sg-more').addEventListener('click', () => { $('sg-results').hidden = false; $('sg-more').remove(); });
     },
     parse() {
       this.lyr = D.parseLyrics($('sg-lyrics').value);

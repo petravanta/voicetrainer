@@ -61,5 +61,23 @@ check(D.hzToNote(sum[0].lo) === 'G3' && D.hzToNote(sum[0].hi) === 'C4', 'bright 
 check(D.hzToNote(sum[1].lo) === 'C3' && D.hzToNote(sum[1].hi) === 'E3', 'dark line range C3 to E3');
 check(sum[2].f0 === null && sum[2].res === null, 'a line with no frames has no summary');
 
+// lyrics search (LRCLIB): request URL and turning a made-up response into the result list (no network here)
+check(D.lyricsSearchUrl('  Some  Artist & Song ') === 'https://lrclib.net/api/search?q=Some%20Artist%20%26%20Song', 'search URL sends only the tidied, encoded query');
+check(D.lyricsSearchUrl('   ') === null, 'an empty query sends nothing');
+const found = D.lyricsResults([
+  { id: 1, trackName: 'Made Up Song', artistName: 'Nobody', albumName: 'Single', duration: 201.7, instrumental: false, plainLyrics: 'One\nTwo', syncedLyrics: null },
+  { id: 2, trackName: 'Other Tune', artistName: 'Somebody', duration: 180, plainLyrics: 'La la', syncedLyrics: null },
+  { id: 3, trackName: 'made up song', artistName: 'nobody', albumName: 'Album', duration: 203, plainLyrics: 'One\nTwo', syncedLyrics: '[00:05.00]One\n[00:09.50]Two' },
+  { id: 4, trackName: 'Quiet Bit', artistName: 'Nobody', duration: 60, instrumental: true, plainLyrics: null, syncedLyrics: null },
+  { id: 5, trackName: 'Empty', artistName: 'Nobody', duration: 60, plainLyrics: '  ', syncedLyrics: null },
+  null, 'junk',
+]);
+check(found.length === 2, `two songs listed: duplicates merged, instrumental and empty dropped (got ${found.length})`);
+check(found[0].timed && found[0].id === 3 && D.parseLyrics(found[0].text).lines.length === 2, 'a song with a timed copy loads the timed lyrics, in the first row');
+check(found[0].duration === 203 && found[0].album === 'Album', 'the row shows the timed copy\'s album and length');
+check(!found[1].timed && found[1].text === 'La la', 'a song with plain lyrics only loads them');
+check(D.lyricsResults({ message: 'error' }).length === 0 && D.lyricsResults(null).length === 0, 'an error body gives no results');
+check(D.lyricsResults(Array.from({ length: 20 }, (_, i) => ({ trackName: 'S' + i, artistName: 'A', plainLyrics: 'x' }))).length === 8, 'at most 8 results');
+
 console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
 process.exit(fails ? 1 : 0);
