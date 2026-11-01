@@ -696,6 +696,10 @@ a { color: var(--accent); }
 .sg-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 4px; font-size: clamp(1.05rem, 3.6vw, 1.45rem); line-height: 1.35; color: var(--faint); transition: color 0.2s; }
 .sg-lines li.past { color: var(--muted); }
 .sg-lines li.now { color: var(--ink); font-weight: 600; }
+/* Follow my singing: a thin bar under the current line fills as its syllables are heard */
+.sg-lines.following li.now .sg-t { background: linear-gradient(var(--accent), var(--accent)) 0 100% / calc(var(--sgp, 0) * 100%) 2px no-repeat; transition: background-size 0.15s; }
+@media (prefers-reduced-motion: reduce) { .sg-lines.following li.now .sg-t { transition: none; } }
+#sg-follow-btn[aria-pressed="true"] { border-color: var(--accent); }
 .sg-lines li.gap { min-height: 1.6em; }
 .sg-lines li.gap::before { content: "♪"; color: var(--faint); }
 .sg-badge { font-family: var(--f-mono); font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
