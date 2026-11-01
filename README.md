@@ -6,7 +6,7 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 
 - **Readings**: read a prepared passage aloud; press Finish for a result card (resonance, /s/ brightness, pitch, breathiness, change since last time) and the weakest vowels to practise. **Your vowels** maps every vowel you held steadily on the F1/F2 vowel chart against the typical masculine and feminine values, with its own score and the words it was heard in (consonants are left out). **Focus spots** pick the few short bits of the passage where getting to your goal gains the most (how far each word was from the goal, added up over the phrase); **Practise** opens just that bit in the reader, scores every try against the reading (a bar per try for how far it is from the goal, each word's number in the reading next to the latest try, and a plain-words verdict on which words reached the goal and which are still off), and saves the tries in Practice progress. The History panel lists the spots that keep coming up over your last five readings. Each reading is saved with one trend per passage; readings under 70% of the text are kept as partial and left out of the trend.
 - **Freestyle**: every live dial (resonance meter, vowel space, spectrogram, vocal tract, pitch), and a vowel map of the session that fills in as you talk. Nothing is saved. On a phone the dials sit side by side and you swipe between them.
-- **Sing along**: play a song anywhere (Spotify, YouTube, a CD) with headphones on, or load a song file from your device, and sing. Paste the lyrics as plain text (press Next line or the space bar as you go) or as timed LRC lyrics (they scroll by themselves: with a song file they follow it exactly, otherwise press Next line as the first line begins, then nudge by half a second if they drift). You see the note you're singing, your resonance and a pitch trace coloured by resonance; each line gets its resonance and range as you finish it, and Finish shows a summary per line. Nothing is saved. Music from speakers mixes into the microphone, so use headphones; with a song file there's an echo cancellation option for speakers. Pitch is read up to about 500 Hz (B4). The app can't hook into Spotify itself: browsers can't capture Spotify's audio, and its API has no lyrics.
+- **Sing along**: play a song anywhere (Spotify, YouTube, a CD) with headphones on, or load a song file from your device, and sing. Search for the lyrics by artist and title (from [LRCLIB](https://lrclib.net), a free third-party lyrics library: only what you type is sent there, and timed versions are loaded when it has them), or paste them as plain text (press Next line or the space bar as you go) or as timed LRC lyrics (they scroll by themselves: with a song file they follow it exactly, otherwise press Next line as the first line begins, then nudge by half a second if they drift). You see the note you're singing, your resonance and a pitch trace coloured by resonance; each line gets its resonance and range as you finish it, and Finish shows a summary per line. Nothing is saved. Music from speakers mixes into the microphone, so use headphones; with a song file there's an echo cancellation option for speakers. Pitch is read up to about 500 Hz (B4). The app can't hook into Spotify itself: browsers can't capture Spotify's audio, and its API has no lyrics.
 - **Practice**: one exercise at a time with the live coach. Every finished exercise is saved, with last, best and a trend line per exercise.
 
 Phones get a tab bar along the bottom; the screen stays awake while the microphone runs.
@@ -33,7 +33,7 @@ Readings, practice history, settings and your own texts live in one file (`Voice
 - **Reading practice**: the reader behind Readings, with the highlight following your voice, a single-line focus track, steady-pace and tap modes, and your own texts.
 - **Demo voice settings**: voice type, pitch, resonance and brightness for the synthetic demo voice; type, pitch and speed for the reading voice.
 
-Everything runs in the browser; no audio leaves your machine (except the optional Show words recognition noted above).
+Everything runs in the browser; no audio leaves your machine (except the optional Show words recognition noted above). The Sing along lyrics search sends only the typed artist and title to LRCLIB; no lyrics are bundled with the app.
 
 **Try it: https://petravanta.github.io/voicetrainer/** (allow microphone access when asked)
 
@@ -52,7 +52,7 @@ node test/dsp.test.js       # pitch/formant/scoring checks on synthetic voices
 node test/examples.test.js  # every reference example scores on target
 node test/coach.test.js     # live coaching cues point the right way
 node test/reading.test.js   # syllable counting and tracking for reading along
-node test/sing.test.js      # lyrics parsing (plain and LRC) and the per-line sing-along summary
+node test/sing.test.js      # lyrics parsing (plain and LRC), lyrics search results and the per-line sing-along summary
 ```
 
 ## Extending the app

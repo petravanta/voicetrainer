@@ -990,13 +990,41 @@
     });
   }
 
+  // Lyrics search (LRCLIB, lrclib.net: free, open, no key, CORS enabled). Only the typed query is sent.
+  // lyricsSearchUrl builds the request; lyricsResults turns its JSON into a short list for the Sing tab:
+  // one row per title and artist in the service's order, using a timed (LRC) version when any copy has one,
+  // and dropping instrumentals and records without lyrics.
+  const LYRICS_API = 'https://lrclib.net/api/search';
+  function lyricsSearchUrl(query, base = LYRICS_API) {
+    const q = String(query || '').replace(/\s+/g, ' ').trim();
+    return q ? `${base}?q=${encodeURIComponent(q)}` : null;
+  }
+  function lyricsResults(json, max = 8) {
+    if (!Array.isArray(json)) return [];
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const out = [], byKey = new Map();
+    for (const r of json) {
+      if (!r || typeof r !== 'object' || r.instrumental) continue;
+      const synced = str(r.syncedLyrics), plain = str(r.plainLyrics);
+      if (!synced && !plain) continue;
+      const title = str(r.trackName || r.name), artist = str(r.artistName);
+      const duration = Number.isFinite(+r.duration) && +r.duration > 0 ? Math.round(+r.duration) : null;
+      const timed = !!synced && parseLyrics(synced).timed;
+      const row = { id: r.id, title: title || 'Untitled', artist, album: str(r.albumName), duration, timed, text: timed ? synced : (plain || synced) };
+      const key = `${title.toLowerCase()}|${artist.toLowerCase()}`, have = byKey.get(key);
+      if (!have) { byKey.set(key, row); out.push(row); }
+      else if (timed && !have.timed) Object.assign(have, row); // same song, but this copy has timings
+    }
+    return out.slice(0, max);
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     yin, lpc, polyRoots, formants, fitVowel, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
-    parseLyrics, lyricLineAt, singSummary,
+    parseLyrics, lyricLineAt, singSummary, lyricsSearchUrl, lyricsResults, LYRICS_API,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

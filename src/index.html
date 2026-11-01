@@ -270,9 +270,18 @@
 
   <section class="sing" id="sing" data-for="sing" aria-labelledby="h-sing">
     <div class="section-head"><h2 id="h-sing">Sing along</h2><span class="muted small">Not saved. Just for fun and feedback.</span></div>
-    <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD) and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with the lyrics you paste here. At the end you get each line's resonance and range.</p>
+    <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD) and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with lyrics you find or paste here. At the end you get each line's resonance and range.</p>
     <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or loading the song file below, avoids that.</p>
     <div class="panel sg-setup" id="sg-setup">
+      <div class="sg-find">
+        <form class="sg-find-row" id="sg-find" role="search">
+          <label class="reader-field"><span>Find lyrics</span><input type="search" id="sg-q" placeholder="Artist and song title" autocomplete="off" enterkeyhint="search" maxlength="200"></label>
+          <button type="submit" class="btn" id="sg-find-go">Search</button>
+        </form>
+        <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a>, a free community lyrics library run by a third party. Searching sends what you type there; your voice and everything else stay on this device. You can always paste lyrics yourself instead.</p>
+        <p class="vd-note" id="sg-find-msg" role="status"></p>
+        <ul class="sg-results" id="sg-results" hidden></ul>
+      </div>
       <label class="reader-field"><span>Lyrics</span><textarea id="sg-lyrics" rows="9" spellcheck="false" placeholder="Paste the lyrics here, one line per line.&#10;&#10;Timed lyrics in LRC format scroll by themselves:&#10;[00:12.40] First line of the song&#10;[00:16.10] Second line"></textarea></label>
       <p class="vd-note" id="sg-parse" role="status"></p>
       <div class="sg-track">
