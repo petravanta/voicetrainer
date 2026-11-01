@@ -1279,6 +1279,10 @@
     return all.filter(r => { const hay = fold(`${r.title} ${r.artist} ${r.album}`); return words.every(w => hay.includes(w)); });
   }
 
+  // Lyrics the user types or pastes ("New song") need a song name and an artist before they are used or saved.
+  // Returns the missing fields, in form order: [] when the song is ready.
+  const ownSongMissing = (s) => ['title', 'artist'].filter(k => !String((s && s[k]) || '').trim());
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
@@ -1287,7 +1291,7 @@
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
-    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind,
+    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, ownSongMissing,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
