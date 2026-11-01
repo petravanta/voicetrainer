@@ -196,6 +196,24 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   const own = D.lyricsCachePut(saved, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La la' }, 3000);
   check(own[0].src === 'mine' && own[0].title === 'Mine' && own[0].artist === 'Me' && D.lyricsCacheFind(own, 'me mine').length === 1, 'own songs keep their name and artist in Your songs');
 
+  // sorting Your songs, and last-used times
+  const lib = [
+    { src: 'mine', title: 'zebra Song', artist: 'The Beatles', text: 'a', at: 300 },
+    { src: 'lrclib', title: 'Song 10', artist: 'ABBA', text: 'b', at: 100 },
+    { src: 'lrclib', title: 'Song 9', artist: 'abba', text: 'c', at: 200 },
+    { src: 'lrclib', title: 'Ánimo', artist: 'Café Tacvba', text: 'd' },
+    { src: 'lrclib', title: 'Old', artist: 'Zed', text: 'e' },
+  ];
+  check(D.lyricsCacheSort(lib, 'used').map(r => r.text).join('') === 'acbde', 'sort by last use: newest first, songs without a time last in saved order');
+  check(D.lyricsCacheSort(lib, 'name').map(r => r.title).join('|') === 'Ánimo|Old|Song 9|Song 10|zebra Song', 'sort by name: case and accents ignored, numbers by value');
+  check(D.lyricsCacheSort(lib, 'artist').map(r => r.text).join('') === 'cbade', 'sort by artist (ignoring a leading The), then by name');
+  check(D.lyricsCacheSort(lib, 'bogus').map(r => r.text).join('') === 'acbde', 'an unknown sort falls back to last use');
+  const touched = D.lyricsCacheTouch(lib, D.lyricsKey(lib[4]), 999);
+  check(touched[0].title === 'Old' && touched[0].at === 999 && touched.length === 5 && D.lyricsCacheTouch(lib, 'nope', 999)[0].text === 'a', 'using a song marks it used now; unknown keys change nothing');
+  const noon = new Date(2026, 10, 1, 12).getTime(), dayMs = 864e5;
+  check(D.usedAgo(noon - 3600e3, noon) === 'today' && D.usedAgo(noon - dayMs, noon) === 'yesterday' && D.usedAgo(noon - 3 * dayMs, noon) === '3 days ago'
+    && D.usedAgo(noon - 20 * dayMs, noon) === '2 weeks ago' && D.usedAgo(0, noon) === '' && /Aug|8/.test(D.usedAgo(noon - 80 * dayMs, noon)), 'last used, in words');
+
   // attached videos live in the song's entry in Your songs
   const vid = { id: 'dQw4w9WgXcQ', start: 42, offset: 1.234 };
   let withVid = D.lyricsCacheVideo(own, own[0].key, vid);
