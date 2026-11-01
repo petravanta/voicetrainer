@@ -672,6 +672,9 @@ a { color: var(--accent); }
 .sg-saved-head h3 { margin: 0; }
 .sg-saved-n { font-weight: 400; letter-spacing: 0; text-transform: none; }
 .sg-saved-list { max-height: 16rem; }
+.sg-sort { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.sg-sort[hidden] { display: none; }
+.sg-sort select { font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-height: 36px; }
 .sg-saved-foot { display: flex; justify-content: flex-end; }
 .sg-saved-foot:has(> [hidden]) { display: none; }
 .sg-song { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }

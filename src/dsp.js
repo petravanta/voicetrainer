@@ -1317,6 +1317,35 @@
   const lyricsCacheVideo = (list, key, video) => lyricsCacheClean(list).map(r => (r.key === key ? { ...r, video: videoClean(video) } : r));
   const lyricsCacheDrop = (list, key) => lyricsCacheClean(list).filter(r => r.key !== key);
   const lyricsCacheGet = (list, row) => lyricsCacheClean(list).find(r => r.key === lyricsKey(row)) || null;
+  // Mark a saved song as used now (opened, or sung), leaving everything else alone. Unknown keys change nothing.
+  const lyricsCacheTouch = (list, key, now = Date.now()) => lyricsCacheClean(lyricsCacheClean(list).map(r => (r.key === key ? { ...r, at: now } : r)));
+  // When a saved song was last used, in words: 'today', 'yesterday', '3 days ago', '2 weeks ago', or a date; '' when unknown.
+  function usedAgo(at, now = Date.now()) {
+    if (!(at > 0)) return '';
+    const day = (t) => { const d = new Date(t); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5; };
+    const n = Math.max(0, Math.round(day(now) - day(at)));
+    if (n === 0) return 'today';
+    if (n === 1) return 'yesterday';
+    if (n < 14) return `${n} days ago`;
+    if (n < 56) return `${Math.floor(n / 7)} weeks ago`;
+    const d = new Date(at);
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date(now).getFullYear() ? { year: 'numeric' } : {}) });
+  }
+  // Your songs in display order: 'used' = last used first (the stored order), 'name' = by song name, 'artist' = by artist,
+  // then song name. Names compare without case or accents, numbers by value, and ignoring a leading "The " or "A ".
+  // Songs saved before last-used times were kept (at 0) count as the oldest, in their saved order.
+  const LYRICS_SORTS = ['used', 'name', 'artist'];
+  function lyricsCacheSort(list, by) {
+    const all = lyricsCacheClean(list);
+    if (by !== 'name' && by !== 'artist') return all;
+    const strip = (s) => String(s || '').trim().replace(/^(the|a|an)\s+(?=\S)/i, '');
+    const cmp = (a, b) => strip(a).localeCompare(strip(b), undefined, { sensitivity: 'base', numeric: true });
+    return all.map((r, i) => ({ r, i })).sort((x, y) => {
+      const a = x.r, b = y.r;
+      const c = by === 'artist' ? (cmp(a.artist, b.artist) || cmp(a.title, b.title)) : (cmp(a.title, b.title) || cmp(a.artist, b.artist));
+      return c || x.i - y.i;
+    }).map(o => o.r);
+  }
   // Entries whose title, artist or album hold every word typed (accents and case ignored); all of them for an empty query.
   function lyricsCacheFind(list, query) {
     const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -1338,7 +1367,7 @@
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
-    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, videoClean, ownSongMissing,
+    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
