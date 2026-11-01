@@ -3398,7 +3398,7 @@
   // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
   // Nothing is saved; the summary at the end is for this song only.
   const SING_SAVED_KEY = 'vt.sing.saved'; // lyrics loaded from a search, kept for reuse (see D.lyricsCachePut)
-  const SING_KEY = 'vt.sing.lyrics', SING_SONG_KEY = 'vt.sing.song', SING_FOLLOW_KEY = 'vt.sing.follow', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
+  const SING_KEY = 'vt.sing.lyrics', SING_SONG_KEY = 'vt.sing.song', SING_FOLLOW_KEY = 'vt.sing.follow', SING_SORT_KEY = 'vt.sing.sort', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
   const Sing = {
     on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
     audio: null, url: null, trackName: '', rec: null, recKey: null, backKeys: new Set(), started: false, base: 0, at: 0, offset: 0, t0: 0,
@@ -3418,6 +3418,12 @@
         const b = e.target.closest('button[data-s]'); if (b) this.useSaved(+b.dataset.s);
       });
       $('sg-saved-clear').addEventListener('click', () => this.forgetAll());
+      let sort = 'used'; try { sort = localStorage.getItem(SING_SORT_KEY) || 'used'; } catch (e) {}
+      $('sg-sort').value = D.LYRICS_SORTS.includes(sort) ? sort : 'used';
+      $('sg-sort').addEventListener('change', (e) => {
+        try { if (e.target.value === 'used') localStorage.removeItem(SING_SORT_KEY); else localStorage.setItem(SING_SORT_KEY, e.target.value); } catch (err) {}
+        this.renderSaved();
+      });
       $('sg-results').addEventListener('click', (e) => {
         const b = e.target.closest('button[data-k]'); if (b) this.pick(+b.dataset.k);
       });
@@ -3559,20 +3565,22 @@
     savedEntry(key) { return key ? this.savedList().find(r => r.key === key) || null : null; },
     remember(r) { if (r && r.text) this.storeSaved(D.lyricsCachePut(this.savedList(), r)); this.renderSaved(); },
     renderSaved() {
-      const all = this.savedList(), q = $('sg-q').value, shown = this.shown = D.lyricsCacheFind(all, q);
+      const all = this.savedList(), q = $('sg-q').value, by = $('sg-sort').value;
+      const shown = this.shown = D.lyricsCacheSort(D.lyricsCacheFind(all, q), by), now = Date.now();
       const list = $('sg-saved-list'), msg = $('sg-saved-msg'), cur = this.song && this.song.key;
       $('sg-saved-clear').hidden = !all.length;
+      $('sg-sort-wrap').hidden = all.length < 2;
       $('sg-saved-n').textContent = !all.length ? '' : shown.length === all.length ? `(${all.length})` : `(${shown.length} of ${all.length} match your search)`;
       list.innerHTML = shown.map((r, k) => {
         const on = !!cur && r.key === cur;
         return `<li><button type="button" data-s="${k}"${on ? ' class="on" aria-current="true"' : ''}><span class="t">${escapeHtml(r.title)}</span>`
-          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), r.video ? 'video attached' : this.backKeys.has(r.key) ? 'song file' : '', on ? 'loaded now' : ''].filter(Boolean).join(' · '))}</span>`
+          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), r.video ? 'video attached' : this.backKeys.has(r.key) ? 'song file' : '', on ? 'loaded now' : r.at ? ('used ' + D.usedAgo(r.at, now)).replace(/ /g, '\u00a0') : ''].filter(Boolean).join(' · '))}</span>`
           + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button>`
           + `<button type="button" class="sg-x" data-x="${k}" title="Remove from your songs" aria-label="Remove ${escapeHtml(r.title)}${r.artist ? ' by ' + escapeHtml(r.artist) : ''} from your songs">×</button></li>`;
       }).join('');
       list.hidden = !shown.length;
       if (msg.dataset.keep) return;
-      msg.textContent = !all.length ? 'No songs yet. Search for a song, or tap New song to type or paste your own. Songs are kept here on this device, most recent first, so you can pick them again with one tap.'
+      msg.textContent = !all.length ? 'No songs yet. Search for a song, or tap New song to type or paste your own. Songs are kept here on this device, so you can pick them again with one tap.'
         : !shown.length ? 'None of your songs match the search box; search to find more.'
         : 'Tap a song to load its lyrics; × removes it.';
     },
@@ -3586,7 +3594,7 @@
       const r = this.shown[k]; if (!r) return;
       delete $('sg-saved-msg').dataset.keep;
       this.apply(r, `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''} from your songs.`);
-      this.remember(r); // most recently used moves to the top
+      this.remember(r); // marks it used now (the top of the list when sorted by last use)
     },
     forget(k) {
       const r = this.shown[k]; if (!r) return;
@@ -3969,6 +3977,7 @@
     },
     async start() {
       if (!this.saveOwn(true)) return; // own lyrics need a name and an artist first
+      if (this.song && this.savedEntry(this.song.key)) { this.storeSaved(D.lyricsCacheTouch(this.savedList(), this.song.key)); this.renderSaved(); } // singing counts as using it
       this.parse();
       await startMic({ aec: !!this.audio && $('sg-aec').checked });
       if (state.running !== 'mic') return; // no microphone: startMic has said why
