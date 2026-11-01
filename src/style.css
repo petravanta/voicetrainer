@@ -511,7 +511,7 @@ body[data-mode="readings"]:not(.reading-full) .sourcebar { display: none; }
 
 /* phones: modes in a bar along the bottom, Freestyle dials side by side to swipe through */
 @media (max-width: 860px) {
-  nav.modes { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; padding: 0 max(4px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(4px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
+  nav.modes { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 0 max(4px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(4px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); overflow: visible; }
   nav.modes button { flex-direction: column; gap: 3px; padding: 8px 4px 9px; font-size: 12px; border-bottom: 0; border-top: 3px solid transparent; }
   nav.modes button[aria-selected="true"] { border-top-color: var(--accent); color: var(--accent); }
   nav.modes svg { width: 20px; height: 20px; }
@@ -640,3 +640,60 @@ a { color: var(--accent); }
 .vm-row .vm-words { grid-area: words; }
 .vm-row .vm-words:empty { display: none; }
 @media (max-width: 560px) { .vm-row { grid-template-columns: 5.5em minmax(0, 1fr) 2.4em; } }
+
+/* sing along: lyrics with live pitch and resonance */
+.sing { display: grid; gap: 14px; }
+.sing .section-head { margin-bottom: 0; }
+.sg-lead, .sg-bleed { margin: 0; }
+.sg-setup { display: grid; gap: 12px; }
+.sg-setup #sg-parse { margin: 0; }
+.sg-track { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.sg-track #sg-track-name { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
+.sg-check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.sg-check input { margin-top: 4px; flex: none; }
+.sg-stage { display: grid; gap: 12px; }
+.sg-hud { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sg-stat { display: grid; gap: 2px; align-content: start; min-width: 0; }
+.sg-k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.sg-stat b { font-family: var(--f-mono); font-weight: 500; font-size: clamp(1.6rem, 6vw, 2.6rem); line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-stat small { font-family: var(--f-mono); font-size: 12px; }
+.sg-meter { position: relative; display: block; height: 8px; border-radius: 4px; margin-top: 4px; background: linear-gradient(90deg, var(--masc), color-mix(in srgb, var(--masc) 50%, var(--fem)) 50%, var(--fem)); }
+.sg-band { position: absolute; top: -3px; bottom: -3px; border: 1.5px dashed var(--ink); border-radius: 4px; opacity: 0.55; }
+.sg-needle { position: absolute; top: -5px; bottom: -5px; width: 3px; margin-left: -1.5px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--surface); transition: left 0.3s ease-out; }
+@media (prefers-reduced-motion: reduce) { .sg-needle { transition: none; } }
+.sg-fig { margin: 0; display: grid; gap: 6px; }
+.sg-fig canvas { width: 100%; display: block; border-radius: 6px; }
+.dot.masc-fill { background: var(--masc); }
+.sg-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sg-controls .btn-pair > .btn + .btn { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.sg-hint { margin: 0; }
+.sg-lines { position: relative; list-style: none; margin: 0; padding: min(18vh, 170px) 4px; height: min(46vh, 420px); overflow-y: auto; scrollbar-width: thin; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
+.sg-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 4px; font-size: clamp(1.05rem, 3.6vw, 1.45rem); line-height: 1.35; color: var(--faint); transition: color 0.2s; }
+.sg-lines li.past { color: var(--muted); }
+.sg-lines li.now { color: var(--ink); font-weight: 600; }
+.sg-lines li.gap { min-height: 1.6em; }
+.sg-lines li.gap::before { content: "♪"; color: var(--faint); }
+.sg-badge { font-family: var(--f-mono); font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.sg-badge b { font-weight: 600; }
+.sg-badge .in { color: var(--good); }
+@media (prefers-reduced-motion: reduce) { .sg-lines li { transition: none; } }
+.sg-result { display: grid; gap: 12px; border-color: var(--accent); }
+.sg-result h3, .sg-result p { margin: 0; }
+.sg-sum { list-style: none; margin: 0; padding: 0; display: grid; }
+.sg-sum li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 160px) 3em 8.5em; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.sg-sum .t { min-width: 0; overflow-wrap: anywhere; }
+.sg-sum .n { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.sg-sum .r { font-family: var(--f-mono); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.sg-sum .none { grid-column: 2 / -1; font-size: 13px; color: var(--faint); }
+.sg-bar { position: relative; height: 8px; border-radius: 4px; background: var(--sunk); }
+.sg-bar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--accent); }
+.sg-bar i.in { background: var(--good); }
+.sg-bar s { position: absolute; top: -3px; bottom: -3px; border: 1.5px dashed var(--ink); border-radius: 4px; opacity: 0.45; text-decoration: none; }
+@media (max-width: 600px) {
+  .sg-hud { gap: 8px; }
+  .sg-sum li { grid-template-columns: minmax(0, 1fr) 3em 7.5em; }
+  .sg-sum .t { grid-column: 1 / -1; }
+  .sg-sum .none { grid-column: 1 / -1; }
+}
+.sg-result .stat small { display: block; font-size: 12px; color: var(--muted); }
+.sg-result q { font-weight: 600; }
