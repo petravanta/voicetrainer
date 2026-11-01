@@ -93,6 +93,7 @@
     buildLut();
     clearSpec();
     drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
+    Sing.cols = null; Sing.draw();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
     if (state.drill && state.drill.def.type === 'embody') drawEmbody(state.drill);
   }
@@ -431,12 +432,12 @@
       buf = new Float32Array(analyser.fftSize);
     }
   }
-  async function startMic() {
+  async function startMic(opts = {}) {
     stop();
     try {
       ensureCtx();
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('no api'), { name: 'NoApi' });
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: !!opts.aec, noiseSuppression: false, autoGainControl: false } });
       node = ctx.createMediaStreamSource(stream);
       node.connect(analyser);
       begin('mic', 'Listening to your microphone');
@@ -624,6 +625,7 @@
     ensureLoop();
   }
   function stop() {
+    if (Sing.on) { take = null; Sing.finish(true); }
     const hadRun = !!state.running;
     if (take) { offerPlanFrom(take); take = null; }
     if (node) { try { node.onended = null; node.stop && node.stop(); } catch (e) {} try { node.disconnect(); } catch (e) {} node = null; }
@@ -689,7 +691,7 @@
     if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
     // While a reference example plays (and briefly after), show it but don't score it as the user.
     const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
-    const d = !gated && state.drill && !state.drill.result ? state.drill : null;
+    const d = !gated && state.drill && !state.drill.result && mode !== 'sing' ? state.drill : null; // an open exercise doesn't grade your singing
     const dd = exSrc && state.drill && state.drill.demoOn ? state.drill : null; // a demo is playing for this exercise
     // your own voice takes the panel back from the demo
     if (!gated && state.drill && state.drill.demoOn && (fr.kind === 'voiced' || fr.kind === 'fricative' || (fr.whisperF && state.drill.def.type === 'whisper'))) endDemoView(state.drill);
@@ -793,6 +795,7 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
+    if (Sing.on && !gated) Sing.frame(fr, frRes);
     if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
@@ -3309,9 +3312,248 @@
   }
 
   // ---------------- modes ----------------
+  // ---------------- sing along ----------------
+  // The music plays somewhere else (headphones) or from a song file loaded here; the microphone is
+  // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
+  // Nothing is saved; the summary at the end is for this song only.
+  const SING_KEY = 'vt.sing.lyrics', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
+  const Sing = {
+    on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
+    audio: null, url: null, trackName: '', started: false, base: 0, at: 0, offset: 0, t0: 0,
+    lastResAt: -1e9, cols: null, empty: false,
+    init() {
+      const ta = $('sg-lyrics');
+      try { ta.value = localStorage.getItem(SING_KEY) || ''; } catch (e) {}
+      ta.addEventListener('input', () => { try { localStorage.setItem(SING_KEY, ta.value); } catch (e) {} this.parse(); });
+      $('sg-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) this.load(f); e.target.value = ''; });
+      $('sg-track-clear').addEventListener('click', () => this.unload());
+      $('sg-start').addEventListener('click', () => this.start());
+      $('sg-tap').addEventListener('click', () => this.tap());
+      $('sg-back').addEventListener('click', () => this.nudge(-0.5));
+      $('sg-fwd').addEventListener('click', () => this.nudge(0.5));
+      $('sg-pause').addEventListener('click', () => this.pause(!this.paused));
+      $('sg-finish').addEventListener('click', () => this.finish());
+      $('sg-lines').addEventListener('click', (e) => { // tap a line to jump there
+        const li = e.target.closest('li[data-i]'); if (!li || !this.on) return;
+        const i = +li.dataset.i;
+        if (this.lyr.timed) this.setClock(this.lyr.lines[i].t + 0.02);
+        this.setLine(i);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (mode !== 'sing' || !this.on || (e.code !== 'Space' && e.key !== ' ') || e.target.closest('input, textarea, button, select, a')) return;
+        e.preventDefault(); this.tap();
+      });
+      this.parse();
+    },
+    parse() {
+      this.lyr = D.parseLyrics($('sg-lyrics').value);
+      const n = this.lyr.lines.filter(l => l.text).length, msg = $('sg-parse');
+      if (!n) msg.textContent = 'No lyrics yet. You can still sing without them and get your pitch and resonance for the whole song.';
+      else if (this.lyr.timed) {
+        const t = this.lyr.lines[0].t;
+        msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? 'They follow the song file.' : 'Press Next line when the first line begins; after that they scroll by themselves.');
+      } else msg.textContent = `${n} lines. Press Next line (or the space bar) as you reach each one.`;
+    },
+    load(file) {
+      this.unload();
+      this.url = URL.createObjectURL(file);
+      this.audio = new Audio(this.url);
+      this.audio.preload = 'auto';
+      this.audio.addEventListener('ended', () => { if (this.on) this.finish(); });
+      this.audio.addEventListener('error', () => { $('sg-track-name').textContent = `${file.name} can't be played by this browser. Try MP3, M4A or WAV.`; this.unload(true); });
+      this.trackName = file.name;
+      $('sg-track-name').textContent = file.name;
+      $('sg-track-clear').hidden = false; $('sg-aec-wrap').hidden = false;
+      $('sg-file-btn').textContent = 'Load another song';
+      this.parse();
+    },
+    unload(keepName) {
+      if (this.on) this.finish();
+      if (this.audio) { this.audio.pause(); this.audio.removeAttribute('src'); this.audio = null; }
+      if (this.url) { URL.revokeObjectURL(this.url); this.url = null; }
+      if (!keepName) $('sg-track-name').textContent = 'Optional. A song file on this device plays from here, and timed lyrics follow it exactly.';
+      $('sg-track-clear').hidden = true; $('sg-aec-wrap').hidden = true;
+      $('sg-file-btn').textContent = 'Load a song file';
+      this.parse();
+    },
+    // song time in seconds: the song file's own position, or a clock started by the first Next line
+    clock() {
+      if (this.audio) return this.audio.currentTime + this.offset;
+      if (!this.started) return null;
+      return this.paused ? this.base : this.base + (performance.now() - this.at) / 1000;
+    },
+    setClock(t) {
+      if (this.audio) this.offset = t - this.audio.currentTime;
+      else { this.base = t; this.at = performance.now(); this.started = true; }
+    },
+    async start() {
+      this.parse();
+      await startMic({ aec: !!this.audio && $('sg-aec').checked });
+      if (state.running !== 'mic') return; // no microphone: startMic has said why
+      take = null; // a song isn't a speech sample, so it doesn't feed the guided exercise
+      this.empty = !this.lyr.lines.length;
+      if (this.empty) this.lyr = { timed: false, lines: [{ t: null, text: 'Your singing' }] };
+      Object.assign(this, { on: true, paused: false, frames: [], trace: [], cur: -1, started: false, offset: 0, t0: performance.now(), lastResAt: -1e9 });
+      $('sg-lines').innerHTML = this.lyr.lines.map((l, i) => `<li data-i="${i}"${l.text ? '' : ' class="gap"'}><span class="sg-t">${escapeHtml(l.text)}</span><span class="sg-badge"></span></li>`).join('');
+      $('sg-setup').hidden = true; $('sg-result').hidden = true; $('sg-stage').hidden = false;
+      $('sg-nudge').hidden = !this.lyr.timed; $('sg-tap').hidden = this.empty;
+      $('sg-pause').textContent = 'Pause'; $('sg-pause').setAttribute('aria-pressed', 'false');
+      if (this.audio) { this.audio.currentTime = 0; try { await this.audio.play(); } catch (e) {} }
+      this.setLine(this.lyr.timed ? -1 : 0);
+      if (this.lyr.timed && this.audio) this.setLine(D.lyricLineAt(this.lyr.lines, this.clock()));
+      requestAnimationFrame(() => { this.draw(); this.paintHud(); });
+      $('sg-stage').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    },
+    hint() {
+      const h = $('sg-hint');
+      if (this.empty) h.textContent = 'Sing freely. Press Finish for your summary.';
+      else if (!this.lyr.timed) h.textContent = 'Press Next line (or the space bar) as you start each line. You can also tap a line.';
+      else if (!this.audio && !this.started) h.textContent = 'Start the song, then press Next line (or the space bar) as the first line begins. After that the lyrics scroll by themselves.';
+      else h.textContent = 'Lyrics drifting? Press Next line as a line begins, tap a line, or nudge them by half a second.';
+      const last = this.cur >= this.lyr.lines.length - 1;
+      $('sg-tap').disabled = last;
+    },
+    tap() {
+      if (!this.on || this.empty) return;
+      const next = this.cur + 1; if (next >= this.lyr.lines.length) return;
+      if (this.lyr.timed) this.setClock(this.lyr.lines[next].t + 0.02);
+      this.setLine(next);
+    },
+    nudge(s) { const t = this.clock(); if (t == null) return; this.setClock(Math.max(0, t + s)); this.follow(); },
+    pause(p) {
+      if (!this.on) return;
+      if (p) { if (this.audio) this.audio.pause(); else if (this.started) this.base = this.clock(); }
+      else if (this.audio) this.audio.play().catch(() => {});
+      else this.at = performance.now();
+      this.paused = p;
+      $('sg-pause').textContent = p ? 'Resume' : 'Pause'; $('sg-pause').setAttribute('aria-pressed', String(p));
+    },
+    follow() {
+      if (!this.lyr.timed) return;
+      const t = this.clock(); if (t == null) return;
+      const i = D.lyricLineAt(this.lyr.lines, t);
+      if (i !== this.cur) this.setLine(i);
+    },
+    setLine(i) {
+      const prev = this.cur; this.cur = i;
+      if (prev >= 0 && prev !== i) this.badge(prev);
+      const box = $('sg-lines'), lis = box.children;
+      for (let k = 0; k < lis.length; k++) {
+        lis[k].classList.toggle('past', k < i); lis[k].classList.toggle('now', k === i);
+        if (k === i) lis[k].setAttribute('aria-current', 'true'); else lis[k].removeAttribute('aria-current');
+      }
+      const li = lis[i], reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      box.scrollTo({ top: li ? li.offsetTop - box.clientHeight / 2 + li.offsetHeight / 2 : 0, behavior: reduce ? 'auto' : 'smooth' });
+      this.hint();
+    },
+    lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => ({ line: 0, f0: f.f0, res: f.res })), 1)[0]; },
+    badge(k) {
+      const li = $('sg-lines').children[k]; if (!li) return;
+      const s = this.lineSum(k), [lo, hi] = target(), bits = [];
+      if (s.res != null) bits.push(`<b class="${s.res >= lo && s.res <= hi ? 'in' : ''}">${Math.round(s.res)}</b> resonance`);
+      if (s.f0 != null) bits.push(`${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}`);
+      li.querySelector('.sg-badge').innerHTML = bits.join(' · ');
+    },
+    frame(fr, res) {
+      if (!this.on || this.paused) return;
+      this.follow();
+      const f0 = fr.kind === 'voiced' ? fr.f0 : 0, now = performance.now();
+      if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res });
+      this.trace.push({ t: now, f0, res });
+      while (this.trace.length && now - this.trace[0].t > SING_VIEW_MS + 500) this.trace.shift();
+      if (Number.isFinite(res)) this.lastResAt = now;
+      if (frameCount % 3 === 0) { this.paintHud(); this.draw(); }
+    },
+    paintHud() {
+      const now = performance.now(), recent = this.trace.filter(p => p.f0 > 0 && now - p.t < 300).map(p => p.f0);
+      if (recent.length >= 3) {
+        const f = D.median(recent), cents = Math.round(100 * (12 * Math.log2(f / 440) - Math.round(12 * Math.log2(f / 440))));
+        $('sg-note').textContent = D.hzToNote(f);
+        $('sg-hz').textContent = `${Math.round(f)} Hz · ${cents > 0 ? '+' : ''}${cents}¢`;
+      } else if (!this.trace.some(p => p.f0 > 0 && now - p.t < 800)) { $('sg-note').textContent = '--'; $('sg-hz').innerHTML = '&nbsp;'; }
+      const fresh = now - this.lastResAt < 2000, v = state.meter, nd = $('sg-needle');
+      $('sg-res').textContent = fresh && Number.isFinite(v) ? Math.round(v) : '--';
+      nd.hidden = !(fresh && Number.isFinite(v)); if (!nd.hidden) nd.style.left = clamp(v, 0, 100) + '%';
+      const [lo, hi] = target(), b = $('sg-band'); b.style.left = lo + '%'; b.style.width = (hi - lo) + '%';
+      $('sg-vowel').textContent = fresh ? ($('ro-vowel').textContent.split(' ')[0] || '--') : '--';
+      const t = this.clock();
+      $('sg-clock').textContent = this.lyr.timed ? (t == null ? 'waiting for the first line' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}${this.paused ? ' paused' : ''}`)
+        : this.empty ? (this.paused ? 'paused' : ' ') : `line ${Math.max(1, this.cur + 1)} of ${this.lyr.lines.length}${this.paused ? ', paused' : ''}`;
+    },
+    draw() {
+      const cv = $('cv-sing'); if (!cv || !C.ink || $('sg-stage').hidden) return;
+      fitCanvas(cv);
+      if (!this.cols) this.cols = { m: parseColor(C.masc), f: parseColor(C.fem) };
+      const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = 34 * dpr;
+      const L = Math.log(SING_HZ[1] / SING_HZ[0]), y = (f) => h - Math.log(f / SING_HZ[0]) / L * (h - 10 * dpr) - 5 * dpr;
+      g.clearRect(0, 0, w, h);
+      g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = 1;
+      for (let oct = 2; oct <= 5; oct++) for (const [semi, lab] of [[0, 'C'], [7, 'G']]) {
+        const f = 440 * Math.pow(2, (12 * (oct + 1) + semi - 69) / 12); if (f < SING_HZ[0] || f > SING_HZ[1]) continue;
+        g.strokeStyle = C.line; g.globalAlpha = semi ? 0.45 : 1;
+        g.beginPath(); g.moveTo(axisW, y(f)); g.lineTo(w, y(f)); g.stroke(); g.globalAlpha = 1;
+        if (!semi) { g.fillStyle = C.muted; g.fillText(lab + oct, axisW - 5 * dpr, y(f) + 4 * dpr); }
+      }
+      const now = performance.now(), sx = (w - axisW) / SING_VIEW_MS, { m, f: fm } = this.cols;
+      for (const p of this.trace) {
+        if (!p.f0) continue;
+        const x = w - (now - p.t) * sx; if (x < axisW) continue;
+        if (Number.isFinite(p.res)) { const u = clamp(p.res / 100, 0, 1); g.fillStyle = `rgb(${m.map((c, k) => Math.round(c + (fm[k] - c) * u)).join(',')})`; }
+        else g.fillStyle = C.ink;
+        g.beginPath(); g.arc(x, y(clamp(p.f0, SING_HZ[0], SING_HZ[1])), (Number.isFinite(p.res) ? 2.6 : 1.7) * dpr, 0, 7); g.fill();
+      }
+    },
+    finish(fromStop) {
+      if (!this.on) return;
+      if (this.cur >= 0) this.badge(this.cur);
+      this.on = false; this.paused = false;
+      if (this.audio) this.audio.pause();
+      take = null;
+      if (!fromStop && state.running === 'mic') stop();
+      this.result();
+      $('sg-stage').hidden = true; $('sg-setup').hidden = false;
+      if (this.empty) this.lyr = D.parseLyrics($('sg-lyrics').value);
+    },
+    result() {
+      const lines = this.lyr.lines, sum = D.singSummary(this.frames, lines.length), box = $('sg-result');
+      const res = this.frames.map(f => f.res).filter(Number.isFinite), f0 = this.frames.map(f => f.f0).filter(v => v > 0);
+      const [lo, hi] = target(), inT = (r) => r >= lo && r <= hi;
+      const secs = (performance.now() - this.t0) / 1000, sung = this.frames.length ? secs * f0.length / this.frames.length : 0;
+      if (f0.length < 18) {
+        box.innerHTML = `<h3>No singing heard</h3><p class="muted">The microphone didn't pick up enough voice to summarise. Check it's the right microphone and sing a little closer to it.</p><div class="btn-row"><button type="button" class="btn primary" data-sg="again">Try again</button></div>`;
+      } else {
+        const pLo = D.quantile(f0, 0.05), pHi = D.quantile(f0, 0.95), mRes = res.length >= 8 ? D.median(res) : null;
+        const scored = sum.filter(s => s.res != null && lines[s.line].text);
+        const worst = scored.slice().sort((a, b) => (state.goal === 'fem' ? a.res - b.res : b.res - a.res)).filter(s => !inT(s.res)).slice(0, 2);
+        const stat = (k, v, sub) => `<div class="stat"><b>${v}</b><span>${k}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+        const rows = this.empty ? '' : sum.map((s, i) => {
+          const l = lines[i]; if (!l.text) return '';
+          const bar = s.res != null ? `<span class="sg-bar"><s style="left:${lo}%;width:${hi - lo}%"></s><i class="${inT(s.res) ? 'in' : ''}" style="width:${clamp(s.res, 2, 100)}%"></i></span><span class="n">${Math.round(s.res)}</span>` : '';
+          const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '';
+          return `<li><span class="t">${escapeHtml(l.text)}</span>${bar || rng ? (bar || '<span></span><span></span>') + (rng || '<span></span>') : '<span class="none">not enough voice on this line</span>'}</li>`;
+        }).join('');
+        box.innerHTML = `<div class="section-head"><h3>${this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
+          <div class="stats">${stat('Resonance', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
+          ${stat('In your target', res.length >= 8 ? Math.round(100 * res.filter(inT).length / res.length) + '%' : '--', `band ${lo} to ${hi}`)}
+          ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
+          ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
+          ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a reading was inside your target band.</p>' : ''}
+          ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>0 masculine avg · 100 feminine avg</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
+          <p class="small muted">Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.</p>
+          <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
+      }
+      box.hidden = false;
+      box.querySelectorAll('[data-sg]').forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.sg === 'again') this.start(); else { box.hidden = true; $('sg-lyrics').focus(); }
+      }));
+      box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    },
+  };
+
   let mode = 'home';
   function setMode(m) {
-    if (!['home', 'readings', 'freestyle', 'practice', 'settings'].includes(m)) m = 'home';
+    if (!['home', 'readings', 'freestyle', 'practice', 'sing', 'settings'].includes(m)) m = 'home';
+    if (m !== 'sing' && Sing.on) Sing.finish();
     mode = m;
     document.body.dataset.mode = m;
     for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(m);
@@ -3909,9 +4151,10 @@
     new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
     let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); if (state.coach) renderCoach(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); Sing.draw(); if (state.coach) renderCoach(); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
     Reader.init();
+    Sing.init();
     Texts.sync();
     renderReadings(); renderPracticeHistory(); renderDrillGrid();
     setMode('home');
