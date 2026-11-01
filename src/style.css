@@ -179,14 +179,15 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .tabs button { border: 0; background: none; color: var(--muted); font-weight: 600; padding: 8px 12px 9px; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 .practice-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-.drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
-.drill { text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; display: grid; gap: 2px; }
+.drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; }
+/* tiles grow taller for long names; long words wrap (hyphenated where the browser can) and never spill out */
+.drill { min-width: 0; overflow: hidden; align-content: start; text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; display: grid; gap: 2px; }
 .drill:hover { border-color: var(--accent); }
 #btn-read[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .drill[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.drill .cue { font-family: var(--font-display); font-size: 1.2rem; font-weight: 500; line-height: 1.1; }
-.drill .sub { font-size: 0.8rem; color: var(--muted); }
-.drill .last { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); }
+.drill .cue { font-family: var(--font-display); font-size: clamp(0.95rem, 0.85rem + 0.3vw, 1.08rem); font-weight: 500; line-height: 1.15; overflow-wrap: anywhere; hyphens: auto; margin-bottom: 2px; }
+.drill .sub { font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
+.drill .last { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
 .drill-panel { padding: 16px 18px; display: grid; gap: 12px; }
 .drill-help { color: var(--muted); max-width: 60ch; }
 .drill-title { font-family: var(--font-display); font-size: 1.4rem; font-weight: 500; letter-spacing: -0.01em; }
