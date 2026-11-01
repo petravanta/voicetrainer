@@ -3409,7 +3409,7 @@
         else if (!failed.length) head = `No lyrics found for "${q.trim()}". Try the artist and title spelled another way.`;
         else head = `Couldn't get lyrics right now: ${res.tried.map(t => this.triedText(t)).join(', and ')}. These free services are sometimes overloaded; try again in a minute.`;
         const mine = D.lyricsCacheFind(this.savedList(), q).length;
-        if (mine) head += mine === 1 ? ' One of Your songs matches; it is listed above.' : ` ${mine} of Your songs match; they are listed above.`;
+        if (mine) head += mine === 1 ? ' One of Your songs matches; it is listed below.' : ` ${mine} of Your songs match; they are listed below.`;
         msg.innerHTML = escapeHtml(head) + this.webLink(q);
         return;
       }
@@ -3515,6 +3515,7 @@
       const msg = $('sg-find-msg'), prev = this.snap();
       this.song = this.songFrom(r); this.show(r.text);
       $('sg-results').hidden = true;
+      $('sg-song-h').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // the lyrics open at the bottom, under Your songs
       if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
         note += ` Your song file is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
       msg.innerHTML = escapeHtml(note) + (prev.text.trim() && prev.text !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '') + extra;
