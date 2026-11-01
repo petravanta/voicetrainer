@@ -1140,6 +1140,45 @@
     return text ? { text } : { outcome: 'notfound' };
   }
 
+  // Saved lyrics (Sing tab): lyrics loaded from a search are kept on this device, most recently used first,
+  // so a song can be sung again without searching (or while offline). The list is plain data; app.js stores it.
+  // Entry: { key, src, id, title, artist, album, duration, timed, text, at }. Capped by count and by total text size.
+  const LYRICS_CACHE_MAX = 40, LYRICS_CACHE_CHARS = 600000;
+  const lyricsKey = (r) => [r.src || '', String(r.artist || '').trim().toLowerCase(), String(r.title || '').trim().toLowerCase()].join('|');
+  function lyricsCacheClean(list) {
+    if (!Array.isArray(list)) return [];
+    const str = (v) => (typeof v === 'string' ? v : ''), seen = new Set(), out = [];
+    for (const e of list) {
+      if (!e || typeof e !== 'object' || !str(e.text).trim() || !str(e.title).trim()) continue;
+      const row = { key: '', src: str(e.src), id: e.id == null ? null : e.id, title: str(e.title), artist: str(e.artist), album: str(e.album),
+        duration: Number.isFinite(+e.duration) && +e.duration > 0 ? Math.round(+e.duration) : null, timed: !!e.timed, text: str(e.text), at: +e.at || 0 };
+      row.key = lyricsKey(row);
+      if (seen.has(row.key)) continue;
+      seen.add(row.key); out.push(row);
+    }
+    return out.sort((a, b) => b.at - a.at);
+  }
+  // Add (or refresh) a row; it moves to the front. Oldest entries go when the list is over either cap.
+  function lyricsCachePut(list, row, now = Date.now(), max = LYRICS_CACHE_MAX, chars = LYRICS_CACHE_CHARS) {
+    const [e] = lyricsCacheClean([{ ...row, at: now }]);
+    const rest = lyricsCacheClean(list);
+    if (!e) return rest;
+    const out = [e, ...rest.filter(r => r.key !== e.key)];
+    let total = 0, n = 0;
+    for (; n < out.length && n < max; n++) { total += out[n].text.length; if (n > 0 && total > chars) break; }
+    return out.slice(0, Math.max(1, n));
+  }
+  const lyricsCacheDrop = (list, key) => lyricsCacheClean(list).filter(r => r.key !== key);
+  const lyricsCacheGet = (list, row) => lyricsCacheClean(list).find(r => r.key === lyricsKey(row)) || null;
+  // Entries whose title, artist or album hold every word typed (accents and case ignored); all of them for an empty query.
+  function lyricsCacheFind(list, query) {
+    const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const words = fold(query).split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+    const all = lyricsCacheClean(list);
+    if (!words.length) return all;
+    return all.filter(r => { const hay = fold(`${r.title} ${r.artist} ${r.album}`); return words.every(w => hay.includes(w)); });
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
@@ -1148,6 +1187,7 @@
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
+    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
