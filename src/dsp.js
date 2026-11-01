@@ -1062,14 +1062,16 @@
   // Fetch one JSON document with a timeout. Never throws: the outcome says what happened.
   // 'busy' = the service is overloaded or briefly down (429, 5xx), worth one retry; 'timeout', 'offline'/'network'
   // when no answer came; 'notfound' for 404; 'error' for other answers; 'aborted' when the caller cancelled.
-  async function getJson(url, io, ms) {
+  async function getJson(url, io, ms, headers) {
     const ctl = new AbortController(), outer = io.signal;
     const stop = () => ctl.abort();
     if (outer) { if (outer.aborted) return { outcome: 'aborted' }; outer.addEventListener('abort', stop); }
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, ms);
     try {
-      const r = await io.fetch(url, { signal: ctl.signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const opts = { signal: ctl.signal, credentials: 'omit', referrerPolicy: 'no-referrer' };
+      if (headers) opts.headers = headers;
+      const r = await io.fetch(url, opts);
       const ra = r.headers && r.headers.get ? parseFloat(r.headers.get('Retry-After')) : NaN;
       if (r.status === 429 || r.status >= 500) return { outcome: 'busy', status: r.status, retryAfter: Number.isFinite(ra) ? ra : null };
       if (r.status === 404) return { outcome: 'notfound', status: 404 };
@@ -1087,16 +1089,22 @@
   }
   const RETRYABLE = new Set(['busy', 'timeout', 'network']);
   // One request with a single retry when the failure looks temporary (LRCLIB answers 503 with Retry-After: 1 when loaded).
-  async function getJsonRetry(url, io, ms) {
-    let res = await getJson(url, io, ms);
+  // A request with custom headers needs a CORS preflight; if it fails without any answer, the retry goes without them,
+  // so a blocked preflight can never cost the search.
+  async function getJsonRetry(url, io, ms, headers) {
+    let res = await getJson(url, io, ms, headers);
     if (!RETRYABLE.has(res.outcome)) return res;
     const wait = res.retryAfter != null ? Math.min(3000, Math.max(500, res.retryAfter * 1000)) : 1200;
     await (io.sleep || ((t) => new Promise(r => setTimeout(r, t))))(wait);
     if (io.signal && io.signal.aborted) return { outcome: 'aborted' };
-    const again = await getJson(url, io, ms);
+    const again = await getJson(url, io, ms, res.outcome === 'network' ? undefined : headers);
     return again.outcome === 'ok' || again.outcome === 'aborted' ? again : { ...again, retried: true };
   }
 
+  // LRCLIB asks apps to identify themselves. Browsers won't let a page set User-Agent, so this goes in the
+  // Lrclib-Client header, which LRCLIB's CORS setup allows (Access-Control-Allow-Headers). build.js stamps the version.
+  const APP_BUILD = /*BUILD*/'dev';
+  const LRCLIB_CLIENT = `VoiceTrainer ${APP_BUILD} (https://github.com/petravanta/voicetrainer)`;
   const LYRICS_SOURCES = {
     lrclib: { name: 'LRCLIB', site: 'https://lrclib.net', timed: true },
     ovh: { name: 'lyrics.ovh', site: 'https://lyrics.ovh', timed: false },
@@ -1109,7 +1117,7 @@
     const lrcUrl = lyricsSearchUrl(query);
     if (!lrcUrl) return { rows: [], source: null, tried };
     if (io.onStep) io.onStep('lrclib');
-    const a = await getJsonRetry(lrcUrl, io, ms);
+    const a = await getJsonRetry(lrcUrl, io, ms, { 'Lrclib-Client': LRCLIB_CLIENT });
     if (a.outcome === 'aborted') return { aborted: true };
     const lrcRows = a.outcome === 'ok' ? lyricsResults(a.json).map(r => ({ ...r, src: 'lrclib' })) : [];
     tried.push({ src: 'lrclib', outcome: a.outcome === 'ok' && !lrcRows.length ? 'empty' : a.outcome, status: a.status, count: lrcRows.length });
@@ -1139,7 +1147,7 @@
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lyricsSearchUrl, lyricsResults, LYRICS_API,
-    LYRICS_OVH, LYRICS_SOURCES, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, findLyrics, loadLyricsText,
+    LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

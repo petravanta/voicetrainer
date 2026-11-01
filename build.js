@@ -7,8 +7,12 @@ let page = src('index.html');
 const data = {};
 for (const n of ['texts', 'words', 'breath', 'control', 'whisper', 'embody', 'emotions', 'pron']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
 page = page.split('/*DATA*/').join(JSON.stringify(data).replace(/<\/script/gi, '<\\/script'));
+// Version stamp (date of the build and the commit), sent to LRCLIB in the Lrclib-Client header
+let sha = '';
+try { sha = require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch (e) { /* not a git checkout */ }
+const build = new Date().toISOString().slice(0, 10).replace(/-/g, '.') + (sha ? '+' + sha : '');
 for (const [mark, file] of [['/*STYLE*/', 'style.css'], ['/*DSP*/', 'dsp.js'], ['/*SYNTH*/', 'synth.js'], ['/*APP*/', 'app.js']]) {
-  page = page.split(mark).join(src(file).replace(/<\/script/gi, '<\\/script'));
+  page = page.split(mark).join(src(file).split("/*BUILD*/'dev'").join(JSON.stringify(build).replace(/"/g, "'")).replace(/<\/script/gi, '<\\/script'));
 }
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(__dirname, 'dist', 'artifact.html'), page);
