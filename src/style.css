@@ -691,6 +691,12 @@ a { color: var(--accent); }
 .sg-saved-list .sg-x { all: unset; box-sizing: border-box; cursor: pointer; display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 1.25rem; line-height: 1; }
 .sg-saved-list .sg-x:hover { border-color: var(--warn); color: var(--ink); }
 .sg-saved-list .sg-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sg-backing { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sg-backing h3 { margin: 0; }
+.sg-backing h3 small { font-weight: 400; font-size: 13px; }
+.sg-backing .vd-note { margin: 0; }
+.sg-video { width: 100%; max-width: 560px; aspect-ratio: 16 / 9; margin: 0 auto 12px; border-radius: 10px; overflow: hidden; background: #000; }
+.sg-video iframe { display: block; width: 100%; height: 100%; border: 0; }
 .sg-track { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .sg-track #sg-track-name { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
 .sg-check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }

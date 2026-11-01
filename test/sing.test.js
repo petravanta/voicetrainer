@@ -196,6 +196,14 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   const own = D.lyricsCachePut(saved, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La la' }, 3000);
   check(own[0].src === 'mine' && own[0].title === 'Mine' && own[0].artist === 'Me' && D.lyricsCacheFind(own, 'me mine').length === 1, 'own songs keep their name and artist in Your songs');
 
+  // backing tracks: YouTube links and the karaoke search
+  const ids = ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'youtu.be/dQw4w9WgXcQ?si=abc', 'https://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ',
+    'https://www.youtube.com/shorts/dQw4w9WgXcQ', 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=5', 'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=x', 'dQw4w9WgXcQ'];
+  check(ids.every(u => D.youtubeId(u) === 'dQw4w9WgXcQ'), 'YouTube video id read from watch, youtu.be, shorts, embed and music links');
+  check(['', 'https://vimeo.com/123', 'https://www.youtube.com/watch?v=short', 'https://evil.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/@channel', 'not a link at all'].every(u => D.youtubeId(u) === null), 'other links and text are not taken for videos');
+  check(D.youtubeStart('https://youtu.be/dQw4w9WgXcQ?t=90') === 90 && D.youtubeStart('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s') === 90 && D.youtubeStart('https://youtube.com/embed/dQw4w9WgXcQ?start=7') === 7 && D.youtubeStart('dQw4w9WgXcQ') === 0, 'start time read from t= and start=');
+  check(D.karaokeSearchUrl('Dancing Queen', 'ABBA') === 'https://www.youtube.com/results?search_query=ABBA%20Dancing%20Queen%20karaoke' && D.karaokeSearchUrl('  ', '') === null, 'karaoke search names the artist and song');
+
   console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
   process.exit(fails ? 1 : 0);
 })();

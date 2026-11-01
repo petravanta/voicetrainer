@@ -1159,6 +1159,36 @@
     return q ? `https://duckduckgo.com/?q=${encodeURIComponent(q + ' lyrics')}` : null;
   }
 
+  // Backing tracks. Karaoke and instrumental versions of songs are licensed, so the app never includes or
+  // downloads one: it links to a YouTube search, plays a YouTube video the user picks in YouTube's own embedded
+  // player, or plays a file from the user's device.
+  function karaokeSearchUrl(title, artist) {
+    const q = [artist, title].map(v => String(v || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+    return q ? `https://www.youtube.com/results?search_query=${encodeURIComponent(q + ' karaoke')}` : null;
+  }
+  // The 11-character video id from a YouTube link (watch, youtu.be, shorts, embed, live, music) or a bare id.
+  function youtubeId(text) {
+    const s = String(text || '').trim();
+    if (/^[\w-]{11}$/.test(s)) return s;
+    let u;
+    try { u = new URL(/^[a-z][\w+.-]*:/i.test(s) ? s : 'https://' + s); } catch (e) { return null; }
+    const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
+    const ok = (id) => (id && /^[\w-]{11}$/.test(id) ? id : null);
+    if (host === 'youtu.be') return ok(u.pathname.split('/')[1]);
+    if (host !== 'youtube.com' && host !== 'youtube-nocookie.com') return null;
+    if (u.pathname === '/watch') return ok(u.searchParams.get('v'));
+    const m = u.pathname.match(/^\/(?:embed|shorts|live|v)\/([\w-]{11})(?:[/?#]|$)/);
+    return m ? m[1] : null;
+  }
+  // Start time from a YouTube link (t=90, t=1m30s, start=90), in seconds; 0 when there is none.
+  function youtubeStart(text) {
+    let u; try { u = new URL(/^[a-z][\w+.-]*:/i.test(String(text).trim()) ? String(text).trim() : 'https://' + String(text).trim()); } catch (e) { return 0; }
+    const t = u.searchParams.get('t') || u.searchParams.get('start') || (u.hash.match(/t=([\dhms]+)/) || [])[1] || '';
+    if (/^\d+s?$/.test(t)) return parseInt(t, 10);
+    const m = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+    return m && t ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : 0;
+  }
+
   // Fetch one JSON document with a timeout. Never throws: the outcome says what happened.
   // 'busy' = the service is overloaded or briefly down (429, 5xx), worth one retry; 'timeout', 'offline'/'network'
   // when no answer came; 'notfound' for 404; 'error' for other answers; 'aborted' when the caller cancelled.
@@ -1292,6 +1322,7 @@
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, ownSongMissing,
+    karaokeSearchUrl, youtubeId, youtubeStart,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

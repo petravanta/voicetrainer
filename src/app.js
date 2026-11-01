@@ -3311,16 +3311,97 @@
     series('sibS', C.warn);
   }
 
-  // ---------------- modes ----------------
+  // ---------------- backing tracks ----------------
+  // A karaoke or instrumental track for Sing along: a YouTube video in YouTube's own embedded player, or a file
+  // from the user's device. Saved per song in IndexedDB (files can be megabytes, too big for localStorage):
+  // key = the song's key in Your songs, value = { kind: 'yt', id, start, offset } or { kind: 'file', name, blob, offset }.
+  const Backing = {
+    dbp: null,
+    open() {
+      if (!this.dbp) this.dbp = new Promise((res) => {
+        try { const r = indexedDB.open('vt-sing', 1); r.onupgradeneeded = () => r.result.createObjectStore('backing'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); }
+        catch (e) { res(null); }
+      });
+      return this.dbp;
+    },
+    async op(mode, fn) {
+      const db = await this.open(); if (!db) return null;
+      return new Promise((res) => {
+        try {
+          const tx = db.transaction('backing', mode), rq = fn(tx.objectStore('backing'));
+          tx.oncomplete = () => res(rq ? rq.result : true); tx.onerror = tx.onabort = () => res(null);
+        } catch (e) { res(null); }
+      });
+    },
+    get(k) { return this.op('readonly', st => st.get(k)); },
+    put(k, v) { return this.op('readwrite', st => st.put(v, k)); },
+    del(k) { return this.op('readwrite', st => st.delete(k)); },
+    keys() { return this.op('readonly', st => st.getAllKeys()); },
+  };
+  // YouTube's IFrame Player API, loaded the first time a video is used.
+  let ytApi = null;
+  function loadYouTube() {
+    if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+    if (!ytApi) ytApi = new Promise((res, rej) => {
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { try { if (prev) prev(); } catch (e) {} res(window.YT); };
+      const sc = document.createElement('script');
+      sc.src = 'https://www.youtube.com/iframe_api'; sc.async = true;
+      sc.onerror = () => { ytApi = null; rej(new Error('blocked')); };
+      document.head.appendChild(sc);
+      setTimeout(() => { if (!(window.YT && window.YT.Player)) { ytApi = null; rej(new Error('timeout')); } }, 15000);
+    });
+    return ytApi;
+  }
+  // A YouTube player that looks like an <audio> element to Sing: currentTime, duration, play(), pause().
+  // getCurrentTime() moves in coarse steps, so between steps the time runs on from the last one while playing.
+  class YtTrack {
+    constructor(id, start, box, on) {
+      Object.assign(this, { id, start: start || 0, box, on, p: null, t: start || 0, at: 0, playing: false, dead: false });
+      const el = document.createElement('div'); box.appendChild(el);
+      this.ready = loadYouTube().then(YT => new Promise((res, rej) => {
+        if (this.dead) return rej(new Error('gone'));
+        this.p = new YT.Player(el, {
+          videoId: id, host: 'https://www.youtube-nocookie.com', width: '100%', height: '100%',
+          playerVars: { playsinline: 1, rel: 0, start: Math.floor(this.start) },
+          events: {
+            onReady: () => res(this),
+            onStateChange: (e) => this.state(e.data),
+            onError: (e) => { this.on.error(e.data); rej(new Error('player ' + e.data)); },
+          },
+        });
+      }));
+      this.ready.catch(() => {});
+    }
+    state(s) { // 1 playing, 2 paused, 0 ended, 3 buffering
+      this.sync(); this.playing = s === 1;
+      if (s === 0) this.on.ended();
+      if (this.on.state) this.on.state(s);
+    }
+    sync() { if (this.p && this.p.getCurrentTime) { this.t = this.p.getCurrentTime() || 0; this.at = performance.now(); } }
+    get currentTime() {
+      if (!this.p || !this.p.getCurrentTime) return this.t;
+      const t = this.p.getCurrentTime() || 0, now = performance.now();
+      if (t !== this.t) { this.t = t; this.at = now; return t; }
+      return this.playing ? t + Math.min(1, (now - this.at) / 1000) : t;
+    }
+    set currentTime(v) { this.t = v; this.at = performance.now(); if (this.p && this.p.seekTo) this.p.seekTo(v, true); }
+    get duration() { const d = this.p && this.p.getDuration ? this.p.getDuration() : 0; return d > 0 ? d : NaN; }
+    play() { if (this.p && this.p.playVideo) this.p.playVideo(); return Promise.resolve(); }
+    pause() { if (this.p && this.p.pauseVideo) this.p.pauseVideo(); }
+    destroy() { this.dead = true; try { if (this.p && this.p.destroy) this.p.destroy(); } catch (e) {} this.box.innerHTML = ''; }
+  }
+  const YT_ERRORS = { 2: "That doesn't look like a valid video link.", 5: "YouTube's player couldn't play this video here.", 100: 'That video was removed or is private.', 101: "The video's owner only lets it play on YouTube itself.", 150: "The video's owner only lets it play on YouTube itself." };
+
   // ---------------- sing along ----------------
-  // The music plays somewhere else (headphones) or from a song file loaded here; the microphone is
+  // The music plays somewhere else (headphones) or from a backing track played here; the microphone is
   // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
   // Nothing is saved; the summary at the end is for this song only.
   const SING_SAVED_KEY = 'vt.sing.saved'; // lyrics loaded from a search, kept for reuse (see D.lyricsCachePut)
   const SING_KEY = 'vt.sing.lyrics', SING_SONG_KEY = 'vt.sing.song', SING_FOLLOW_KEY = 'vt.sing.follow', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
   const Sing = {
     on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
-    audio: null, url: null, trackName: '', started: false, base: 0, at: 0, offset: 0, t0: 0,
+    audio: null, url: null, trackName: '', rec: null, recKey: null, backKeys: new Set(), started: false, base: 0, at: 0, offset: 0, t0: 0,
     lastResAt: -1e9, cols: null, empty: false, fol: null,
     init() {
       let text = '', meta = null;
@@ -3331,7 +3412,7 @@
       $('sg-song-close').addEventListener('click', () => this.closeSong());
       $('sg-song-save').addEventListener('click', () => this.saveOwn(false));
       $('sg-find').addEventListener('submit', (e) => { e.preventDefault(); this.search(); });
-      $('sg-q').addEventListener('input', () => { this.syncWeb(); delete $('sg-saved-msg').dataset.keep; this.renderSaved(); });
+      $('sg-q').addEventListener('input', () => { this.syncWeb(); this.karaokeLink(); delete $('sg-saved-msg').dataset.keep; this.renderSaved(); });
       $('sg-saved-list').addEventListener('click', (e) => {
         const x = e.target.closest('button[data-x]'); if (x) { this.forget(+x.dataset.x); return; }
         const b = e.target.closest('button[data-s]'); if (b) this.useSaved(+b.dataset.s);
@@ -3340,8 +3421,9 @@
       $('sg-results').addEventListener('click', (e) => {
         const b = e.target.closest('button[data-k]'); if (b) this.pick(+b.dataset.k);
       });
-      $('sg-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) this.load(f); e.target.value = ''; });
-      $('sg-track-clear').addEventListener('click', () => this.unload());
+      $('sg-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) this.useFile(f); e.target.value = ''; });
+      $('sg-yt-form').addEventListener('submit', (e) => { e.preventDefault(); this.useYouTube($('sg-yt-url').value); });
+      $('sg-track-clear').addEventListener('click', () => this.removeTrack());
       $('sg-start').addEventListener('click', () => this.start());
       $('sg-tap').addEventListener('click', () => this.tap());
       $('sg-prev').addEventListener('click', () => this.back());
@@ -3365,6 +3447,12 @@
         else if (e.key === 'Backspace') { e.preventDefault(); this.back(); }
       });
       this.restoreSong(text, meta);
+      Backing.keys().then(keys => { // drop tracks of songs no longer in Your songs
+        if (!keys) return;
+        const have = new Set(this.savedList().map(r => r.key));
+        keys.forEach(k => { if (have.has(k)) this.backKeys.add(k); else Backing.del(k); });
+        this.renderSaved();
+      });
     },
     // Lyrics search: LRCLIB first (timed lyrics), lyrics.ovh as the backup when LRCLIB is busy or finds nothing.
     // Only the typed query leaves the device; manual paste and a web search link always work.
@@ -3469,7 +3557,7 @@
       list.innerHTML = shown.map((r, k) => {
         const on = !!cur && r.key === cur;
         return `<li><button type="button" data-s="${k}"${on ? ' class="on" aria-current="true"' : ''}><span class="t">${escapeHtml(r.title)}</span>`
-          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), on ? 'loaded now' : ''].filter(Boolean).join(' · '))}</span>`
+          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), this.backKeys.has(r.key) ? 'backing track' : '', on ? 'loaded now' : ''].filter(Boolean).join(' · '))}</span>`
           + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button>`
           + `<button type="button" class="sg-x" data-x="${k}" title="Remove from your songs" aria-label="Remove ${escapeHtml(r.title)}${r.artist ? ' by ' + escapeHtml(r.artist) : ''} from your songs">×</button></li>`;
       }).join('');
@@ -3517,7 +3605,7 @@
       $('sg-results').hidden = true;
       $('sg-song-h').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // the lyrics open at the bottom, under Your songs
       if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
-        note += ` Your song file is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
+        note += ` Your backing track is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
       msg.innerHTML = escapeHtml(note) + (prev.text.trim() && prev.text !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '') + extra;
       const undo = $('sg-undo');
       if (undo) undo.addEventListener('click', () => { this.restore(prev); msg.textContent = 'Your earlier lyrics are back.'; if (this.found.length) $('sg-results').hidden = false; });
@@ -3557,7 +3645,8 @@
         $('sg-song-by').textContent = s.mine ? '' : [s.artist ? 'by ' + s.artist : '', s.album].filter(Boolean).join(' · ');
       }
       this.ownNote();
-      this.storeSong(); this.parse(); this.renderSaved();
+      this.storeSong(); this.parse(); this.renderSaved(); this.karaokeLink();
+      this.syncTrack();
     },
     storeSong() {
       try {
@@ -3581,7 +3670,7 @@
       s.title = $('sg-title').value; s.artist = $('sg-artist').value;
       e.target.removeAttribute('aria-invalid');
       s.dirty = true; this.ownNote();
-      this.storeSong();
+      this.storeSong(); this.karaokeLink();
     },
     newSong() {
       const s = this.song;
@@ -3632,6 +3721,7 @@
       if (s.key && s.key !== key) list = D.lyricsCacheDrop(list, s.key);
       const replaces = s.key !== key && !!D.lyricsCacheGet(list, row);
       this.storeSaved(D.lyricsCachePut(list, row));
+      if (s.key && s.key !== key && this.recKey === s.key) { Backing.del(s.key); this.backKeys.delete(s.key); this.recKey = null; } // renamed: the track moves with it
       Object.assign(s, { key, title: row.title, artist: row.artist, timed: row.timed, dirty: false });
       delete $('sg-saved-msg').dataset.keep;
       this.show();
@@ -3657,7 +3747,7 @@
       else if (!n) msg.textContent = 'No lyrics yet. You can still sing without them and get your pitch and resonance for the whole song.';
       else if (this.lyr.timed) {
         const t = this.lyr.lines[0].t;
-        msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? 'They follow the song file.' : 'Press Next line when the first line begins; after that they scroll by themselves.');
+        msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? 'They follow the backing track.' : 'Press Next line when the first line begins; after that they scroll by themselves.');
       } else msg.textContent = `${n} lines. Press Next line (or the space bar) as you reach each one, or let the app follow your singing.`;
       this.syncFollow(n);
     },
@@ -3690,29 +3780,115 @@
       const need = this.fol ? this.fol.need[this.cur] : 0;
       li.style.setProperty('--sgp', need ? String(Math.min(1, this.fol.n / need)) : '0');
     },
-    load(file) {
-      this.unload();
-      this.url = URL.createObjectURL(file);
+    // Backing track. this.audio is an <audio> element for a file or a YtTrack for a YouTube video; this.rec is
+    // what is stored for it and this.recKey the song it is stored under (null while it belongs to no saved song).
+    trackIdle: 'No backing track. Sing to music playing anywhere, or add one below.',
+    // The YouTube karaoke search: the open song's name and artist, else what's typed in Find lyrics.
+    karaokeLink() {
+      const s = this.song, u = (s && s.title.trim() && D.karaokeSearchUrl(s.title, s.artist)) || D.karaokeSearchUrl($('sg-q').value) || 'https://www.youtube.com/results?search_query=karaoke';
+      $('sg-karaoke').href = u;
+    },
+    trackNote(text) { $('sg-track-name').textContent = text; },
+    // Show the track that goes with the song on screen: load the song's own, keep a track that belongs to
+    // no song yet (and store it with this one), and put away the previous song's.
+    async syncTrack() {
+      const key = this.song && this.song.key || null;
+      if (this.rec && !this.recKey) { if (key) { this.recKey = key; this.storeTrack(); this.trackNote(this.rec.kind === 'yt' ? 'YouTube video, shown at the top of this tab and kept with this song.' : `File: ${this.rec.name}. Kept with this song in this browser.`); } return; }
+      if (this.rec && this.recKey === key) return;
+      if (this.rec) this.dropTrack();
+      if (!key) return;
+      const want = ++this.trackSeq, rec = await Backing.get(key);
+      if (want !== this.trackSeq || !rec || this.rec || !this.song || this.song.key !== key) return;
+      if (rec.kind === 'file' && rec.blob) this.playFile(rec.blob, rec.name, rec, key);
+      else if (rec.kind === 'yt' && rec.id) this.playYouTube(rec, key);
+    },
+    trackSeq: 0,
+    storeTrack() {
+      if (!this.recKey || !this.rec) return;
+      const k = this.recKey;
+      Backing.put(k, this.rec).then(ok => { if (ok) { this.backKeys.add(k); this.renderSaved(); } });
+    },
+    useFile(file) {
+      this.dropTrack();
+      const key = this.song && this.song.key || null;
+      this.playFile(file, file.name, { kind: 'file', name: file.name, blob: file, offset: 0 }, key);
+      if (key) this.storeTrack();
+    },
+    useYouTube(text) {
+      const id = D.youtubeId(text), inp = $('sg-yt-url');
+      if (!id) { this.trackNote(String(text || '').trim() ? "That isn't a YouTube video link. Open the video on YouTube, use Share, Copy link, and paste it here." : 'Paste a link to a YouTube video first.'); inp.focus(); return; }
+      this.dropTrack();
+      const key = this.song && this.song.key || null;
+      this.playYouTube({ kind: 'yt', id, start: D.youtubeStart(text), offset: 0 }, key);
+      if (key) this.storeTrack();
+      inp.value = '';
+    },
+    playFile(blob, name, rec, key) {
+      this.rec = rec; this.recKey = key;
+      this.url = URL.createObjectURL(blob);
       this.audio = new Audio(this.url);
       this.audio.preload = 'auto';
       this.audio.addEventListener('ended', () => { if (this.on) this.finish(); });
-      this.audio.addEventListener('error', () => { $('sg-track-name').textContent = `${file.name} can't be played by this browser. Try MP3, M4A or WAV.`; this.unload(true); });
-      this.trackName = file.name;
-      $('sg-track-name').textContent = file.name;
-      $('sg-track-clear').hidden = false; $('sg-aec-wrap').hidden = false;
-      $('sg-file-btn').textContent = 'Load another song';
-      this.parse();
+      this.audio.addEventListener('error', () => { this.dropTrack(); this.trackNote(`${name} can't be played by this browser. Try MP3, M4A or WAV.`); });
+      this.trackName = name;
+      this.trackNote(`File: ${name}` + (key ? '. Kept with this song in this browser.' : ''));
+      this.trackShown();
     },
-    unload(keepName) {
+    playYouTube(rec, key) {
+      this.rec = rec; this.recKey = key; this.trackName = '';
+      this.trackNote('YouTube video, shown at the top of this tab' + (key ? ' and kept with this song.' : '.') + ' Wear headphones so the microphone hears only you.');
+      if (mode === 'sing') this.makeYt(); // otherwise when the Sing tab opens, so YouTube isn't contacted before then
+      this.trackShown();
+    },
+    makeYt() {
+      const rec = this.rec; if (!rec || rec.kind !== 'yt' || this.audio) return;
+      const box = $('sg-video'); box.hidden = false;
+      const track = this.audio = new YtTrack(rec.id, rec.start, box, {
+        ended: () => { if (this.on && this.audio === track) this.finish(); },
+        state: () => { if (this.on && this.audio === track) this.hint(); },
+        error: (code) => { if (this.audio === track) this.trackNote(`${YT_ERRORS[code] || `YouTube couldn't play this video (error ${code}).`} Pick another karaoke version, or play this one on YouTube with headphones.`); },
+      });
+      track.ready.catch((e) => {
+        if (this.audio !== track || !/blocked|timeout/.test(e.message)) return;
+        track.destroy(); this.audio = null; box.hidden = true; this.trackShown(); // tried again next time the Sing tab opens
+        this.trackNote("YouTube's player couldn't load here (offline, or blocked by this page or a content blocker). " + (this.recKey ? 'The video link is kept with the song, and it will try again next time you open Sing. ' : '') + "Or play the music elsewhere.");
+      });
+    },
+    trackShown() {
+      $('sg-track-clear').hidden = !this.rec; $('sg-aec-wrap').hidden = !this.audio;
+      $('sg-file-btn').textContent = this.rec && this.rec.kind === 'file' ? 'Use another file' : 'Use a file';
+      if (!this.on) this.parse();
+    },
+    // Put the track away (it stays stored with its song).
+    dropTrack() {
       if (this.on) this.finish();
-      if (this.audio) { this.audio.pause(); this.audio.removeAttribute('src'); this.audio = null; }
+      ++this.trackSeq;
+      if (this.audio) {
+        if (this.audio instanceof YtTrack) this.audio.destroy();
+        else { this.audio.pause(); this.audio.removeAttribute('src'); }
+        this.audio = null;
+      }
       if (this.url) { URL.revokeObjectURL(this.url); this.url = null; }
-      if (!keepName) $('sg-track-name').textContent = 'Optional. A song file on this device plays from here, and timed lyrics follow it exactly.';
-      $('sg-track-clear').hidden = true; $('sg-aec-wrap').hidden = true;
-      $('sg-file-btn').textContent = 'Load a song file';
-      this.parse();
+      $('sg-video').hidden = true;
+      this.rec = null; this.recKey = null; this.trackName = '';
+      this.trackNote(this.trackIdle);
+      this.trackShown();
     },
-    // song time in seconds: the song file's own position, or a clock started by the first Next line
+    // Remove: put it away and forget it for this song.
+    removeTrack() {
+      const k = this.recKey;
+      this.dropTrack();
+      if (k) { Backing.del(k); this.backKeys.delete(k); this.renderSaved(); }
+      $('sg-yt-url').focus();
+    },
+    // Remember the lyric timing set against this track (Next line and the nudges), for next time.
+    keepOffset() {
+      if (this.rec && this.audio && Math.abs((this.rec.offset || 0) - this.offset) > 0.05) { this.rec.offset = Math.round(this.offset * 100) / 100; this.storeTrack(); }
+    },
+    // Sing tab shown or left: a backing track playing in the setup stops when you leave.
+    leave() { if (this.audio && !this.on) this.audio.pause(); },
+    enter() { if (this.rec && this.rec.kind === 'yt' && !this.audio) { this.makeYt(); this.trackShown(); } },
+    // song time in seconds: the backing track's own position, or a clock started by the first Next line
     clock() {
       if (this.audio) return this.audio.currentTime + this.offset;
       if (!this.started) return null;
@@ -3730,18 +3906,18 @@
       take = null; // a song isn't a speech sample, so it doesn't feed the guided exercise
       this.empty = !this.lyr.lines.length;
       if (this.empty) this.lyr = { timed: false, lines: [{ t: null, text: 'Your singing' }] };
-      Object.assign(this, { on: true, paused: false, frames: [], trace: [], cur: -1, started: false, offset: 0, t0: performance.now(), lastResAt: -1e9 });
+      Object.assign(this, { on: true, paused: false, frames: [], trace: [], cur: -1, started: false, offset: this.rec && this.audio ? +this.rec.offset || 0 : 0, t0: performance.now(), lastResAt: -1e9 });
       $('sg-lines').innerHTML = this.lyr.lines.map((l, i) => `<li data-i="${i}"${l.text ? '' : ' class="gap"'}><span class="sg-t">${escapeHtml(l.text)}</span><span class="sg-badge"></span></li>`).join('');
       $('sg-setup').hidden = true; $('sg-result').hidden = true; $('sg-stage').hidden = false;
       $('sg-nudge').hidden = !this.lyr.timed; $('sg-step').hidden = this.empty;
       $('sg-follow-btn').hidden = this.empty || !this.canFollow(this.lyr.lines.length);
       this.fol = null; this.followLive($('sg-follow').checked);
       $('sg-pause').textContent = 'Pause'; $('sg-pause').setAttribute('aria-pressed', 'false');
-      if (this.audio) { this.audio.currentTime = 0; try { await this.audio.play(); } catch (e) {} }
+      if (this.audio) { this.audio.currentTime = this.audio instanceof YtTrack ? this.audio.start : 0; try { await this.audio.play(); } catch (e) {} }
       this.setLine(this.lyr.timed ? -1 : this.fol ? Math.max(0, this.fol.cur) : 0);
       if (this.lyr.timed && this.audio) this.setLine(D.lyricLineAt(this.lyr.lines, this.clock()));
       requestAnimationFrame(() => { this.draw(); this.paintHud(); });
-      $('sg-stage').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      $(this.audio instanceof YtTrack ? 'sg-video' : 'sg-stage').scrollIntoView({ block: 'start', behavior: 'smooth' });
     },
     hint() {
       const h = $('sg-hint');
@@ -3750,6 +3926,7 @@
       else if (this.fol && !this.started) h.textContent = 'Start the song and sing: the lyrics start with your first phrase. Or press Next line as the first line begins.';
       else if (this.fol) h.textContent = 'The timed lyrics scroll by themselves, and the start of each phrase you sing nudges them back in step. Still drifting? Press Next line, tap a line, or nudge them by half a second.';
       else if (!this.lyr.timed) h.textContent = 'Press Next line (or the space bar) as you start each line. You can also tap a line.';
+      else if (this.audio instanceof YtTrack && !this.audio.playing && !this.paused && this.audio.p) h.textContent = 'Waiting for the video. If it does not start, tap play on the video.';
       else if (!this.audio && !this.started) h.textContent = 'Start the song, then press Next line (or the space bar) as the first line begins. After that the lyrics scroll by themselves.';
       else h.textContent = 'Lyrics drifting? Press Next line as a line begins, tap a line, or nudge them by half a second.';
       const last = this.cur >= this.lyr.lines.length - 1;
@@ -3868,7 +4045,7 @@
       if (!this.on) return;
       if (this.cur >= 0) this.badge(this.cur);
       this.on = false; this.paused = false; this.fol = null;
-      if (this.audio) this.audio.pause();
+      if (this.audio) { this.audio.pause(); if (this.lyr.timed) this.keepOffset(); }
       take = null;
       if (!fromStop && state.running === 'mic') stop();
       this.result();
@@ -3893,7 +4070,7 @@
           const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '';
           return `<li><span class="t">${escapeHtml(l.text)}</span>${bar || rng ? (bar || '<span></span><span></span>') + (rng || '<span></span>') : '<span class="none">not enough voice on this line</span>'}</li>`;
         }).join('');
-        box.innerHTML = `<div class="section-head"><h3>${this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
+        box.innerHTML = `<div class="section-head"><h3>${this.song && this.song.title.trim() ? escapeHtml(this.song.title.trim()) : this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
           <div class="stats">${stat('Resonance', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
           ${stat('In your target', res.length >= 8 ? Math.round(100 * res.filter(inT).length / res.length) + '%' : '--', `band ${lo} to ${hi}`)}
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
@@ -3915,8 +4092,10 @@
   function setMode(m) {
     if (!['home', 'readings', 'freestyle', 'practice', 'sing', 'settings'].includes(m)) m = 'home';
     if (m !== 'sing' && Sing.on) Sing.finish();
+    if (m !== 'sing') Sing.leave();
     mode = m;
     document.body.dataset.mode = m;
+    if (m === 'sing') Sing.enter();
     for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(m);
     for (const b of document.querySelectorAll('#modes [data-mode]')) b.setAttribute('aria-selected', String(b.dataset.mode === m));
     if (m !== 'readings' && Reader.open) { cancelRun(); Reader.hide(); }
