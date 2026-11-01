@@ -3800,6 +3800,7 @@
     trackIdle: 'No video attached. Sing to music playing anywhere, or attach one below.',
     backFor: undefined, // the song the Attach section was last set up for (it folds when another song opens)
     recFor: null,
+    linkShown: '', linkFor: undefined, // the link last put in the YouTube link box, and the song it was for
     // The YouTube karaoke search: the open song's name and artist, else what's typed in Find lyrics.
     karaokeLink() {
       const s = this.song, u = (s && s.title.trim() && D.karaokeSearchUrl(s.title, s.artist)) || D.karaokeSearchUrl($('sg-q').value) || 'https://www.youtube.com/results?search_query=karaoke';
@@ -3819,7 +3820,7 @@
     async syncTrack() {
       const s = this.song, key = s && s.key || null, saved = !!this.savedEntry(key);
       // Attach video is optional, so it starts folded; a song that has a track opens it (trackShown).
-      if (s !== this.backFor) { this.backFor = s; $('sg-backing').open = false; }
+      if (s !== this.backFor) { this.backFor = s; $('sg-backing').open = false; this.showLink(); }
       if (this.rec && !this.recKey && !(this.recFor && this.recFor !== s)) {
         if (saved) { this.recKey = key; this.recFor = null; if (s.video) { s.video = null; this.storeSong(); } this.storeTrack(); }
         else if (s) { this.recFor = s; if (this.rec.kind === 'yt') { s.video = D.videoClean(this.rec); this.storeSong(); } }
@@ -3870,9 +3871,10 @@
     useYouTube(text) {
       const id = D.youtubeId(text), inp = $('sg-yt-url');
       if (!id) { this.trackNote(String(text || '').trim() ? "That isn't a YouTube video link. Open the video on YouTube, use Share, Copy link, and paste it here." : 'Paste a link to a YouTube video first.'); inp.focus(); return; }
+      const start = D.youtubeStart(text), r = this.rec;
+      if (r && r.kind === 'yt' && r.id === id && (+r.start || 0) === start) { this.trackShown(); return; } // already attached: keep its timing
       this.dropTrack();
-      this.playYouTube({ kind: 'yt', id, start: D.youtubeStart(text), offset: 0 }, null);
-      inp.value = '';
+      this.playYouTube({ kind: 'yt', id, start, offset: 0 }, null);
       this.keepSong(); // attaching a video keeps the song in Your songs
       this.syncTrack();
     },
@@ -3912,7 +3914,14 @@
       $('sg-track-clear').hidden = !this.rec; $('sg-aec-wrap').hidden = !this.audio;
       $('sg-track-clear').textContent = this.rec && this.rec.kind === 'file' ? 'Remove song file' : 'Remove video';
       $('sg-file-btn').textContent = this.rec && this.rec.kind === 'file' ? 'Use another file' : 'Use a file';
+      this.showLink();
       if (!this.on) this.parse();
+    },
+    // The YouTube link box shows the attached video's link (to see, copy or change it). It empties when the video
+    // goes or another song opens, but text being typed in it is left alone otherwise.
+    showLink() {
+      const link = this.rec && this.rec.kind === 'yt' ? D.youtubeUrl(this.rec) : '';
+      if (link !== this.linkShown || (!link && this.backFor !== this.linkFor)) { $('sg-yt-url').value = link; this.linkShown = link; this.linkFor = this.backFor; }
     },
     // Put the track away (it stays stored with its song).
     dropTrack() {
