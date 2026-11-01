@@ -3507,7 +3507,7 @@
       this.storeSaved([]);
       this.unlink(before);
       this.renderSaved();
-      this.savedNote(`Cleared ${before.length} song${before.length > 1 ? 's' : ''}.`, () => { this.storeSaved(before); this.relink(before); this.renderSaved(); });
+      this.savedNote(`Deleted ${before.length} saved song${before.length > 1 ? 's' : ''} from this browser.`, () => { this.storeSaved(before); this.relink(before); this.renderSaved(); });
       $('sg-saved-undo').focus();
     },
     // Put lyrics into the box, with Undo when that replaces something, and an extra button or two after the note.

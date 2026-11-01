@@ -56,7 +56,8 @@ p{margin:0}
 .btn:hover{border-color:var(--muted)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.ghost{background:none}
-.btn.danger{color:var(--danger)}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn.danger:hover{background:var(--danger-soft);border-color:var(--danger)}
 .btn.sm{padding:4px 10px;font-size:13px}
 .btn.big{padding:12px 22px;font-size:16px}
 .chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:600;color:var(--muted)}
@@ -669,6 +670,8 @@ a { color: var(--accent); }
 .sg-saved-head h3 { margin: 0; }
 .sg-saved-n { font-weight: 400; letter-spacing: 0; text-transform: none; }
 .sg-saved-list { max-height: 16rem; }
+.sg-saved-foot { display: flex; justify-content: flex-end; }
+.sg-saved-foot:has(> [hidden]) { display: none; }
 .sg-saved-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .sg-song { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sg-song[hidden] { display: none; }
