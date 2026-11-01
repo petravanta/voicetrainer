@@ -990,7 +990,7 @@
     });
   }
 
-  // Lyrics search (LRCLIB, lrclib.net: free, open, no key, CORS enabled). Only the typed query is sent.
+  // Lyrics search (LRCLIB, lrclib.net: free, open, no key, CORS enabled; lyrics.ovh below is the backup). Only the typed query is sent.
   // lyricsSearchUrl builds the request; lyricsResults turns its JSON into a short list for the Sing tab:
   // one row per title and artist in the service's order, using a timed (LRC) version when any copy has one,
   // and dropping instrumentals and records without lyrics.
@@ -1018,6 +1018,128 @@
     return out.slice(0, max);
   }
 
+  // Backup source: lyrics.ovh (api.lyrics.ovh: free, no key, plain lyrics only). Its /suggest search looks
+  // titles up on Deezer; the lyrics themselves come from /v1/<artist>/<title> when a result is picked.
+  const LYRICS_OVH = 'https://api.lyrics.ovh';
+  const ovhPart = (s) => encodeURIComponent(String(s || '').replace(/[\/\\?#%]+/g, ' ').replace(/\s+/g, ' ').trim());
+  function ovhSearchUrl(query, base = LYRICS_OVH) {
+    const q = ovhPart(query);
+    return q ? `${base}/suggest/${q}` : null;
+  }
+  function ovhLyricsUrl(artist, title, base = LYRICS_OVH) {
+    const a = ovhPart(artist), t = ovhPart(title);
+    return a && t ? `${base}/v1/${a}/${t}` : null;
+  }
+  function ovhResults(json, max = 8) {
+    const data = json && Array.isArray(json.data) ? json.data : [];
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const out = [], seen = new Set();
+    for (const r of data) {
+      if (!r || typeof r !== 'object') continue;
+      const title = str(r.title_short) || str(r.title), artist = str(r.artist && r.artist.name);
+      if (!title || !artist) continue;
+      const key = `${title.toLowerCase()}|${artist.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const duration = Number.isFinite(+r.duration) && +r.duration > 0 ? Math.round(+r.duration) : null;
+      out.push({ id: r.id, src: 'ovh', title, artist, album: str(r.album && r.album.title), duration, timed: false, text: null });
+      if (out.length >= max) break;
+    }
+    return out;
+  }
+  // lyrics.ovh text: CRLF line ends, often a French "Paroles de la chanson … par …" heading, and runs of blank lines.
+  function ovhLyrics(json) {
+    let t = json && typeof json.lyrics === 'string' ? json.lyrics : '';
+    t = t.replace(/\r\n?/g, '\n').replace(/^\s*Paroles de la chanson[^\n]*\n/i, '');
+    return t.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  // Opens a normal web search for the lyrics, so they can be copied and pasted when both services fail.
+  function lyricsWebUrl(query) {
+    const q = String(query || '').replace(/\s+/g, ' ').trim();
+    return q ? `https://duckduckgo.com/?q=${encodeURIComponent(q + ' lyrics')}` : null;
+  }
+
+  // Fetch one JSON document with a timeout. Never throws: the outcome says what happened.
+  // 'busy' = the service is overloaded or briefly down (429, 5xx), worth one retry; 'timeout', 'offline'/'network'
+  // when no answer came; 'notfound' for 404; 'error' for other answers; 'aborted' when the caller cancelled.
+  async function getJson(url, io, ms, headers) {
+    const ctl = new AbortController(), outer = io.signal;
+    const stop = () => ctl.abort();
+    if (outer) { if (outer.aborted) return { outcome: 'aborted' }; outer.addEventListener('abort', stop); }
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, ms);
+    try {
+      const opts = { signal: ctl.signal, credentials: 'omit', referrerPolicy: 'no-referrer' };
+      if (headers) opts.headers = headers;
+      const r = await io.fetch(url, opts);
+      const ra = r.headers && r.headers.get ? parseFloat(r.headers.get('Retry-After')) : NaN;
+      if (r.status === 429 || r.status >= 500) return { outcome: 'busy', status: r.status, retryAfter: Number.isFinite(ra) ? ra : null };
+      if (r.status === 404) return { outcome: 'notfound', status: 404 };
+      if (!r.ok) return { outcome: 'error', status: r.status };
+      try { return { outcome: 'ok', status: r.status, json: await r.json() }; }
+      catch (e) { return timedOut ? { outcome: 'timeout' } : outer && outer.aborted ? { outcome: 'aborted' } : { outcome: 'error', status: r.status }; }
+    } catch (e) {
+      if (outer && outer.aborted) return { outcome: 'aborted' };
+      if (timedOut) return { outcome: 'timeout' };
+      return { outcome: io.online === false ? 'offline' : 'network' };
+    } finally {
+      clearTimeout(timer);
+      if (outer) outer.removeEventListener('abort', stop);
+    }
+  }
+  const RETRYABLE = new Set(['busy', 'timeout', 'network']);
+  // One request with a single retry when the failure looks temporary (LRCLIB answers 503 with Retry-After: 1 when loaded).
+  // A request with custom headers needs a CORS preflight; if it fails without any answer, the retry goes without them,
+  // so a blocked preflight can never cost the search.
+  async function getJsonRetry(url, io, ms, headers) {
+    let res = await getJson(url, io, ms, headers);
+    if (!RETRYABLE.has(res.outcome)) return res;
+    const wait = res.retryAfter != null ? Math.min(3000, Math.max(500, res.retryAfter * 1000)) : 1200;
+    await (io.sleep || ((t) => new Promise(r => setTimeout(r, t))))(wait);
+    if (io.signal && io.signal.aborted) return { outcome: 'aborted' };
+    const again = await getJson(url, io, ms, res.outcome === 'network' ? undefined : headers);
+    return again.outcome === 'ok' || again.outcome === 'aborted' ? again : { ...again, retried: true };
+  }
+
+  // LRCLIB asks apps to identify themselves. Browsers won't let a page set User-Agent, so this goes in the
+  // Lrclib-Client header, which LRCLIB's CORS setup allows (Access-Control-Allow-Headers). build.js stamps the version.
+  const APP_BUILD = /*BUILD*/'dev';
+  const LRCLIB_CLIENT = `VoiceTrainer ${APP_BUILD} (https://github.com/petravanta/voicetrainer)`;
+  const LYRICS_SOURCES = {
+    lrclib: { name: 'LRCLIB', site: 'https://lrclib.net', timed: true },
+    ovh: { name: 'lyrics.ovh', site: 'https://lyrics.ovh', timed: false },
+  };
+  // Search LRCLIB first (it has timed lyrics); when it is busy, unreachable or finds nothing, ask lyrics.ovh.
+  // io: { fetch, sleep?, signal?, online?, onStep?(sourceKey, attempt) , timeoutMs? }.
+  // Returns { rows, source, tried: [{ src, outcome, status?, count? }] } or { aborted: true }.
+  async function findLyrics(query, io) {
+    const ms = io.timeoutMs || 7000, tried = [];
+    const lrcUrl = lyricsSearchUrl(query);
+    if (!lrcUrl) return { rows: [], source: null, tried };
+    if (io.onStep) io.onStep('lrclib');
+    const a = await getJsonRetry(lrcUrl, io, ms, { 'Lrclib-Client': LRCLIB_CLIENT });
+    if (a.outcome === 'aborted') return { aborted: true };
+    const lrcRows = a.outcome === 'ok' ? lyricsResults(a.json).map(r => ({ ...r, src: 'lrclib' })) : [];
+    tried.push({ src: 'lrclib', outcome: a.outcome === 'ok' && !lrcRows.length ? 'empty' : a.outcome, status: a.status, count: lrcRows.length });
+    if (lrcRows.length) return { rows: lrcRows, source: 'lrclib', tried };
+    if (io.onStep) io.onStep('ovh');
+    const b = await getJsonRetry(ovhSearchUrl(query), io, ms + 1000);
+    if (b.outcome === 'aborted') return { aborted: true };
+    const ovhRows = b.outcome === 'ok' ? ovhResults(b.json) : [];
+    tried.push({ src: 'ovh', outcome: b.outcome === 'ok' && !ovhRows.length ? 'empty' : b.outcome, status: b.status, count: ovhRows.length });
+    return { rows: ovhRows, source: ovhRows.length ? 'ovh' : null, tried };
+  }
+  // Fetch the text for a picked row that came without it (lyrics.ovh results). Returns { text } or { outcome }.
+  async function loadLyricsText(row, io) {
+    if (row.text) return { text: row.text };
+    const url = ovhLyricsUrl(row.artist, row.title);
+    if (!url) return { outcome: 'notfound' };
+    const res = await getJsonRetry(url, io, (io.timeoutMs || 7000) + 1000);
+    if (res.outcome !== 'ok') return { outcome: res.outcome, status: res.status };
+    const text = ovhLyrics(res.json);
+    return text ? { text } : { outcome: 'notfound' };
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
@@ -1025,6 +1147,7 @@
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lyricsSearchUrl, lyricsResults, LYRICS_API,
+    LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
