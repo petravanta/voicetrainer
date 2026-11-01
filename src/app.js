@@ -61,6 +61,8 @@
   DRILLS.control = DATA.control.map(c => ({ ...c, type: 'iso' }));
   // Whisper exercises: resonance with no voice, read from the formants of the whispered sound.
   DRILLS.whisper = DATA.whisper.map(w => ({ ...w, type: 'whisper', steps: (fem) => w.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
+  // Embodied voice: say one sound while conveying a feeling dealt from data/emotions.json. Not scored.
+  DRILLS.embody = DATA.embody.map(e => ({ ...e, type: 'embody', steps: (fem) => e.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
   const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90, whIn: 120 }; // frames at ~60 per second
 
@@ -91,6 +93,7 @@
     clearSpec();
     drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
+    if (state.drill && state.drill.def.type === 'embody') drawEmbody(state.drill);
   }
   function parseColor(s) {
     const c = document.createElement('canvas').getContext('2d');
@@ -524,6 +527,7 @@
     ensureCtx();
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
+    if (def.type === 'embody') return playSamples(Synth.uwu(fs, state.goal, D.VOWELS), mode, `plain "${def.say}", typical ${fem ? 'feminine' : 'masculine'}`);
     if (def.type === 'whisper') return playSamples(Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT), mode, def.kind === 'siren' ? 'whisper sliding up and down' : `typical ${fem ? 'feminine' : 'masculine'} whisper`);
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
@@ -578,7 +582,7 @@
   function startDemoView(d, label) {
     if (!d) return;
     demoLabel = label ? label[0].toLowerCase() + label.slice(1) : 'demo';
-    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
+    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
     d.offTarget = null; // a "sounds closer to..." note from before the demo no longer applies
@@ -590,7 +594,7 @@
     const m = $('drill-msg');
     if (m && m.classList.contains('demo-msg')) { m.classList.remove('demo-msg'); m.textContent = d.result ? (d.msgBefore || '') : state.running ? 'Listening...' : ''; }
     d.offTarget = null;
-    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
+    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
   }
@@ -599,6 +603,7 @@
     if (t === 'breath') updateBreath(d, force);
     else if (t === 'iso') updateIso(d, force);
     else if (t === 'whisper') updateWhisper(d, force);
+    else if (t === 'embody') updateEmbody(d, force);
     else if (t === 'prosody' && !force) updateProsody(d);
   }
   function setExampleUi(mode) {
@@ -676,6 +681,7 @@
   function onFrame(fr) {
     frameCount++;
     let frRes = NaN, frSib = NaN, frVowel = null; // this frame's scores, for the per-word reading report
+    let frAny = NaN; // this frame's resonance, demo voice included (for the embody view)
     drawSpecColumn(fr, an.fsd);
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
     if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
@@ -718,6 +724,7 @@
           vowel = cls.vowel; score = score100(cls.alpha); ok = true;
         }
         if (ok) {
+          frAny = score;
           if (!gated) { addVowelToSession(vowel.key, score, F); frRes = score; frVowel = vowel.key; }
           pushMeter(score, gated);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
@@ -765,6 +772,10 @@
     if (dd && dd.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) dd.demoIso.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (d && d.def.type === 'whisper' && d.whFr) { d.whFr.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount }); if (d.whFr.length > 3600) d.whFr.shift(); }
     if (dd && dd.def.type === 'whisper' && dd.demoWh) dd.demoWh.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount });
+    if ((d || dd) && (d || dd).def.type === 'embody') {
+      const e = d ? d.emb : dd.demoEmb;
+      if (e) { e.push({ n: frameCount, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frAny }); if (e.length > 900) e.shift(); }
+    }
     if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
@@ -843,7 +854,7 @@
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
@@ -869,6 +880,7 @@
     if (d.def.type === 'breath') return renderBreathPanel(d);
     if (d.def.type === 'iso') return renderIsoPanel(d);
     if (d.def.type === 'whisper') return renderWhisperPanel(d);
+    if (d.def.type === 'embody') return renderEmbodyPanel(d);
     if (d.def.type === 'prosody') return renderProsodyPanel(d);
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
@@ -1316,6 +1328,7 @@
     if (def.type === 'breath') return updateBreath(d);
     if (def.type === 'iso') return updateIso(d);
     if (def.type === 'whisper') return updateWhisper(d);
+    if (def.type === 'embody') return updateEmbody(d);
     if (def.type === 'prosody') return updateProsody(d);
     let prog;
     if (def.type === 'vowel') prog = d.vowelFr.length / NEED.vowel;
@@ -1966,6 +1979,191 @@
       { label: `Typical ${fem ? 'masculine' : 'feminine'} whisper`, make: mk(fem ? 'masc' : 'fem'), grade },
       { label: 'Voiced, not whispered', make: mk(state.goal, { wrong: 'voiced' }), grade },
     ];
+  }
+
+  // ---------------- embodied voice ----------------
+  // "Uwu with feeling": one sound, a feeling dealt at random, a gentle view of where the voice sits
+  // (pitch across, resonance up) and a question to notice what the body did. Nothing is scored or saved
+  // to the history; the takes this visit leave small labelled marks on the view.
+  const Feelings = {
+    KEY: 'voicetrainer.feelings.recent', RECENT: 20,
+    recent() { try { const r = JSON.parse(localStorage.getItem(this.KEY) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } },
+    deal() {
+      const r = this.recent(), f = D.dealFeeling(DATA.emotions, r);
+      r.push(f.id);
+      try { localStorage.setItem(this.KEY, JSON.stringify(r.slice(-this.RECENT))); } catch (e) {}
+      return f;
+    },
+  };
+  const EMB = { hz: [80, 420], trail: 75, hold: 30 }; // view range, trail frames (~1.25 s), resonance carried over gaps
+  function renderEmbodyPanel(d) {
+    const p = $('drill-panel'), def = d.def, fem = state.goal === 'fem';
+    p.innerHTML = `
+      <p class="eyebrow"><span>Embodied voice</span><span>no score</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      <div class="emo-card" aria-live="polite">
+        <p class="emo-lead">Say <b class="emo-say"></b> feeling</p>
+        <p class="emo-name" id="emo-name"></p>
+        <p class="emo-scene" id="emo-scene"></p>
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="emo-next">Another feeling</button>
+          <button type="button" class="btn" id="ex-play">Hear a plain "${def.say}"</button>
+        </div>
+      </div>
+      <ol class="breath-steps"></ol>
+      <div class="coach">
+        <p class="eyebrow"><span>Where your voice is</span><span id="emo-count" class="trend"></span></p>
+        <canvas id="cv-embody" height="200" role="img" aria-label="Your pitch (across) and resonance (up) with the ${fem ? 'high, bright' : 'low, darker'} home zone shaded"></canvas>
+        <p class="emo-where" id="emo-where"></p>
+        <p class="coach-why">Across is pitch, up is resonance (darker to brighter, on the same scale as the meter). The shaded corner is home for your goal. The dot is your voice now with a short tail; each finished take leaves a small mark named after its feeling. Wandering is part of it: nothing here is scored or saved.</p>
+      </div>
+      <div class="emo-reflect">
+        <p class="eyebrow"><span>Notice</span><span id="emo-after" class="trend"></span></p>
+        <p class="emo-q" id="emo-q"></p>
+        <div><button type="button" class="btn sm" id="emo-q-next">Another question</button></div>
+      </div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    p.querySelector('.drill-help').textContent = def.why;
+    p.querySelector('.emo-say').textContent = `"${def.say}"`;
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps(fem)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    d.emb = []; d.demoEmb = []; d.marks = []; d.takes = 0; d.takeEnd = frameCount; d.felt = new Set(); d.eased = {};
+    d.q = Math.floor(Math.random() * def.reflect.length);
+    $('emo-next').addEventListener('click', () => { dealFeeling(d); });
+    $('emo-q-next').addEventListener('click', () => { d.q = (d.q + 1) % def.reflect.length; showReflect(d, false); });
+    $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    dealFeeling(d);
+    showReflect(d, false);
+    updateEmbody(d, true);
+  }
+  function dealFeeling(d) {
+    d.feeling = Feelings.deal();
+    $('emo-name').textContent = d.feeling.name;
+    $('emo-scene').textContent = d.feeling.scene;
+    const c = document.querySelector('.emo-card');
+    if (c) { c.classList.remove('dealt'); void c.offsetWidth; c.classList.add('dealt'); }
+  }
+  function showReflect(d, after) {
+    const q = $('emo-q'); if (!q) return;
+    q.textContent = d.def.reflect[d.q];
+    $('emo-after').textContent = after && d.lastTake ? `after "${d.def.say}" as ${d.lastTake}` : '';
+  }
+  // the smoothed point for each frame: pitch is the median of the last few voiced frames (tames octave
+  // slips on "oo"), resonance carries over short gaps since the glide is rarely steady enough to read
+  function embodyPoints(frames) {
+    const out = [], f0s = [];
+    let res = NaN, resN = -1e9;
+    for (const f of frames) {
+      if (Number.isFinite(f.res)) { res = f.res; resN = f.n; }
+      if (!f.v) { out.push(null); continue; }
+      f0s.push(f.f0); if (f0s.length > 7) f0s.shift();
+      out.push({ n: f.n, f0: D.median(f0s), res: f.n - resN <= EMB.hold ? res : NaN });
+    }
+    return out;
+  }
+  function inHome(pt) {
+    const [plo, phi] = pitchBand(), [rlo, rhi] = target();
+    return pt && pt.f0 >= plo && pt.f0 <= phi && Number.isFinite(pt.res) && pt.res >= rlo && pt.res <= rhi;
+  }
+  function updateEmbody(d, force) {
+    if (!force && frameCount % 3) return;
+    const where = $('emo-where'); if (!where) return;
+    const demo = !!d.demoOn, frames = (demo ? d.demoEmb : d.emb) || [], fem = state.goal === 'fem';
+    const pts = embodyPoints(frames.slice(-EMB.trail - 10));
+    d.view = { pts, demo };
+    // a finished take: a voiced stretch followed by a pause
+    if (!demo && frameCount % 6 === 0 && frames.length) {
+      for (const [a, b] of D.voicedTakes(frames.map(f => f.v))) {
+        if (frames[b].n <= d.takeEnd) continue;
+        d.takeEnd = frames[b].n;
+        const all = embodyPoints(frames).slice(a, b + 1).filter(Boolean), r = all.filter(q => Number.isFinite(q.res));
+        if (all.length >= 10) {
+          d.takes++; d.felt.add(d.feeling.id); d.lastTake = d.feeling.name;
+          // one mark per feeling, at the middle of its takes; the latest feelings stay on the view
+          let m = d.marks.find(k => k.id === d.feeling.id);
+          if (m) d.marks.splice(d.marks.indexOf(m), 1); else m = { id: d.feeling.id, name: d.feeling.name, f0s: [], rs: [] };
+          m.f0s.push(D.median(all.map(q => q.f0))); if (r.length >= 3) m.rs.push(D.median(r.map(q => q.res)));
+          m.f0 = D.median(m.f0s); m.res = m.rs.length ? D.median(m.rs) : NaN;
+          d.marks.push(m); if (d.marks.length > 10) d.marks.shift();
+          d.q = (d.q + 1) % d.def.reflect.length;
+          showReflect(d, true);
+        }
+      }
+    }
+    drawEmbody(d);
+    const last = pts.filter(Boolean).at(-1), now = last && frameCount - last.n < 20 ? last : null;
+    const who = demo ? 'Demo voice: ' : '';
+    let text;
+    if (!now) text = demo ? (exSrc ? `Demo playing (${demoLabel}).` : `That was the demo voice. Say "${d.def.say}" yourself to carry on.`)
+      : !state.running ? `Start the microphone, then say "${d.def.say}" feeling ${d.feeling.name}.` : `Say "${d.def.say}" when you're ready.`;
+    else if (inHome(now)) text = `${who}home: ${fem ? 'high and bright' : 'low and darker'}.`;
+    else {
+      const [plo, phi] = pitchBand(), [rlo, rhi] = target(), bits = [];
+      if (now.f0 < plo) bits.push('lower pitch'); else if (now.f0 > phi) bits.push('higher pitch');
+      if (Number.isFinite(now.res)) { if (now.res < rlo) bits.push('darker'); else if (now.res > rhi) bits.push('brighter'); }
+      text = bits.length ? `${who}wandered: ${bits.join(', ')} than home.${demo ? '' : ' That is fine; see if the feeling can come home with you.'}` : `${who}listening for the vowel...`;
+    }
+    where.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    where.classList.toggle('ok', !!now && inHome(now));
+    $('emo-count').textContent = d.takes ? `${d.takes} take${d.takes > 1 ? 's' : ''} · ${d.felt.size} feeling${d.felt.size > 1 ? 's' : ''}` : '';
+  }
+  function drawEmbody(d) {
+    const cv = $('cv-embody'); if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, fem = state.goal === 'fem';
+    const pad = { l: 26 * dpr, r: 10 * dpr, t: 16 * dpr, b: 22 * dpr };
+    const lh0 = Math.log(EMB.hz[0]), lh1 = Math.log(EMB.hz[1]);
+    const X = (hz) => pad.l + clamp((Math.log(hz) - lh0) / (lh1 - lh0), 0, 1) * (w - pad.l - pad.r);
+    const Y = (r) => h - pad.b - clamp(r, 0, 100) / 100 * (h - pad.t - pad.b);
+    const view = d.view || { pts: [] }, pts = view.pts, last = pts.filter(Boolean).at(-1);
+    const now = last && frameCount - last.n < 20 ? last : null, home = !!now && inHome(now);
+    g.clearRect(0, 0, w, h);
+    // frame and light grid
+    g.strokeStyle = C.line; g.lineWidth = dpr; g.strokeRect(pad.l, pad.t, w - pad.l - pad.r, h - pad.t - pad.b);
+    g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'center';
+    for (const hz of [100, 150, 200, 300]) {
+      g.globalAlpha = 0.5; g.beginPath(); g.moveTo(X(hz), pad.t); g.lineTo(X(hz), h - pad.b); g.stroke(); g.globalAlpha = 1;
+      g.fillText(hz + ' Hz', X(hz), h - 7 * dpr);
+    }
+    g.save(); g.translate(11 * dpr, (pad.t + h - pad.b) / 2); g.rotate(-Math.PI / 2); g.fillText('darker · brighter', 0, 0); g.restore();
+    // home zone
+    const [plo, phi] = pitchBand(), [rlo, rhi] = target(), col = fem ? C.fem : C.masc;
+    g.fillStyle = col; g.globalAlpha = home ? 0.32 : 0.14;
+    g.fillRect(X(plo), Y(rhi), X(phi) - X(plo), Y(rlo) - Y(rhi));
+    g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = (home ? 2 : 1) * dpr; g.setLineDash(home ? [] : [4 * dpr, 4 * dpr]);
+    g.strokeRect(X(plo), Y(rhi), X(phi) - X(plo), Y(rlo) - Y(rhi)); g.setLineDash([]);
+    g.fillStyle = col; g.textAlign = 'left'; g.fillText('home', X(plo) + 5 * dpr, Y(rlo) - 6 * dpr);
+    // marks left by finished takes
+    g.font = `${10 * dpr}px ${C.font}`;
+    const placed = [], lh = 12 * dpr; // labels step down past each other when takes land close together
+    for (const m of d.marks || []) {
+      const x = X(m.f0), y = Number.isFinite(m.res) ? Y(m.res) : h - pad.b - 6 * dpr, right = x > w * 0.7;
+      g.strokeStyle = C.muted; g.lineWidth = 1.2 * dpr; g.beginPath(); g.arc(x, y, 4 * dpr, 0, 6.283); g.stroke();
+      const label = m.name + (m.f0s.length > 1 ? ' ×' + m.f0s.length : ''), tw = g.measureText(label).width;
+      const x0 = right ? x - 7 * dpr - tw : x + 7 * dpr;
+      let ly = y + 3.5 * dpr;
+      while (placed.some(b => Math.abs(b.y - ly) < lh && b.x0 < x0 + tw && x0 < b.x0 + b.w)) ly += lh;
+      placed.push({ x0, y: ly, w: tw });
+      if (Math.abs(ly - (y + 3.5 * dpr)) > 1) { g.globalAlpha = 0.5; g.beginPath(); g.moveTo(x, y); g.lineTo(right ? x0 + tw : x0 - 2 * dpr, ly - 3.5 * dpr); g.stroke(); g.globalAlpha = 1; }
+      g.fillStyle = C.muted; g.textAlign = 'left'; g.fillText(label, x0, ly);
+    }
+    // the tail and the dot
+    const tail = pts.slice(-EMB.trail);
+    g.strokeStyle = C.accent; g.lineCap = 'round'; g.lineWidth = 2.4 * dpr;
+    for (let i = 1; i < tail.length; i++) {
+      const a = tail[i - 1], b = tail[i];
+      if (!a || !b || !Number.isFinite(a.res) || !Number.isFinite(b.res)) continue;
+      g.globalAlpha = 0.1 + 0.6 * i / tail.length;
+      g.beginPath(); g.moveTo(X(a.f0), Y(a.res)); g.lineTo(X(b.f0), Y(b.res)); g.stroke();
+    }
+    g.globalAlpha = 1;
+    if (now) {
+      g.beginPath();
+      if (Number.isFinite(now.res)) { g.fillStyle = home ? C.good : C.accent; g.arc(X(now.f0), Y(now.res), 7 * dpr, 0, 6.283); g.fill(); }
+      else { g.strokeStyle = C.accent; g.lineWidth = 2 * dpr; g.arc(X(now.f0), h - pad.b - 7 * dpr, 6 * dpr, 0, 6.283); g.stroke(); } // pitch only, resonance not read yet
+    }
+    if (view.demo) { g.fillStyle = C.muted; g.textAlign = 'right'; g.fillText('demo voice', w - pad.r - 6 * dpr, pad.t + 13 * dpr); }
   }
 
   function finishDrill(d) {
@@ -3686,7 +3884,7 @@
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
     $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem', true);
