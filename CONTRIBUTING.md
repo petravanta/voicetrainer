@@ -1,6 +1,6 @@
 # Contributing
 
-The easiest way to help is to add practice content: reading texts, practice words, breath exercises, control exercises or whisper exercises. They're plain JSON files in [`data/`](data/), and you don't need to know any JavaScript.
+The easiest way to help is to add practice content: reading texts, practice words, breath exercises, control exercises, whisper exercises, or feelings for the Embody exercise. They're plain JSON files in [`data/`](data/), and you don't need to know any JavaScript.
 
 ## Add an entry
 
@@ -47,6 +47,14 @@ A short word that starts with *s* or *sh*, plus the vowel it carries. The vowel 
     "Hold the \"ah\" with the gauge in the zone."
   ]
 }
+```
+
+### A feeling
+
+Feelings are dealt at random in the Embody exercise. `family` is a rough group (see [`emotions.schema.json`](data/schema/emotions.schema.json)); the next feeling comes from a different family, so rerolls feel different. Keep the scene to one light, kind line.
+
+```json
+{"id": "fe-cosy", "name": "cosy", "family": "calm", "scene": "Thick socks, a hot drink, rain outside."}
 ```
 
 ## Data or code?

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Feelings",
+  "description": "Feelings dealt at random in the embodied-voice exercises (data/embody.json). Each has a short scene to help imagine it.",
+  "type": "array",
+  "minItems": 20,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "name", "family", "scene"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^fe-[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with fe-. Never change or reuse one that has shipped."},
+      "name": {"type": "string", "pattern": "^[a-z][a-z' -]*$", "description": "The feeling, in lowercase, as it reads after \"feeling\" (for example \"smug\")."},
+      "family": {"enum": ["joy", "play", "pride", "calm", "tender", "sad", "anger", "fear", "surprise", "tired", "odd"], "description": "Rough group. The next feeling dealt comes from a different family where possible, so rerolls feel different."},
+      "scene": {"type": "string", "maxLength": 90, "description": "A one-line situation that brings the feeling on. Keep it light and kind; no harm to people or animals."}
+    }
+  }
+}

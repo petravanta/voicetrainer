@@ -321,7 +321,25 @@
     return concat([lead, one(), silence(fs, 0.3), one(), silence(fs, 0.3), one(), lead]);
   }
 
-  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample };
+  // ---------- embodied voice ----------
+  // "uwu" ("eww-woo") said `times` times at the typical values of `goal`: a glide from "ee" into
+  // "oo", a dip for the "w", then a longer "oo" that falls a little. o.f0: pitch scale (default 1).
+  function uwu(fs, goal, VOWELS, o = {}) {
+    const fem = goal === 'fem', V = (k) => { const v = VOWELS.find(x => x.key === k); return fem ? v.W : v.M; };
+    const ee = V('i'), oo = V('u'), w = [oo[0] * 0.9, oo[1] * 0.85, oo[2]];
+    const f0 = (fem ? 190 : 118) * (o.f0 || 1), lead = silence(fs, 0.15);
+    const one = () => concat([
+      voiced(fs, 0.34, f0 * 1.04, f0, oo, { from: ee, to: w, trans: 0.12, ramp: 0.03 }),
+      voiced(fs, 0.07, f0, f0 * 1.02, w, { level: 0.12, ramp: 0.01 }),
+      voiced(fs, 0.5, f0 * 1.06, f0 * 0.94, oo, { from: w, trans: 0.06, ramp: 0.06 }),
+    ]);
+    const parts = [lead];
+    for (let i = 0; i < (o.times || 2); i++) parts.push(one(), silence(fs, 0.6));
+    parts.push(lead);
+    return concat(parts);
+  }
+
+  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
