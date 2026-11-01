@@ -167,6 +167,31 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   got = await D.loadLyricsText({ ...row, text: 'Have it' }, { fetch: () => { throw new Error('no'); }, sleep });
   check(got.text === 'Have it', 'rows that already have text need no request');
 
+  // saved lyrics: most recent first, one entry per song and source, capped, removable, searchable
+  const song = (i, extra) => ({ src: 'lrclib', id: i, title: `Song ${i}`, artist: 'Band', timed: true, text: `[00:01.00]Line ${i}`, ...extra });
+  let saved = [];
+  for (let i = 0; i < 5; i++) saved = D.lyricsCachePut(saved, song(i), 1000 + i);
+  check(saved.length === 5 && saved[0].title === 'Song 4' && saved[4].title === 'Song 0', 'saved lyrics: newest first');
+  saved = D.lyricsCachePut(saved, song(1), 2000);
+  check(saved.length === 5 && saved[0].title === 'Song 1', 'saving a song again moves it to the front, no duplicate');
+  saved = D.lyricsCachePut(saved, song(1, { src: 'ovh', timed: false, text: 'Line 1' }), 2001);
+  check(saved.length === 6, 'the same song from another source is a separate entry');
+  check(D.lyricsCacheGet(saved, { src: 'ovh', artist: ' band', title: 'SONG 1 ' }).text === 'Line 1', 'lookup ignores case and spaces');
+  saved = D.lyricsCacheDrop(saved, saved[0].key);
+  check(saved.length === 5 && !D.lyricsCacheGet(saved, { src: 'ovh', artist: 'Band', title: 'Song 1' }), 'removing one entry');
+  let capped = [];
+  for (let i = 0; i < 50; i++) capped = D.lyricsCachePut(capped, song(i), i, 10);
+  check(capped.length === 10 && capped[0].title === 'Song 49' && capped[9].title === 'Song 40', 'count cap drops the oldest');
+  capped = [];
+  for (let i = 0; i < 5; i++) capped = D.lyricsCachePut(capped, song(i, { text: 'x'.repeat(400) }), i, 40, 1000);
+  check(capped.length === 2 && capped[0].title === 'Song 4', 'size cap drops the oldest');
+  check(D.lyricsCachePut([], song(0, { text: 'x'.repeat(5000) }), 0, 40, 1000).length === 1, 'one song larger than the size cap is still kept');
+  check(D.lyricsCachePut([], song(0, { text: '  ' }), 0).length === 0, 'empty lyrics are not saved');
+  const mixed = D.lyricsCacheClean([song(1, { title: 'Café del Mar', artist: 'Energy 52' }), song(2, { title: 'Other', artist: 'Someone' }), null, { title: 'no text' }, 'junk']);
+  check(mixed.length === 2, 'damaged entries are dropped when loading');
+  check(D.lyricsCacheFind(mixed, 'cafe energy').length === 1 && D.lyricsCacheFind(mixed, '').length === 2 && D.lyricsCacheFind(mixed, 'nope').length === 0, 'search saved lyrics by words, accents ignored');
+  check(D.lyricsCacheClean('not a list').length === 0, 'a broken store reads as empty');
+
   console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
   process.exit(fails ? 1 : 0);
 })();
