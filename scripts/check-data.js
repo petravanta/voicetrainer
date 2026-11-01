@@ -12,15 +12,18 @@ const unique = (file, list, key) => {
 };
 const prefix = (file, list, p) => list.forEach((x) => { if (!x.id.startsWith(p)) errors.push(`${file}.json: id "${x.id}" should start with "${p}"`); });
 
-const texts = load('texts'), words = load('words'), breath = load('breath'), control = load('control'), whisper = load('whisper');
+const texts = load('texts'), words = load('words'), breath = load('breath'), control = load('control'), whisper = load('whisper'), embody = load('embody'), emotions = load('emotions');
 unique('texts', texts, 'id'); prefix('texts', texts, 'b-');
 unique('words', words, 'word');
 unique('breath', breath, 'id'); prefix('breath', breath, 'b-');
 unique('control', control, 'id'); prefix('control', control, 'c-');
 unique('whisper', whisper, 'id'); prefix('whisper', whisper, 'wh-');
+unique('embody', embody, 'id'); prefix('embody', embody, 'em-');
+unique('emotions', emotions, 'id'); prefix('emotions', emotions, 'fe-'); unique('emotions', emotions, 'name');
+if (emotions.length < 60) errors.push(`emotions.json: ${emotions.length} feelings; keep at least 60 so rerolls stay fresh`);
 // Breath and text ids share the b- prefix but live in different lists; keep them distinct anyway
 const textIds = new Set(texts.map((t) => t.id));
 breath.forEach((b) => { if (textIds.has(b.id)) errors.push(`breath.json: id "${b.id}" is also a text id`); });
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`data ok: ${texts.length} texts, ${words.length} words, ${breath.length} breath, ${control.length} control, ${whisper.length} whisper`);
+console.log(`data ok: ${texts.length} texts, ${words.length} words, ${breath.length} breath, ${control.length} control, ${whisper.length} whisper, ${embody.length} embody, ${emotions.length} feelings`);

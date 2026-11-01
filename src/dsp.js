@@ -550,6 +550,30 @@
     return { legs, span: vals.length ? hi - lo : 0, dir };
   }
 
+  // ---------- embodied voice (unscored) ----------
+  // Deals the next feeling: never one of the `recent` ids, and from a family other than the last
+  // one's where it can. rand() returns [0, 1).
+  function dealFeeling(list, recent = [], rand = Math.random) {
+    const seen = new Set(recent), last = list.find(e => e.id === recent[recent.length - 1]);
+    let pool = list.filter(e => !seen.has(e.id) && (!last || e.family !== last.family));
+    if (!pool.length) pool = list.filter(e => !seen.has(e.id));
+    if (!pool.length) pool = list.filter(e => !last || e.id !== last.id);
+    if (!pool.length) pool = list;
+    return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
+  }
+  // Splits a stream of per-frame voicing (true/false, ~60 per second) into takes: voiced stretches
+  // of at least `minOn` frames, ended by `gap` unvoiced frames (short dips, like the "w" in "uwu",
+  // stay inside one take). Returns the finished takes as [start, end] frame indexes.
+  function voicedTakes(voiced, minOn = 18, gap = 24) {
+    const takes = [];
+    let start = -1, last = -1, on = 0;
+    voiced.forEach((v, i) => {
+      if (v) { if (start < 0) { start = i; on = 0; } on++; last = i; }
+      else if (start >= 0 && i - last >= gap) { if (on >= minOn) takes.push([start, last]); start = -1; }
+    });
+    return takes;
+  }
+
   // ---------- streaming analyzer ----------
   class Analyzer {
     constructor(sampleRate) {
@@ -873,6 +897,7 @@
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
+    dealFeeling, voicedTakes,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
