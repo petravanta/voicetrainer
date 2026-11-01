@@ -191,6 +191,10 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   check(mixed.length === 2, 'damaged entries are dropped when loading');
   check(D.lyricsCacheFind(mixed, 'cafe energy').length === 1 && D.lyricsCacheFind(mixed, '').length === 2 && D.lyricsCacheFind(mixed, 'nope').length === 0, 'search saved lyrics by words, accents ignored');
   check(D.lyricsCacheClean('not a list').length === 0, 'a broken store reads as empty');
+  check(D.ownSongMissing({ title: ' ', artist: '' }).join() === 'title,artist' && D.ownSongMissing({ title: 'Mine', artist: '' }).join() === 'artist'
+    && D.ownSongMissing({ title: 'Mine', artist: 'Me' }).length === 0 && D.ownSongMissing(null).length === 2, 'own lyrics need a song name and an artist');
+  const own = D.lyricsCachePut(saved, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La la' }, 3000);
+  check(own[0].src === 'mine' && own[0].title === 'Mine' && own[0].artist === 'Me' && D.lyricsCacheFind(own, 'me mine').length === 1, 'own songs keep their name and artist in Your songs');
 
   console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
   process.exit(fails ? 1 : 0);

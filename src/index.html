@@ -274,7 +274,7 @@
     <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or loading the song file below, avoids that.</p>
     <div class="panel sg-setup" id="sg-setup">
       <section class="sg-saved" id="sg-saved" aria-labelledby="sg-saved-h">
-        <div class="sg-saved-head"><h3 id="sg-saved-h">Your songs <span class="sg-saved-n" id="sg-saved-n"></span></h3><button type="button" class="btn sm" id="sg-saved-clear" hidden>Clear all</button></div>
+        <div class="sg-saved-head"><h3 id="sg-saved-h">Your songs <span class="sg-saved-n" id="sg-saved-n"></span></h3><span class="sg-saved-acts"><button type="button" class="btn sm" id="sg-saved-clear" hidden>Clear all</button><button type="button" class="btn sm" id="sg-new" aria-controls="sg-song">New song</button></span></div>
         <p class="vd-note" id="sg-saved-msg" role="status"></p>
         <ul class="sg-results sg-saved-list" id="sg-saved-list" aria-labelledby="sg-saved-h"></ul>
       </section>
@@ -283,11 +283,20 @@
           <label class="reader-field"><span>Find lyrics</span><input type="search" id="sg-q" placeholder="Artist and song title" autocomplete="off" enterkeyhint="search" maxlength="200"></label>
           <button type="submit" class="btn" id="sg-find-go">Search</button>
         </form>
-        <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved on this device too, and listed under Your songs above, so you can pick them again without searching; × removes one. You can always paste lyrics yourself instead. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
+        <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved on this device too, and listed under Your songs above, so you can pick them again without searching; × removes one. To type or paste lyrics yourself, tap New song and give it a name and an artist. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
         <p class="vd-note" id="sg-find-msg" role="status"></p>
         <ul class="sg-results" id="sg-results" hidden></ul>
       </div>
+      <section class="sg-song" id="sg-song" aria-labelledby="sg-song-h" hidden>
+        <div class="sg-saved-head"><h3 id="sg-song-h">Lyrics</h3><button type="button" class="btn sm" id="sg-song-close">Close</button></div>
+        <p class="sg-song-by" id="sg-song-by"></p>
+        <div class="sg-song-meta" id="sg-song-meta" hidden>
+          <label class="reader-field"><span>Song name</span><input type="text" id="sg-title" maxlength="200" autocomplete="off" required aria-describedby="sg-song-msg"></label>
+          <label class="reader-field"><span>Artist</span><input type="text" id="sg-artist" maxlength="200" autocomplete="off" required aria-describedby="sg-song-msg"></label>
+        </div>
       <label class="reader-field"><span>Lyrics</span><textarea id="sg-lyrics" rows="9" spellcheck="false" placeholder="Paste the lyrics here, one line per line.&#10;&#10;Timed lyrics in LRC format scroll by themselves:&#10;[00:12.40] First line of the song&#10;[00:16.10] Second line"></textarea></label>
+        <div class="sg-song-save"><button type="button" class="btn" id="sg-song-save" hidden>Save to Your songs</button><p class="vd-note" id="sg-song-msg" role="status"></p></div>
+      </section>
       <p class="vd-note" id="sg-parse" role="status"></p>
       <div class="sg-track">
         <label class="btn" for="sg-file" id="sg-file-btn">Load a song file</label>
