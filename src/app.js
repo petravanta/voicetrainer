@@ -3447,10 +3447,18 @@
         else if (e.key === 'Backspace') { e.preventDefault(); this.back(); }
       });
       this.restoreSong(text, meta);
-      Backing.keys().then(keys => { // drop tracks of songs no longer in Your songs
+      Backing.keys().then(async keys => { // drop song files of songs no longer in Your songs
         if (!keys) return;
         const have = new Set(this.savedList().map(r => r.key));
-        keys.forEach(k => { if (have.has(k)) this.backKeys.add(k); else Backing.del(k); });
+        for (const k of keys) {
+          if (!have.has(k)) { Backing.del(k); continue; }
+          const rec = await Backing.get(k);
+          if (rec && rec.kind === 'yt') { // video links used to be kept here; they live in the song's entry in Your songs now
+            const e = this.savedEntry(k);
+            if (e && !e.video) this.storeSaved(D.lyricsCacheVideo(this.savedList(), k, rec));
+            Backing.del(k);
+          } else if (rec) this.backKeys.add(k);
+        }
         this.renderSaved();
       });
     },
@@ -3548,6 +3556,7 @@
         catch (e) { if (l.length <= 1) return this.savedList(); }
       }
     },
+    savedEntry(key) { return key ? this.savedList().find(r => r.key === key) || null : null; },
     remember(r) { if (r && r.text) this.storeSaved(D.lyricsCachePut(this.savedList(), r)); this.renderSaved(); },
     renderSaved() {
       const all = this.savedList(), q = $('sg-q').value, shown = this.shown = D.lyricsCacheFind(all, q);
@@ -3557,7 +3566,7 @@
       list.innerHTML = shown.map((r, k) => {
         const on = !!cur && r.key === cur;
         return `<li><button type="button" data-s="${k}"${on ? ' class="on" aria-current="true"' : ''}><span class="t">${escapeHtml(r.title)}</span>`
-          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), this.backKeys.has(r.key) ? 'backing track' : '', on ? 'loaded now' : ''].filter(Boolean).join(' · '))}</span>`
+          + `<span class="a">${escapeHtml([r.artist, r.src === 'mine' ? 'your lyrics' : this.srcName(r.src), r.video ? 'video attached' : this.backKeys.has(r.key) ? 'song file' : '', on ? 'loaded now' : ''].filter(Boolean).join(' · '))}</span>`
           + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button>`
           + `<button type="button" class="sg-x" data-x="${k}" title="Remove from your songs" aria-label="Remove ${escapeHtml(r.title)}${r.artist ? ' by ' + escapeHtml(r.artist) : ''} from your songs">×</button></li>`;
       }).join('');
@@ -3605,24 +3614,25 @@
       $('sg-results').hidden = true;
       $('sg-song-h').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // the lyrics open at the bottom, under Your songs
       if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
-        note += ` Your backing track is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
+        note += ` The attached ${this.rec && this.rec.kind === 'yt' ? 'video' : 'song file'} is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
       msg.innerHTML = escapeHtml(note) + (prev.text.trim() && prev.text !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '') + extra;
       const undo = $('sg-undo');
       if (undo) undo.addEventListener('click', () => { this.restore(prev); msg.textContent = 'Your earlier lyrics are back.'; if (this.found.length) $('sg-results').hidden = false; });
     },
     // The song on screen: null until one is picked from Your songs or a search, or New song is tapped.
     // { mine, key, src, title, artist, album, duration, timed, dirty }: mine = typed or pasted here (needs a
-    // name and an artist), key = its entry in Your songs (null while not saved), dirty = changed since saved.
+    // name and an artist), key = its entry in Your songs (null while not saved), dirty = changed since saved,
+    // video = a video attached while the song isn't in Your songs yet (it moves into the song's entry when saved).
     song: null,
     songFrom(r) {
       return { mine: r.src === 'mine', key: D.lyricsKey(r), src: String(r.src || ''), title: String(r.title || ''), artist: String(r.artist || ''),
-        album: String(r.album || ''), duration: Number.isFinite(+r.duration) && +r.duration > 0 ? +r.duration : null, timed: !!r.timed, dirty: false };
+        album: String(r.album || ''), duration: Number.isFinite(+r.duration) && +r.duration > 0 ? +r.duration : null, timed: !!r.timed, dirty: false, video: null };
     },
-    blankSong() { return { mine: true, key: null, src: 'mine', title: '', artist: '', album: '', duration: null, timed: false, dirty: true }; },
+    blankSong() { return { mine: true, key: null, src: 'mine', title: '', artist: '', album: '', duration: null, timed: false, dirty: true, video: null }; },
     // After a reload: the song that was open, else lyrics left in the box from before songs had names.
     restoreSong(text, meta) {
       if (meta && typeof meta === 'object' && (meta.mine || String(meta.title || '').trim())) {
-        this.song = { ...this.songFrom(meta), mine: !!meta.mine, key: typeof meta.key === 'string' ? meta.key : null, dirty: !!meta.dirty };
+        this.song = { ...this.songFrom(meta), mine: !!meta.mine, key: typeof meta.key === 'string' ? meta.key : null, dirty: !!meta.dirty, video: D.videoClean(meta.video) };
       } else if (text.trim()) {
         const had = this.savedList().find(r => r.text === text);
         this.song = had ? this.songFrom(had) : this.blankSong();
@@ -3718,11 +3728,14 @@
       const row = { src: 'mine', title: s.title.trim(), artist: s.artist.trim(), timed: D.parseLyrics(text).timed, text };
       const key = D.lyricsKey(row);
       let list = this.savedList();
+      const was = s.key && s.key !== key ? list.find(r => r.key === s.key) : null;
+      if (was) row.video = was.video; // renamed: the attached video moves with it
+      else if (!s.key && s.video) row.video = s.video;
       if (s.key && s.key !== key) list = D.lyricsCacheDrop(list, s.key);
       const replaces = s.key !== key && !!D.lyricsCacheGet(list, row);
       this.storeSaved(D.lyricsCachePut(list, row));
       if (s.key && s.key !== key && this.recKey === s.key) { Backing.del(s.key); this.backKeys.delete(s.key); this.recKey = null; } // renamed: the track moves with it
-      Object.assign(s, { key, title: row.title, artist: row.artist, timed: row.timed, dirty: false });
+      Object.assign(s, { key, title: row.title, artist: row.artist, timed: row.timed, dirty: false, video: null });
       delete $('sg-saved-msg').dataset.keep;
       this.show();
       this.ownNote(`Saved ${row.title} by ${row.artist} in Your songs.` + (replaces ? ' It replaces your earlier song with the same name and artist.' : ''));
@@ -3747,7 +3760,7 @@
       else if (!n) msg.textContent = 'No lyrics yet. You can still sing without them and get your pitch and resonance for the whole song.';
       else if (this.lyr.timed) {
         const t = this.lyr.lines[0].t;
-        msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? 'They follow the backing track.' : 'Press Next line when the first line begins; after that they scroll by themselves.');
+        msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? `They follow the attached ${this.rec && this.rec.kind === 'yt' ? 'video' : 'song file'}.` : 'Press Next line when the first line begins; after that they scroll by themselves.');
       } else msg.textContent = `${n} lines. Press Next line (or the space bar) as you reach each one, or let the app follow your singing.`;
       this.syncFollow(n);
     },
@@ -3780,48 +3793,85 @@
       const need = this.fol ? this.fol.need[this.cur] : 0;
       li.style.setProperty('--sgp', need ? String(Math.min(1, this.fol.n / need)) : '0');
     },
-    // Backing track. this.audio is an <audio> element for a file or a YtTrack for a YouTube video; this.rec is
-    // what is stored for it and this.recKey the song it is stored under (null while it belongs to no saved song).
-    trackIdle: 'No backing track. Sing to music playing anywhere, or add one below.',
+    // Attached video or song file. this.audio is an <audio> element for a file or a YtTrack for a YouTube video;
+    // this.rec is what is stored for it and this.recKey the song it is stored under: a video in the song's entry in
+    // Your songs (D.lyricsCacheVideo), a file in IndexedDB (Backing). While recKey is null the track belongs to no
+    // saved song yet; recFor is then the open song it was attached to (its .video keeps the link across reloads).
+    trackIdle: 'No video attached. Sing to music playing anywhere, or attach one below.',
+    recFor: null,
     // The YouTube karaoke search: the open song's name and artist, else what's typed in Find lyrics.
     karaokeLink() {
       const s = this.song, u = (s && s.title.trim() && D.karaokeSearchUrl(s.title, s.artist)) || D.karaokeSearchUrl($('sg-q').value) || 'https://www.youtube.com/results?search_query=karaoke';
       $('sg-karaoke').href = u;
     },
     trackNote(text) { $('sg-track-name').textContent = text; },
+    trackText() {
+      const r = this.rec; if (!r) return this.trackIdle;
+      const kept = this.recKey ? (r.kind === 'yt' ? ' Kept with this song in Your songs.' : ' Kept with this song in this browser.')
+        : this.song ? ' It is kept with this song once the song is saved in Your songs.'
+        : ' It will be kept with the song you open or start next.';
+      return r.kind === 'yt' ? 'Attached video, shown at the top of this tab.' + kept + ' Wear headphones so the microphone hears only you.'
+        : `Song file: ${r.name}.` + kept;
+    },
     // Show the track that goes with the song on screen: load the song's own, keep a track that belongs to
-    // no song yet (and store it with this one), and put away the previous song's.
+    // no song yet (and store it with this one once it's saved), and put away the previous song's.
     async syncTrack() {
-      const key = this.song && this.song.key || null;
-      if (this.rec && !this.recKey) { if (key) { this.recKey = key; this.storeTrack(); this.trackNote(this.rec.kind === 'yt' ? 'YouTube video, shown at the top of this tab and kept with this song.' : `File: ${this.rec.name}. Kept with this song in this browser.`); } return; }
-      if (this.rec && this.recKey === key) return;
+      const s = this.song, key = s && s.key || null, saved = !!this.savedEntry(key);
+      if (this.rec && !this.recKey && !(this.recFor && this.recFor !== s)) {
+        if (saved) { this.recKey = key; this.recFor = null; if (s.video) { s.video = null; this.storeSong(); } this.storeTrack(); }
+        else if (s) { this.recFor = s; if (this.rec.kind === 'yt') { s.video = D.videoClean(this.rec); this.storeSong(); } }
+        this.trackNote(this.trackText());
+        return;
+      }
+      if (this.rec && this.recKey && this.recKey === key) return;
       if (this.rec) this.dropTrack();
-      if (!key) return;
+      if (!saved) { // a song that isn't in Your songs (yet) can still have a video attached
+        if (s && s.video) { this.playYouTube({ kind: 'yt', ...s.video }, null); this.recFor = s; this.trackNote(this.trackText()); }
+        return;
+      }
+      const e = this.savedEntry(key);
+      if (e.video) { this.playYouTube({ kind: 'yt', ...e.video }, key); return; }
       const want = ++this.trackSeq, rec = await Backing.get(key);
       if (want !== this.trackSeq || !rec || this.rec || !this.song || this.song.key !== key) return;
       if (rec.kind === 'file' && rec.blob) this.playFile(rec.blob, rec.name, rec, key);
-      else if (rec.kind === 'yt' && rec.id) this.playYouTube(rec, key);
+      else if (rec.kind === 'yt' && rec.id) { this.playYouTube(rec, key); this.storeTrack(); } // an older link: moves into the song's entry
     },
     trackSeq: 0,
+    // Keep the track with its song: a video in the song's entry in Your songs, a file in this browser's IndexedDB.
     storeTrack() {
-      if (!this.recKey || !this.rec) return;
+      const r = this.rec; if (!r) return;
       const k = this.recKey;
-      Backing.put(k, this.rec).then(ok => { if (ok) { this.backKeys.add(k); this.renderSaved(); } });
+      if (!k) { if (r.kind === 'yt' && this.recFor) { this.recFor.video = D.videoClean(r); this.storeSong(); } return; }
+      const e = this.savedEntry(k);
+      if (r.kind === 'yt') {
+        if (e) this.storeSaved(D.lyricsCacheVideo(this.savedList(), k, r));
+        Backing.del(k); this.backKeys.delete(k);
+        this.renderSaved();
+      } else {
+        if (e && e.video) this.storeSaved(D.lyricsCacheVideo(this.savedList(), k, null));
+        Backing.put(k, r).then(ok => { if (ok) { this.backKeys.add(k); this.renderSaved(); } });
+      }
+    },
+    // Make sure the open song is in Your songs, so a video attached to it is kept there.
+    keepSong() {
+      const s = this.song; if (!s || this.savedEntry(s.key)) return;
+      if (s.mine) { this.saveOwn(false); return; }
+      const text = $('sg-lyrics').value;
+      if (text.trim()) { this.remember({ ...s, text }); this.show(); }
     },
     useFile(file) {
       this.dropTrack();
-      const key = this.song && this.song.key || null;
-      this.playFile(file, file.name, { kind: 'file', name: file.name, blob: file, offset: 0 }, key);
-      if (key) this.storeTrack();
+      this.playFile(file, file.name, { kind: 'file', name: file.name, blob: file, offset: 0 }, null);
+      this.syncTrack();
     },
     useYouTube(text) {
       const id = D.youtubeId(text), inp = $('sg-yt-url');
       if (!id) { this.trackNote(String(text || '').trim() ? "That isn't a YouTube video link. Open the video on YouTube, use Share, Copy link, and paste it here." : 'Paste a link to a YouTube video first.'); inp.focus(); return; }
       this.dropTrack();
-      const key = this.song && this.song.key || null;
-      this.playYouTube({ kind: 'yt', id, start: D.youtubeStart(text), offset: 0 }, key);
-      if (key) this.storeTrack();
+      this.playYouTube({ kind: 'yt', id, start: D.youtubeStart(text), offset: 0 }, null);
       inp.value = '';
+      this.keepSong(); // attaching a video keeps the song in Your songs
+      this.syncTrack();
     },
     playFile(blob, name, rec, key) {
       this.rec = rec; this.recKey = key;
@@ -3831,12 +3881,12 @@
       this.audio.addEventListener('ended', () => { if (this.on) this.finish(); });
       this.audio.addEventListener('error', () => { this.dropTrack(); this.trackNote(`${name} can't be played by this browser. Try MP3, M4A or WAV.`); });
       this.trackName = name;
-      this.trackNote(`File: ${name}` + (key ? '. Kept with this song in this browser.' : ''));
+      this.trackNote(this.trackText());
       this.trackShown();
     },
     playYouTube(rec, key) {
       this.rec = rec; this.recKey = key; this.trackName = '';
-      this.trackNote('YouTube video, shown at the top of this tab' + (key ? ' and kept with this song.' : '.') + ' Wear headphones so the microphone hears only you.');
+      this.trackNote(this.trackText());
       if (mode === 'sing') this.makeYt(); // otherwise when the Sing tab opens, so YouTube isn't contacted before then
       this.trackShown();
     },
@@ -3851,11 +3901,12 @@
       track.ready.catch((e) => {
         if (this.audio !== track || !/blocked|timeout/.test(e.message)) return;
         track.destroy(); this.audio = null; box.hidden = true; this.trackShown(); // tried again next time the Sing tab opens
-        this.trackNote("YouTube's player couldn't load here (offline, or blocked by this page or a content blocker). " + (this.recKey ? 'The video link is kept with the song, and it will try again next time you open Sing. ' : '') + "Or play the music elsewhere.");
+        this.trackNote("YouTube's player couldn't load here (offline, or blocked by this page or a content blocker). " + (this.recKey ? 'The attached video is kept with the song, and it will try again next time you open Sing. ' : '') + "Or play the music elsewhere.");
       });
     },
     trackShown() {
       $('sg-track-clear').hidden = !this.rec; $('sg-aec-wrap').hidden = !this.audio;
+      $('sg-track-clear').textContent = this.rec && this.rec.kind === 'file' ? 'Remove song file' : 'Remove video';
       $('sg-file-btn').textContent = this.rec && this.rec.kind === 'file' ? 'Use another file' : 'Use a file';
       if (!this.on) this.parse();
     },
@@ -3870,15 +3921,20 @@
       }
       if (this.url) { URL.revokeObjectURL(this.url); this.url = null; }
       $('sg-video').hidden = true;
-      this.rec = null; this.recKey = null; this.trackName = '';
+      this.rec = null; this.recKey = null; this.recFor = null; this.trackName = '';
       this.trackNote(this.trackIdle);
       this.trackShown();
     },
     // Remove: put it away and forget it for this song.
     removeTrack() {
-      const k = this.recKey;
+      const k = this.recKey, s = this.song;
       this.dropTrack();
-      if (k) { Backing.del(k); this.backKeys.delete(k); this.renderSaved(); }
+      if (k) {
+        Backing.del(k); this.backKeys.delete(k);
+        const e = this.savedEntry(k); if (e && e.video) this.storeSaved(D.lyricsCacheVideo(this.savedList(), k, null));
+      }
+      if (s && s.video) { s.video = null; this.storeSong(); }
+      this.renderSaved();
       $('sg-yt-url').focus();
     },
     // Remember the lyric timing set against this track (Next line and the nudges), for next time.
