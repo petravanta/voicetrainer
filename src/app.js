@@ -3,6 +3,7 @@
   const D = window.VTDSP, Synth = window.VTSynth;
   // Practice words, breath and control exercises and reading texts live in data/*.json (see CONTRIBUTING.md); build.js inlines them here
   const DATA = window.VTDATA;
+  const PRON = D.pronIndex(DATA.pron); // word -> its stressed vowels, so a reading checks vowels against the text
   const $ = (id) => document.getElementById(id);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toFixed(d) : '--');
@@ -681,6 +682,7 @@
   function onFrame(fr) {
     frameCount++;
     let frRes = NaN, frSib = NaN, frVowel = null; // this frame's scores, for the per-word reading report
+    const frWord = Reader.idx; // the word this frame's vowel was checked against (the highlight may move on below)
     let frAny = NaN; // this frame's resonance, demo voice included (for the embody view)
     drawSpecColumn(fr, an.fsd);
     pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
@@ -711,8 +713,9 @@
       state.lastF = { F, at: Date.now() };
       state.trail.push([F[0], F[1]]); if (state.trail.length > 24) state.trail.shift();
       if (fr.stable) {
-        let score = NaN, vowel = null, ok = false;
+        let score = NaN, vowel = null, ok = false, mapIt = true;
         const cls = D.classifyVowel(F);
+        const wv = Run.on && !gated && !d ? readingWordVowels() : null;
         if (d && d.def.vowel) {
           const v = D.VOWEL_BY_KEY[d.def.vowel];
           const fit = D.fitVowel(F, v);
@@ -720,12 +723,19 @@
           ok = fit.rms < 0.085 || cls.vowel.key === v.key;
           if (ok) d.vowelFr.push({ F, alpha: fit.alpha, per: fit.per });
           else d.offTarget = { key: cls.vowel.key, n: (d.offTarget && d.offTarget.n || 0) + 1 };
+        } else if (wv && wv.why === 'ok') {
+          // reading: only the vowels this word should have count, so a vowel is never pinned on the wrong word
+          const m = D.matchWordVowel(F, wv.keys, cls);
+          if (m) { vowel = m.vowel; score = score100(m.alpha); ok = true; }
+        } else if (wv && wv.why === 'function') {
+          // "the", "of", "with": reduced in running speech, so not scored at all
         } else if (cls.cost < 0.07) {
           vowel = cls.vowel; score = score100(cls.alpha); ok = true;
+          mapIt = !wv; // a glide ("sign") or a word we can't look up still counts towards overall resonance, but not per vowel
         }
         if (ok) {
           frAny = score;
-          if (!gated) { addVowelToSession(vowel.key, score, F); frRes = score; frVowel = vowel.key; }
+          if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; }
           pushMeter(score, gated);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
@@ -783,7 +793,7 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
-    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: frVowel });
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -801,17 +811,23 @@
     while (meterFrames.length > 1 && now - meterFrames[0].t > AVG_MS) meterFrames.shift();
     state.meter = D.median(meterFrames.map(m => m.s));
   }
-  function addVowelToSession(key, score, F) {
-    (session.vowels[key] = session.vowels[key] || []).push(score);
-    if (session.vowels[key].length > 3000) session.vowels[key].splice(0, 1000);
-    if (F) { // formants too, for the vowel map
+  // perVowel false: the frame counts towards overall resonance only (in a reading, a vowel the text can't confirm)
+  function addVowelToSession(key, score, F, perVowel = true) {
+    if (perVowel) (session.vowels[key] = session.vowels[key] || []).push(score);
+    if (perVowel && session.vowels[key].length > 3000) session.vowels[key].splice(0, 1000);
+    if (F && perVowel) { // formants too, for the vowel map
       const vf = (session.vf[key] = session.vf[key] || []);
       vf.push([F[0], F[1], F[2], score]);
       if (vf.length > 3000) vf.splice(0, 1000);
     }
     session.all.push(score);
     if (session.all.length > 20000) session.all.splice(0, 5000);
-    if (take) { (take.vowels[key] = take.vowels[key] || []).push(score); take.all.push(score); }
+    if (take) { if (perVowel) (take.vowels[key] = take.vowels[key] || []).push(score); take.all.push(score); }
+  }
+  // the vowels of the word the reading highlight is on, looked up once per word
+  function readingWordVowels() {
+    const w = Reader.words[Reader.idx];
+    return w ? (w.vk = w.vk || D.wordVowels(w.text, PRON)) : null;
   }
 
   function renderMeter() {
@@ -2865,7 +2881,7 @@
       breath: round(st.breath),
       // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
       // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
-      vmap: readingVowelMap(st.map, Run.frames, Reader.words),
+      vmap: readingVowelMap(st.map, Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
       byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)]),
     };
     endRun();
@@ -2928,7 +2944,7 @@
     return Object.fromEntries(map.map(m => {
       const cnt = new Map();
       for (const f of frames) if (f.k === m.k && words[f.i]) { const w = words[f.i].text.replace(/^[^\p{L}']+|[^\p{L}']+$/gu, '').toLowerCase(); if (w) cnt.set(w, (cnt.get(w) || 0) + 1); }
-      const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(e => e[0]);
+      const top = [...cnt.entries()].filter(e => e[1] >= 3).sort((a, b) => b[1] - a[1]).slice(0, 4).map(e => e[0]); // a stray frame or two is not "heard in"
       return [m.k, [Math.round(m.F[0]), Math.round(m.F[1]), Math.round(m.F[2]), r1(m.s), m.n, top]];
     }));
   }
@@ -2975,7 +2991,7 @@
         + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
     }).join('');
     return `<div class="vm"><div class="section-head"><h4>Your vowels</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
-      <p class="small muted">Each vowel you held steadily, scored on its own (consonants are left out). ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}</p>
+      <p class="small muted">${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}</p>
       ${vm ? `<div class="vm-chart">${vowelMapSvg(rows)}</div>` : ''}
       <ul class="vm-list">${list}</ul>
       <p class="small muted">Tap a vowel to practise it. Short vowels in quick speech are rarely held long enough to score, so some may be missing.</p></div>`;

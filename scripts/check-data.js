@@ -25,5 +25,13 @@ if (emotions.length < 60) errors.push(`emotions.json: ${emotions.length} feeling
 const textIds = new Set(texts.map((t) => t.id));
 breath.forEach((b) => { if (textIds.has(b.id)) errors.push(`breath.json: id "${b.id}" is also a text id`); });
 
+// Every word of a bundled text needs its vowels known, or a reading can't check the vowels heard on it.
+// Regenerate data/pron.json with scripts/make-pron.js after adding a text.
+const D = require('../src/dsp.js'), pron = D.pronIndex(load('pron'));
+for (const t of texts) {
+  const unknown = [...new Set(t.body.split(/\s+/).filter((w) => /[a-z]/i.test(w) && D.wordVowels(w, pron).why === 'unknown'))];
+  if (unknown.length) errors.push(`texts.json: "${t.id}" has words missing from pron.json: ${unknown.join(' ')} (run scripts/make-pron.js)`);
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`data ok: ${texts.length} texts, ${words.length} words, ${breath.length} breath, ${control.length} control, ${whisper.length} whisper, ${embody.length} embody, ${emotions.length} feelings`);

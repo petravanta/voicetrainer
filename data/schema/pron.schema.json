@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Word vowels",
+  "description": "The stressed vowels of common English words, generated from the CMU Pronouncing Dictionary by scripts/make-pron.js (don't edit by hand; add a word to the script's hand-coded list instead). A reading checks each vowel it hears against the vowels of the word being read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "words"],
+  "properties": {
+    "source": {"type": "string"},
+    "words": {
+      "type": "object",
+      "description": "Code -> space-separated lowercase words. A code has one character per stressed syllable: a vowel key from src/dsp.js (i I e E A a c V o U u r, where A stands for ae) or x for a glide or r-coloured vowel the app doesn't score.",
+      "propertyNames": {"pattern": "^[iIeEAacVoUurx]+$"},
+      "additionalProperties": {"type": "string", "pattern": "^[a-z']+( [a-z']+)*$"}
+    }
+  }
+}
