@@ -1189,6 +1189,13 @@
     return m && t ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : 0;
   }
 
+  // A link to an attached video ({id, start}), the short form YouTube's Share gives; youtubeId/youtubeStart read it back.
+  function youtubeUrl(v) {
+    const id = v && youtubeId(v.id); if (!id) return '';
+    const t = Math.max(0, Math.floor(+v.start || 0));
+    return `https://youtu.be/${id}` + (t ? `?t=${t}` : '');
+  }
+
   // Fetch one JSON document with a timeout. Never throws: the outcome says what happened.
   // 'busy' = the service is overloaded or briefly down (429, 5xx), worth one retry; 'timeout', 'offline'/'network'
   // when no answer came; 'notfound' for 404; 'error' for other answers; 'aborted' when the caller cancelled.
@@ -1332,7 +1339,7 @@
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, videoClean, ownSongMissing,
-    karaokeSearchUrl, youtubeId, youtubeStart,
+    karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
