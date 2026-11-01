@@ -3316,6 +3316,7 @@
   // The music plays somewhere else (headphones) or from a song file loaded here; the microphone is
   // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
   // Nothing is saved; the summary at the end is for this song only.
+  const SING_SAVED_KEY = 'vt.sing.saved'; // lyrics loaded from a search, kept for reuse (see D.lyricsCachePut)
   const SING_KEY = 'vt.sing.lyrics', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
   const Sing = {
     on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
@@ -3326,7 +3327,12 @@
       try { ta.value = localStorage.getItem(SING_KEY) || ''; } catch (e) {}
       ta.addEventListener('input', () => { try { localStorage.setItem(SING_KEY, ta.value); } catch (e) {} this.parse(); });
       $('sg-find').addEventListener('submit', (e) => { e.preventDefault(); this.search(); });
-      $('sg-q').addEventListener('input', () => this.syncWeb());
+      $('sg-q').addEventListener('input', () => { this.syncWeb(); delete $('sg-saved-msg').dataset.keep; this.renderSaved(); });
+      $('sg-saved-list').addEventListener('click', (e) => {
+        const x = e.target.closest('button[data-x]'); if (x) { this.forget(+x.dataset.x); return; }
+        const b = e.target.closest('button[data-s]'); if (b) this.useSaved(+b.dataset.s);
+      });
+      $('sg-saved-clear').addEventListener('click', () => this.forgetAll());
       $('sg-results').addEventListener('click', (e) => {
         const b = e.target.closest('button[data-k]'); if (b) this.pick(+b.dataset.k);
       });
@@ -3348,6 +3354,7 @@
         if (mode !== 'sing' || !this.on || (e.code !== 'Space' && e.key !== ' ') || e.target.closest('input, textarea, button, select, a')) return;
         e.preventDefault(); this.tap();
       });
+      this.renderSaved();
       this.parse();
     },
     // Lyrics search: LRCLIB first (timed lyrics), lyrics.ovh as the backup when LRCLIB is busy or finds nothing.
@@ -3392,6 +3399,8 @@
         if (navigator.onLine === false) head = 'You seem to be offline.';
         else if (!failed.length) head = `No lyrics found for "${q.trim()}". Try the artist and title spelled another way.`;
         else head = `Couldn't get lyrics right now: ${res.tried.map(t => this.triedText(t)).join(', and ')}. These free services are sometimes overloaded; try again in a minute.`;
+        const mine = D.lyricsCacheFind(this.savedList(), q).length;
+        if (mine) head += mine === 1 ? ' One of your saved songs matches; it is below.' : ` ${mine} of your saved songs match; they are below.`;
         msg.innerHTML = escapeHtml(head) + this.webLink(q);
         return;
       }
@@ -3407,7 +3416,8 @@
     },
     async pick(k) {
       const r = this.found[k]; if (!r) return;
-      const ta = $('sg-lyrics'), msg = $('sg-find-msg'), list = $('sg-results');
+      const msg = $('sg-find-msg'), list = $('sg-results');
+      if (!r.text) { const have = D.lyricsCacheGet(this.savedList(), r); if (have) r.text = have.text; }
       if (!r.text) {
         if (this.ctl) this.ctl.abort();
         const seq = ++this.seq, ctl = this.ctl = new AbortController();
@@ -3425,17 +3435,83 @@
         }
         r.text = got.text;
       }
-      const prev = ta.value;
+      this.apply(r, `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''} from ${this.srcName(r.src)}, and saved them on this device.`,
+        ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-more">Other results</button>');
+      this.remember(r);
+      $('sg-more').addEventListener('click', () => { $('sg-results').hidden = false; $('sg-more').remove(); });
+    },
+    // Saved lyrics: every song loaded from a search is kept in this browser (newest first, capped in dsp.js),
+    // listed under the search box and filtered by what is typed there. Nothing leaves the device.
+    shown: [],
+    savedList() { try { return D.lyricsCacheClean(JSON.parse(localStorage.getItem(SING_SAVED_KEY) || '[]')); } catch (e) { return []; } },
+    storeSaved(list) {
+      // A full store drops the oldest songs until the list fits.
+      for (let l = list; ; l = l.slice(0, -1)) {
+        try { if (l.length) localStorage.setItem(SING_SAVED_KEY, JSON.stringify(l)); else localStorage.removeItem(SING_SAVED_KEY); return l; }
+        catch (e) { if (l.length <= 1) return this.savedList(); }
+      }
+    },
+    remember(r) { if (r && r.text) this.storeSaved(D.lyricsCachePut(this.savedList(), r)); this.renderSaved(); },
+    renderSaved() {
+      const all = this.savedList(), q = $('sg-q').value, shown = this.shown = D.lyricsCacheFind(all, q);
+      const box = $('sg-saved'), list = $('sg-saved-list');
+      box.hidden = !all.length;
+      if (!all.length) { list.innerHTML = ''; return; }
+      $('sg-saved-n').textContent = shown.length === all.length ? `(${all.length})` : `(${shown.length} of ${all.length})`;
+      list.innerHTML = shown.map((r, k) => `<li><button type="button" data-s="${k}"><span class="t">${escapeHtml(r.title)}</span>`
+        + `<span class="a">${escapeHtml([r.artist, this.srcName(r.src)].filter(Boolean).join(' · '))}</span>`
+        + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button>`
+        + `<button type="button" class="sg-x" data-x="${k}" title="Remove from saved lyrics" aria-label="Remove ${escapeHtml(r.title)}${r.artist ? ' by ' + escapeHtml(r.artist) : ''} from saved lyrics">×</button></li>`).join('');
+      list.hidden = !shown.length;
+      const msg = $('sg-saved-msg');
+      if (!shown.length && !msg.dataset.keep) msg.textContent = 'None of your saved lyrics match; search to find more.';
+      else if (!msg.dataset.keep) msg.textContent = '';
+    },
+    savedNote(text, undo) {
+      const msg = $('sg-saved-msg');
+      msg.dataset.keep = '1';
+      msg.innerHTML = escapeHtml(text) + (undo ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-saved-undo">Undo</button>' : '');
+      if (undo) $('sg-saved-undo').addEventListener('click', () => { delete msg.dataset.keep; msg.textContent = ''; undo(); });
+    },
+    useSaved(k) {
+      const r = this.shown[k]; if (!r) return;
+      this.apply(r, `Loaded your saved ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''} (from ${this.srcName(r.src)}).`);
+      this.remember(r); // most recently used moves to the top
+    },
+    forget(k) {
+      const r = this.shown[k]; if (!r) return;
+      const before = this.savedList();
+      this.storeSaved(D.lyricsCacheDrop(before, r.key));
+      delete $('sg-saved-msg').dataset.keep;
+      this.renderSaved();
+      if (!$('sg-saved').hidden) this.savedNote(`Removed ${r.title} from saved lyrics.`, () => { this.storeSaved(before); this.renderSaved(); });
+      else this.findNote(`Removed ${r.title}; no saved lyrics left.`, () => { this.storeSaved(before); this.renderSaved(); });
+      const next = $('sg-saved-list').querySelector(`button[data-x="${Math.min(k, this.shown.length - 1)}"]`);
+      (next || $('sg-q')).focus();
+    },
+    forgetAll() {
+      const before = this.savedList(); if (!before.length) return;
+      this.storeSaved([]);
+      this.renderSaved();
+      this.findNote(`Cleared ${before.length} saved song${before.length > 1 ? 's' : ''}.`, () => { this.storeSaved(before); this.renderSaved(); });
+      $('sg-q').focus();
+    },
+    // A status line with an Undo button under the search box (used once the saved list itself is gone).
+    findNote(text, undo) {
+      const msg = $('sg-find-msg');
+      msg.innerHTML = escapeHtml(text) + ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-find-undo">Undo</button>';
+      $('sg-find-undo').addEventListener('click', () => { msg.textContent = ''; undo(); });
+    },
+    // Put lyrics into the box, with Undo when that replaces something, and an extra button or two after the note.
+    apply(r, note, extra = '') {
+      const ta = $('sg-lyrics'), msg = $('sg-find-msg'), prev = ta.value;
       ta.value = r.text; ta.dispatchEvent(new Event('input'));
-      list.hidden = true;
-      let note = `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''} from ${this.srcName(r.src)}.`;
+      $('sg-results').hidden = true;
       if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
         note += ` Your song file is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
-      msg.innerHTML = escapeHtml(note) + (prev.trim() && prev !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '')
-        + ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-more">Other results</button>';
+      msg.innerHTML = escapeHtml(note) + (prev.trim() && prev !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '') + extra;
       const undo = $('sg-undo');
-      if (undo) undo.addEventListener('click', () => { ta.value = prev; ta.dispatchEvent(new Event('input')); msg.textContent = 'Your earlier lyrics are back.'; $('sg-results').hidden = false; });
-      $('sg-more').addEventListener('click', () => { $('sg-results').hidden = false; $('sg-more').remove(); });
+      if (undo) undo.addEventListener('click', () => { ta.value = prev; ta.dispatchEvent(new Event('input')); msg.textContent = 'Your earlier lyrics are back.'; if (this.found.length) $('sg-results').hidden = false; });
     },
     parse() {
       this.lyr = D.parseLyrics($('sg-lyrics').value);
