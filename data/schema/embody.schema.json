@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Embodied voice exercises",
+  "description": "Unscored exercises: say one short sound while conveying a feeling dealt from data/emotions.json, with a gentle live view of pitch and resonance and questions to notice what the body did. Shown in file order.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "title", "cue", "sub", "say", "why", "steps", "reflect"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^em-[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with em-. Never change or reuse one that has shipped."},
+      "title": {"type": "string", "description": "Heading on the exercise."},
+      "cue": {"type": "string", "description": "Short name on the exercise card."},
+      "sub": {"type": "string", "description": "A few words under the name on the card."},
+      "say": {"type": "string", "description": "The sound to say, as shown in the prompt (for example \"uwu\")."},
+      "why": {"type": "string", "description": "What the exercise is for."},
+      "steps": {
+        "type": "array", "minItems": 1,
+        "items": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object", "additionalProperties": false, "required": ["feminine", "masculine"],
+             "properties": {"feminine": {"type": "string"}, "masculine": {"type": "string"}},
+             "description": "A step that depends on the training goal."}
+          ]
+        },
+        "description": "Steps shown in order. Use an object with feminine and masculine for a step that differs by goal."
+      },
+      "reflect": {"type": "array", "minItems": 3, "items": {"type": "string"}, "description": "Questions to notice what changed. One is shown after each try, in turn."}
+    }
+  }
+}
