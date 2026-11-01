@@ -3798,6 +3798,7 @@
     // Your songs (D.lyricsCacheVideo), a file in IndexedDB (Backing). While recKey is null the track belongs to no
     // saved song yet; recFor is then the open song it was attached to (its .video keeps the link across reloads).
     trackIdle: 'No video attached. Sing to music playing anywhere, or attach one below.',
+    backFor: undefined, // the song the Attach section was last set up for (it folds when another song opens)
     recFor: null,
     // The YouTube karaoke search: the open song's name and artist, else what's typed in Find lyrics.
     karaokeLink() {
@@ -3817,10 +3818,12 @@
     // no song yet (and store it with this one once it's saved), and put away the previous song's.
     async syncTrack() {
       const s = this.song, key = s && s.key || null, saved = !!this.savedEntry(key);
+      // Attach video is optional, so it starts folded; a song that has a track opens it (trackShown).
+      if (s !== this.backFor) { this.backFor = s; $('sg-backing').open = false; }
       if (this.rec && !this.recKey && !(this.recFor && this.recFor !== s)) {
         if (saved) { this.recKey = key; this.recFor = null; if (s.video) { s.video = null; this.storeSong(); } this.storeTrack(); }
         else if (s) { this.recFor = s; if (this.rec.kind === 'yt') { s.video = D.videoClean(this.rec); this.storeSong(); } }
-        this.trackNote(this.trackText());
+        this.trackNote(this.trackText()); this.trackShown();
         return;
       }
       if (this.rec && this.recKey && this.recKey === key) return;
@@ -3905,6 +3908,7 @@
       });
     },
     trackShown() {
+      if (this.rec) $('sg-backing').open = true;
       $('sg-track-clear').hidden = !this.rec; $('sg-aec-wrap').hidden = !this.audio;
       $('sg-track-clear').textContent = this.rec && this.rec.kind === 'file' ? 'Remove song file' : 'Remove video';
       $('sg-file-btn').textContent = this.rec && this.rec.kind === 'file' ? 'Use another file' : 'Use a file';
