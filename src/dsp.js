@@ -990,6 +990,106 @@
     });
   }
 
+  // ---------- following a singer through the lyrics ----------
+  // Rough syllables a lyric line asks for: section labels like "[Chorus]" ask for none.
+  function lineSyllables(text) {
+    const t = String(text || '').replace(/\[[^\]]*\]/g, ' ');
+    return t.split(/[\s\-–—]+/).reduce((s, w) => s + countSyllables(w), 0);
+  }
+  // Follows a singer through lyric lines by counting what they sing, never by time alone:
+  //  - a syllable is a voiced onset or an energy peak (NucleusTracker, so room sound, the mic
+  //    switching on and stray blips don't count), or a step to a new note of at least a semitone
+  //    held for 80 ms inside a sung stretch (legato singing often has no dip between syllables;
+  //    octave jumps are ignored as likely pitch-tracker slips, and vibrato is smoothed out),
+  //  - with `auto` on, a line is done once most of its syllables are heard and the singer pauses
+  //    (a short pause when all were heard, a longer one when only about 70% were, since sung
+  //    syllables often merge), or straight away once clearly more than the line holds were heard
+  //    (the singer ran on without a breath; the extra syllables carry into the next line),
+  //  - silence, held notes and instrumental breaks never move it on by themselves,
+  //  - it moves one line at a time and skips lines with no words (LRC breaks, "[Chorus]"); singing
+  //    while one of those is showing (after a manual move) moves to the next line with words.
+  // push() returns {onset, phrase, line}: onset when a syllable was counted, phrase when that
+  // syllable came after a pause (or was the first one), line when the follower moved to a new line.
+  class SingFollower {
+    constructor(lines, opts = {}) {
+      this.need = lines.map(l => lineSyllables(l.text));
+      this.auto = opts.auto !== false;
+      this.donePause = opts.donePause != null ? opts.donePause : 260;
+      this.partPause = opts.partPause != null ? opts.partPause : 600;
+      this.phraseMs = opts.phraseMs != null ? opts.phraseMs : 350;
+      this.tracker = new NucleusTracker(3, 120, opts.tracker || {});
+      this.quietMs = 0; this.gapMs = 0; this.first = true; this.f0s = []; this.note = null; this.stepT = null; this.lastOnset = -1e9;
+      this.cur = -1; this.n = 0;
+      this.setLine(this.nextLine(-1));
+    }
+    nextLine(i) { for (let k = i + 1; k < this.need.length; k++) if (this.need[k] > 0) return k; return -1; }
+    prevLine(i) { for (let k = i - 1; k >= 0; k--) if (this.need[k] > 0) return k; return -1; }
+    // where the singer is now; `carry` syllables already belong to it (manual moves start from 0)
+    setLine(i, carry = 0) { this.cur = i; this.n = carry; }
+    get ready() { const need = this.need[this.cur] || 0; return need > 0 && this.n >= Math.max(1, Math.ceil(0.7 * need)); }
+    advance(carry) {
+      const nx = this.nextLine(this.cur); if (nx < 0) return null;
+      this.setLine(nx, carry); return nx;
+    }
+    push(fr, tMs) {
+      const out = { onset: false, phrase: false, line: null }, tr = this.tracker;
+      let hit = tr.push(fr, tMs);
+      const e = 20 * Math.log10(fr.rms + 1e-9);
+      const sung = tr.armed && fr.kind === 'voiced' && fr.f0 > 0 && e > tr.floor + tr.floorDb;
+      // a new note inside a sung stretch counts as a syllable too
+      if (sung && !hit) {
+        this.f0s.push(fr.f0); if (this.f0s.length > 7) this.f0s.shift();
+        const m = median(this.f0s);
+        if (this.note == null) this.note = m;
+        const d = Math.abs(12 * Math.log2(m / this.note));
+        if (this.f0s.length >= 4 && d >= 1 && Math.abs(d - 12) > 0.7 && tMs - this.lastOnset > 150) {
+          if (this.stepT == null) this.stepT = tMs;
+          else if (tMs - this.stepT >= 80) { hit = true; this.note = m; this.stepT = null; }
+        } else this.stepT = null;
+      }
+      if (hit) {
+        this.f0s = fr.f0 > 0 ? [fr.f0] : []; this.note = fr.f0 > 0 ? fr.f0 : null;
+        this.stepT = null; this.lastOnset = tMs;
+        out.onset = true; out.phrase = this.first || this.gapMs >= this.phraseMs; this.first = false; this.gapMs = 0;
+        this.n++;
+        const need = this.need[this.cur] || 0;
+        if (this.auto && !need) { const l = this.advance(1); if (l != null) out.line = l; } // singing on a break or label line: it's the next one
+        else if (this.auto && need && this.n >= need + Math.max(2, Math.ceil(0.35 * need))) {
+          const l = this.advance(Math.min(this.n - need, 2)); if (l != null) out.line = l;
+        }
+      }
+      if (sung) { if (this.quietMs > 0) this.gapMs = Math.max(this.gapMs, this.quietMs); this.quietMs = 0; }
+      else {
+        const dt = this.lastT == null ? 16 : Math.min(100, Math.max(0, tMs - this.lastT));
+        this.quietMs += dt;
+        if (!tr.armed || fr.kind !== 'voiced') { this.f0s = []; this.note = null; this.stepT = null; }
+        const need = this.need[this.cur] || 0;
+        if (this.auto && need && this.ready && this.quietMs >= (this.n >= need ? this.donePause : this.partPause)) {
+          const l = this.advance(0); if (l != null) out.line = l;
+        }
+      }
+      this.lastT = tMs;
+      return out;
+    }
+  }
+  // Timed (LRC) lyrics with no song file run on a clock, and the singer's phrases correct its drift.
+  // Called when a phrase begins at clock time t (s) while line `cur` is showing and `heard` syllables
+  // had been counted on it before this one. Returns the clock time to jump to, or null to leave it:
+  //  - before the first line: the first phrase starts the song at the first line,
+  //  - the next line starts within `win` s and most of this line was sung: the singer is early, jump
+  //    to the next line,
+  //  - this line started up to `win` s ago and hardly any of it was sung: the singer is late, hold
+  //    the clock back to the start of this line.
+  // A phrase in the middle of a line (a breath) moves nothing, since neither case fits.
+  function lrcSync(lines, need, t, cur, heard, win = 2.5) {
+    const next = (i) => { for (let k = i + 1; k < lines.length; k++) if (need[k] > 0) return k; return -1; };
+    if (cur < 0 || t == null) { const k = next(-1); return k >= 0 && (t == null || lines[k].t - t <= 30) ? lines[k].t : null; }
+    const nx = next(cur), nc = need[cur] || 0;
+    if (nx >= 0 && lines[nx].t - t > 0.3 && lines[nx].t - t <= win && (nc === 0 || heard >= Math.ceil(0.6 * nc))) return lines[nx].t;
+    if (nc > 0 && t - lines[cur].t > 0.5 && t - lines[cur].t <= win && heard <= Math.floor(0.25 * nc)) return lines[cur].t;
+    return null;
+  }
+
   // Lyrics search (LRCLIB, lrclib.net: free, open, no key, CORS enabled; lyrics.ovh below is the backup). Only the typed query is sent.
   // lyricsSearchUrl builds the request; lyricsResults turns its JSON into a short list for the Sing tab:
   // one row per title and artist in the service's order, using a timed (LRC) version when any copy has one,
@@ -1185,7 +1285,7 @@
     yin, lpc, polyRoots, formants, fitVowel, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
-    parseLyrics, lyricLineAt, singSummary, lyricsSearchUrl, lyricsResults, LYRICS_API,
+    parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind,
   };

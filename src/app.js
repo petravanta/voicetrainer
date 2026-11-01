@@ -3317,11 +3317,11 @@
   // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
   // Nothing is saved; the summary at the end is for this song only.
   const SING_SAVED_KEY = 'vt.sing.saved'; // lyrics loaded from a search, kept for reuse (see D.lyricsCachePut)
-  const SING_KEY = 'vt.sing.lyrics', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
+  const SING_KEY = 'vt.sing.lyrics', SING_FOLLOW_KEY = 'vt.sing.follow', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
   const Sing = {
     on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
     audio: null, url: null, trackName: '', started: false, base: 0, at: 0, offset: 0, t0: 0,
-    lastResAt: -1e9, cols: null, empty: false,
+    lastResAt: -1e9, cols: null, empty: false, fol: null,
     init() {
       const ta = $('sg-lyrics');
       try { ta.value = localStorage.getItem(SING_KEY) || ''; } catch (e) {}
@@ -3340,6 +3340,11 @@
       $('sg-track-clear').addEventListener('click', () => this.unload());
       $('sg-start').addEventListener('click', () => this.start());
       $('sg-tap').addEventListener('click', () => this.tap());
+      $('sg-prev').addEventListener('click', () => this.back());
+      let pref = false; try { pref = localStorage.getItem(SING_FOLLOW_KEY) === '1'; } catch (e) {}
+      $('sg-follow').checked = pref;
+      $('sg-follow').addEventListener('change', (e) => this.setFollowPref(e.target.checked));
+      $('sg-follow-btn').addEventListener('click', () => { const on = !this.fol; this.setFollowPref(on); this.followLive(on); });
       $('sg-back').addEventListener('click', () => this.nudge(-0.5));
       $('sg-fwd').addEventListener('click', () => this.nudge(0.5));
       $('sg-pause').addEventListener('click', () => this.pause(!this.paused));
@@ -3351,8 +3356,9 @@
         this.setLine(i);
       });
       document.addEventListener('keydown', (e) => {
-        if (mode !== 'sing' || !this.on || (e.code !== 'Space' && e.key !== ' ') || e.target.closest('input, textarea, button, select, a')) return;
-        e.preventDefault(); this.tap();
+        if (mode !== 'sing' || !this.on || e.target.closest('input, textarea, button, select, a')) return;
+        if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); this.tap(); }
+        else if (e.key === 'Backspace') { e.preventDefault(); this.back(); }
       });
       this.renderSaved();
       this.parse();
@@ -3520,7 +3526,37 @@
       else if (this.lyr.timed) {
         const t = this.lyr.lines[0].t;
         msg.textContent = `${n} timed lines (LRC), the first at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}. ` + (this.audio ? 'They follow the song file.' : 'Press Next line when the first line begins; after that they scroll by themselves.');
-      } else msg.textContent = `${n} lines. Press Next line (or the space bar) as you reach each one.`;
+      } else msg.textContent = `${n} lines. Press Next line (or the space bar) as you reach each one, or let the app follow your singing.`;
+      this.syncFollow(n);
+    },
+    // "Follow my singing" moves through plain lyrics by counting sung syllables, and keeps timed lyrics
+    // in step when they run on their own clock. With a song file the file keeps timed lyrics exact.
+    canFollow(n) { return n > 0 && !(this.lyr.timed && this.audio); },
+    syncFollow(n) {
+      const ok = this.canFollow(n), note = $('sg-follow-note');
+      $('sg-follow-wrap').hidden = !ok;
+      if (ok) note.textContent = this.lyr.timed
+        ? '(approximate): the lyrics start when you start singing, and the start of each phrase you sing nudges them back in step if they drift.'
+        : '(approximate): the next line comes up when you pause after singing most of a line. It counts the syllables you sing, so long runs of quick words or one word over many notes can throw it off; Next line, Back a line or a tap on a line puts it right.';
+    },
+    setFollowPref(on) {
+      $('sg-follow').checked = on;
+      try { localStorage.setItem(SING_FOLLOW_KEY, on ? '1' : '0'); } catch (e) {}
+    },
+    // turn following on or off during a song
+    followLive(on) {
+      if (!this.on || this.empty || !this.canFollow(this.lyr.lines.length)) on = false;
+      this.fol = on ? new D.SingFollower(this.lyr.lines, { auto: !this.lyr.timed }) : null;
+      if (this.fol && this.cur >= 0) this.fol.setLine(this.cur);
+      const b = $('sg-follow-btn');
+      b.setAttribute('aria-pressed', String(!!this.fol)); b.textContent = this.fol ? 'Following your singing' : 'Follow my singing';
+      $('sg-lines').classList.toggle('following', !!this.fol);
+      this.progress(); this.hint();
+    },
+    progress() {
+      const li = $('sg-lines').children[this.cur]; if (!li) return;
+      const need = this.fol ? this.fol.need[this.cur] : 0;
+      li.style.setProperty('--sgp', need ? String(Math.min(1, this.fol.n / need)) : '0');
     },
     load(file) {
       this.unload();
@@ -3564,10 +3600,12 @@
       Object.assign(this, { on: true, paused: false, frames: [], trace: [], cur: -1, started: false, offset: 0, t0: performance.now(), lastResAt: -1e9 });
       $('sg-lines').innerHTML = this.lyr.lines.map((l, i) => `<li data-i="${i}"${l.text ? '' : ' class="gap"'}><span class="sg-t">${escapeHtml(l.text)}</span><span class="sg-badge"></span></li>`).join('');
       $('sg-setup').hidden = true; $('sg-result').hidden = true; $('sg-stage').hidden = false;
-      $('sg-nudge').hidden = !this.lyr.timed; $('sg-tap').hidden = this.empty;
+      $('sg-nudge').hidden = !this.lyr.timed; $('sg-step').hidden = this.empty;
+      $('sg-follow-btn').hidden = this.empty || !this.canFollow(this.lyr.lines.length);
+      this.fol = null; this.followLive($('sg-follow').checked);
       $('sg-pause').textContent = 'Pause'; $('sg-pause').setAttribute('aria-pressed', 'false');
       if (this.audio) { this.audio.currentTime = 0; try { await this.audio.play(); } catch (e) {} }
-      this.setLine(this.lyr.timed ? -1 : 0);
+      this.setLine(this.lyr.timed ? -1 : this.fol ? Math.max(0, this.fol.cur) : 0);
       if (this.lyr.timed && this.audio) this.setLine(D.lyricLineAt(this.lyr.lines, this.clock()));
       requestAnimationFrame(() => { this.draw(); this.paintHud(); });
       $('sg-stage').scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -3575,17 +3613,26 @@
     hint() {
       const h = $('sg-hint');
       if (this.empty) h.textContent = 'Sing freely. Press Finish for your summary.';
+      else if (this.fol && !this.lyr.timed) h.textContent = 'Following your singing: the next line comes up when you pause after a line. It only counts syllables, so if it slips, press Next line or Back a line, or tap a line.';
+      else if (this.fol && !this.started) h.textContent = 'Start the song and sing: the lyrics start with your first phrase. Or press Next line as the first line begins.';
+      else if (this.fol) h.textContent = 'The timed lyrics scroll by themselves, and the start of each phrase you sing nudges them back in step. Still drifting? Press Next line, tap a line, or nudge them by half a second.';
       else if (!this.lyr.timed) h.textContent = 'Press Next line (or the space bar) as you start each line. You can also tap a line.';
       else if (!this.audio && !this.started) h.textContent = 'Start the song, then press Next line (or the space bar) as the first line begins. After that the lyrics scroll by themselves.';
       else h.textContent = 'Lyrics drifting? Press Next line as a line begins, tap a line, or nudge them by half a second.';
       const last = this.cur >= this.lyr.lines.length - 1;
-      $('sg-tap').disabled = last;
+      $('sg-tap').disabled = last; $('sg-prev').disabled = this.cur <= 0;
     },
     tap() {
       if (!this.on || this.empty) return;
       const next = this.cur + 1; if (next >= this.lyr.lines.length) return;
       if (this.lyr.timed) this.setClock(this.lyr.lines[next].t + 0.02);
       this.setLine(next);
+    },
+    back() {
+      if (!this.on || this.empty || this.cur <= 0) return;
+      const i = this.cur - 1;
+      if (this.lyr.timed) this.setClock(this.lyr.lines[i].t + 0.02);
+      this.setLine(i);
     },
     nudge(s) { const t = this.clock(); if (t == null) return; this.setClock(Math.max(0, t + s)); this.follow(); },
     pause(p) {
@@ -3602,8 +3649,9 @@
       const i = D.lyricLineAt(this.lyr.lines, t);
       if (i !== this.cur) this.setLine(i);
     },
-    setLine(i) {
+    setLine(i, byFollower) {
       const prev = this.cur; this.cur = i;
+      if (this.fol && !byFollower && i >= 0 && i !== this.fol.cur) this.fol.setLine(i);
       if (prev >= 0 && prev !== i) this.badge(prev);
       const box = $('sg-lines'), lis = box.children;
       for (let k = 0; k < lis.length; k++) {
@@ -3612,7 +3660,18 @@
       }
       const li = lis[i], reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       box.scrollTo({ top: li ? li.offsetTop - box.clientHeight / 2 + li.offsetHeight / 2 : 0, behavior: reduce ? 'auto' : 'smooth' });
-      this.hint();
+      this.progress(); this.hint();
+    },
+    // one analyser frame for the follower: plain lyrics move when it says so; timed lyrics on their
+    // own clock jump when a phrase starts near a line boundary (see D.lrcSync)
+    followFrame(fr) {
+      const r = this.fol.push(fr, performance.now());
+      if (r.line != null && !this.lyr.timed) { this.setLine(r.line, true); return; }
+      if (r.phrase && this.lyr.timed && !this.audio) {
+        const t = D.lrcSync(this.lyr.lines, this.fol.need, this.clock(), this.cur, this.fol.n - 1);
+        if (t != null) { this.setClock(t + 0.02); this.follow(); this.fol.n = 1; this.hint(); }
+      }
+      if (r.onset) this.progress();
     },
     lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => ({ line: 0, f0: f.f0, res: f.res })), 1)[0]; },
     badge(k) {
@@ -3624,6 +3683,7 @@
     },
     frame(fr, res) {
       if (!this.on || this.paused) return;
+      if (this.fol) this.followFrame(fr);
       this.follow();
       const f0 = fr.kind === 'voiced' ? fr.f0 : 0, now = performance.now();
       if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res });
@@ -3674,7 +3734,7 @@
     finish(fromStop) {
       if (!this.on) return;
       if (this.cur >= 0) this.badge(this.cur);
-      this.on = false; this.paused = false;
+      this.on = false; this.paused = false; this.fol = null;
       if (this.audio) this.audio.pause();
       take = null;
       if (!fromStop && state.running === 'mic') stop();
