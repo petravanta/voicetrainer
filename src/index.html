@@ -270,8 +270,8 @@
 
   <section class="sing" id="sing" data-for="sing" aria-labelledby="h-sing">
     <div class="section-head"><h2 id="h-sing">Sing along</h2><span class="muted small">Not saved. Just for fun and feedback.</span></div>
-    <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD), or add a karaoke backing track below, and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with lyrics you find or paste here. At the end you get each line's resonance and range.</p>
-    <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or as a backing track here, avoids that.</p>
+    <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD), or attach a karaoke video below, and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with lyrics you find or paste here. At the end you get each line's resonance and range.</p>
+    <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or as a video or song file attached here, avoids that.</p>
     <div class="sg-video" id="sg-video" hidden></div>
     <div class="panel sg-setup" id="sg-setup">
       <div class="sg-top">
@@ -288,24 +288,24 @@
           <ul class="sg-results" id="sg-results" hidden></ul>
         </div>
         <section class="sg-backing" id="sg-backing" aria-labelledby="sg-backing-h">
-          <h3 id="sg-backing-h">Backing track <small class="muted">optional</small></h3>
-          <p class="vd-note">Karaoke and instrumental versions of songs are licensed, so the app can't include or download them for you. You can play one from YouTube right here, or a file you have, and it stays with this song in Your songs. Wear headphones: the microphone should hear only you.</p>
+          <h3 id="sg-backing-h">Attach video <small class="muted">optional</small></h3>
+          <p class="vd-note">Karaoke and instrumental versions of songs are licensed, so the app can't include or download them for you. Attach a karaoke video from YouTube (or use a song file you have) and it plays right here and stays with this song in Your songs. Wear headphones: the microphone should hear only you.</p>
           <div class="sg-track">
-            <span class="small" id="sg-track-name">No backing track. Sing to music playing anywhere, or add one below.</span>
-            <button type="button" class="btn sm" id="sg-track-clear" hidden>Remove</button>
+            <span class="small" id="sg-track-name">No video attached. Sing to music playing anywhere, or attach one below.</span>
+            <button type="button" class="btn sm" id="sg-track-clear" hidden>Remove video</button>
           </div>
           <form class="sg-find-row" id="sg-yt-form" novalidate>
             <label class="reader-field"><span>YouTube link</span><input type="search" id="sg-yt-url" enterkeyhint="go" placeholder="Paste a karaoke video link" autocomplete="off" inputmode="url" maxlength="300"></label>
-            <button type="submit" class="btn" style="white-space:nowrap">Play here</button>
+            <button type="submit" class="btn" id="sg-yt-go" style="white-space:nowrap">Attach video</button>
           </form>
           <p class="vd-note"><a id="sg-karaoke" href="https://www.youtube.com/results?search_query=karaoke" target="_blank" rel="noopener noreferrer">Find a karaoke version on YouTube</a> opens a search in a new tab; copy the link of a video you like and paste it above. Some videos can only be played on YouTube itself. The video plays in YouTube's own player, so YouTube's terms and privacy policy apply to it.</p>
           <div class="sg-track">
             <label class="btn" for="sg-file" id="sg-file-btn">Use a file</label>
             <input type="file" id="sg-file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac" hidden>
-            <span class="small muted">An instrumental or karaoke track on this device (MP3, M4A, WAV). It is kept in this browser only.</span>
+            <span class="small muted">Or an instrumental or karaoke track on this device (MP3, M4A, WAV). It is kept in this browser only.</span>
           </div>
         </section>
-        <label class="sg-check" id="sg-aec-wrap" hidden><input type="checkbox" id="sg-aec"> No headphones: take the backing track out of the microphone <small>(echo cancellation; it can colour your voice a little, so headphones are still better)</small></label>
+        <label class="sg-check" id="sg-aec-wrap" hidden><input type="checkbox" id="sg-aec"> No headphones: take the video or song file out of the microphone <small>(echo cancellation; it can colour your voice a little, so headphones are still better)</small></label>
       </div>
       <section class="sg-saved" id="sg-saved" aria-labelledby="sg-saved-h">
         <div class="sg-saved-head"><h3 id="sg-saved-h">Your songs <span class="sg-saved-n" id="sg-saved-n"></span></h3></div>

@@ -196,6 +196,20 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   const own = D.lyricsCachePut(saved, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La la' }, 3000);
   check(own[0].src === 'mine' && own[0].title === 'Mine' && own[0].artist === 'Me' && D.lyricsCacheFind(own, 'me mine').length === 1, 'own songs keep their name and artist in Your songs');
 
+  // attached videos live in the song's entry in Your songs
+  const vid = { id: 'dQw4w9WgXcQ', start: 42, offset: 1.234 };
+  let withVid = D.lyricsCacheVideo(own, own[0].key, vid);
+  check(withVid[0].video.id === 'dQw4w9WgXcQ' && withVid[0].video.start === 42 && withVid[0].video.offset === 1.23 && withVid.length === own.length, 'a video is attached to a saved song');
+  const reloaded = D.lyricsCacheClean(JSON.parse(JSON.stringify(withVid)));
+  check(reloaded[0].video && reloaded[0].video.id === 'dQw4w9WgXcQ', 'the attached video survives storing and reading Your songs');
+  withVid = D.lyricsCachePut(withVid, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La la la' }, 4000);
+  check(withVid[0].text === 'La la la' && withVid[0].video && withVid[0].video.id === 'dQw4w9WgXcQ', 'saving the song again keeps its video');
+  check(D.lyricsCachePut(withVid, { src: 'mine', title: 'Mine', artist: 'Me', text: 'La', video: null }, 5000)[0].video === null, 'video: null removes it');
+  check(D.lyricsCacheVideo(withVid, withVid[0].key, null)[0].video === null, 'removing the video leaves the song');
+  check(D.lyricsCacheDrop(withVid, withVid[0].key).every(r => !r.video), 'removing the song removes its video');
+  check(D.lyricsCacheVideo(withVid, 'no|such|song', vid).every((r, i) => r.key === withVid[i].key && JSON.stringify(r.video) === JSON.stringify(withVid[i].video)), 'unknown songs change nothing');
+  check([null, {}, { id: 'short' }, { id: '<script>xx>' }, 'dQw4w9WgXcQ'].every(v => D.videoClean(v) === null), 'broken video entries are dropped');
+
   // backing tracks: YouTube links and the karaoke search
   const ids = ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'youtu.be/dQw4w9WgXcQ?si=abc', 'https://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ',
     'https://www.youtube.com/shorts/dQw4w9WgXcQ', 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=5', 'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=x', 'dQw4w9WgXcQ'];
