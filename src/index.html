@@ -19,6 +19,7 @@
       <button type="button" role="tab" data-mode="readings" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4.2C6.5 3 4.5 2.7 2 3v9.5c2.5-.3 4.5 0 6 1.2 1.5-1.2 3.5-1.5 6-1.2V3c-2.5-.3-4.5 0-6 1.2zM8 4.2v9.5"/></svg><span>Readings</span></button>
       <button type="button" role="tab" data-mode="freestyle" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12a6 6 0 0 1 12 0M8 12l2.6-4.2"/></svg><span>Freestyle</span></button>
       <button type="button" role="tab" data-mode="practice" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.5"/></svg><span>Practice</span></button>
+      <button type="button" role="tab" data-mode="sing" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 12.2V3.5l7-1.5v8.5"/><circle cx="4.3" cy="12.3" r="1.8"/><circle cx="11.3" cy="10.6" r="1.8"/></svg><span>Sing</span></button>
       <button type="button" role="tab" data-mode="settings" aria-selected="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg><span>Settings</span></button>
     </nav>
   </div>
@@ -42,6 +43,10 @@
         <span class="mode-name">Practice</span>
         <span class="mode-what">One sound at a time with a live coach. Each exercise keeps its own history.</span>
         <span class="mode-meta" id="home-practice-meta"></span></button></li>
+      <li class="mode-card"><button type="button" data-go="sing">
+        <span class="mode-name">Sing along</span>
+        <span class="mode-what">Sing to any song with its lyrics on screen and see your pitch and resonance live, line by line. Nothing is saved.</span>
+        <span class="mode-meta" id="home-sing-meta">Bring headphones</span></button></li>
     </ul>
     <div class="banner" id="home-drive" hidden></div>
   </section>
@@ -262,6 +267,44 @@
       </form>
     </div>
   </div>
+
+  <section class="sing" id="sing" data-for="sing" aria-labelledby="h-sing">
+    <div class="section-head"><h2 id="h-sing">Sing along</h2><span class="muted small">Not saved. Just for fun and feedback.</span></div>
+    <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD) and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with the lyrics you paste here. At the end you get each line's resonance and range.</p>
+    <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or loading the song file below, avoids that.</p>
+    <div class="panel sg-setup" id="sg-setup">
+      <label class="reader-field"><span>Lyrics</span><textarea id="sg-lyrics" rows="9" spellcheck="false" placeholder="Paste the lyrics here, one line per line.&#10;&#10;Timed lyrics in LRC format scroll by themselves:&#10;[00:12.40] First line of the song&#10;[00:16.10] Second line"></textarea></label>
+      <p class="vd-note" id="sg-parse" role="status"></p>
+      <div class="sg-track">
+        <label class="btn" for="sg-file" id="sg-file-btn">Load a song file</label>
+        <input type="file" id="sg-file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac" hidden>
+        <span class="small muted" id="sg-track-name">Optional. A song file on this device plays from here, and timed lyrics follow it exactly.</span>
+        <button type="button" class="btn sm" id="sg-track-clear" hidden>Remove</button>
+      </div>
+      <label class="sg-check" id="sg-aec-wrap" hidden><input type="checkbox" id="sg-aec"> No headphones: take the song file out of the microphone <small>(echo cancellation; it can colour your voice a little, so headphones are still better)</small></label>
+      <div class="btn-row"><button type="button" class="btn primary" id="sg-start">Start singing</button></div>
+    </div>
+    <div class="sg-stage panel" id="sg-stage" hidden>
+      <div class="sg-hud" aria-live="off">
+        <div class="sg-stat"><span class="sg-k">Note</span><b id="sg-note">--</b><small id="sg-hz">&nbsp;</small></div>
+        <div class="sg-stat"><span class="sg-k">Resonance</span><b id="sg-res">--</b><span class="sg-meter" aria-hidden="true"><i class="sg-band" id="sg-band"></i><i class="sg-needle" id="sg-needle" hidden></i></span></div>
+        <div class="sg-stat"><span class="sg-k">Vowel</span><b id="sg-vowel">--</b><small id="sg-clock">&nbsp;</small></div>
+      </div>
+      <figure class="sg-fig">
+        <canvas id="cv-sing" height="150"></canvas>
+        <figcaption class="legend"><span>Pitch over the last 8 seconds, coloured by resonance:</span><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span></figcaption>
+      </figure>
+      <div class="sg-controls">
+        <button type="button" class="btn primary" id="sg-tap">Next line</button>
+        <span class="btn-pair" id="sg-nudge" hidden><button type="button" class="btn" id="sg-back" title="Lyrics are ahead of the song: hold them back half a second" aria-label="Hold the lyrics back half a second">−0.5 s</button><button type="button" class="btn" id="sg-fwd" title="Lyrics are behind the song: move them on half a second" aria-label="Move the lyrics on half a second">+0.5 s</button></span>
+        <button type="button" class="btn" id="sg-pause" aria-pressed="false">Pause</button>
+        <button type="button" class="btn" id="sg-finish">Finish</button>
+      </div>
+      <p class="small muted sg-hint" id="sg-hint"></p>
+      <ol class="sg-lines" id="sg-lines"></ol>
+    </div>
+    <div class="panel sg-result" id="sg-result" hidden></div>
+  </section>
 
   <section class="settings" id="settings" data-for="settings" aria-labelledby="h-settings">
     <div class="section-head"><h2 id="h-settings">Settings</h2></div>

@@ -935,12 +935,68 @@
     });
   }
 
+  // ---------- sing along ----------
+  // Lyrics pasted by the user: plain text (one line per lyric line) or LRC ("[01:02.50]words", several
+  // stamps on one line allowed, "[offset:+250]" in ms shows every line that much sooner, as in the LRC format, metadata tags and
+  // enhanced "<01:02.50>" word stamps are dropped). Returns {timed, lines: [{t, text}]} with t in
+  // seconds (null for plain text), sorted by time; blank lines are kept out.
+  function parseLyrics(src) {
+    const rows = String(src || '').replace(/\r\n?/g, '\n').split('\n');
+    const stamp = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
+    let offset = 0, timed = [], plain = [];
+    for (const raw of rows) {
+      const off = raw.match(/^\s*\[offset:\s*([+-]?\d+)\s*\]\s*$/i);
+      if (off) { offset = parseInt(off[1], 10) / 1000; continue; }
+      if (/^\s*\[[a-z#]+:[^\]]*\]\s*$/i.test(raw) && !/^\s*\[\d/.test(raw)) continue; // [ar:..], [ti:..], [length: ..]
+      const ts = [];
+      let m, last = 0; stamp.lastIndex = 0;
+      while ((m = stamp.exec(raw)) && m.index === last) { ts.push(parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(':', '.'))); last = stamp.lastIndex; }
+      const text = raw.slice(last).replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').replace(/\s+/g, ' ').trim();
+      if (ts.length) for (const t of ts) timed.push({ t, text });
+      else if (text) plain.push({ t: null, text });
+    }
+    if (timed.length) {
+      // LRC files use an empty stamped line for an instrumental break: keep it so the highlight can rest there
+      timed = timed.map(l => ({ t: Math.max(0, l.t - offset), text: l.text })).sort((a, b) => a.t - b.t);
+      while (timed.length && !timed[0].text) timed.shift();
+      return { timed: true, lines: timed };
+    }
+    return { timed: false, lines: plain };
+  }
+  // index of the line sung at time t (seconds) in timed lyrics; -1 before the first line
+  function lyricLineAt(lines, t) {
+    let lo = 0, hi = lines.length - 1, ans = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (lines[m].t <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return ans;
+  }
+  // After a song: one summary per lyric line from the frames heard while it was current
+  // ({line, f0 (0 when unvoiced), res (NaN unless a vowel was scored)}). A line needs 0.3 s of voice
+  // for a pitch summary and 8 scored vowel frames for a resonance one.
+  function singSummary(frames, nLines) {
+    const by = Array.from({ length: nLines }, () => ({ f0: [], res: [] }));
+    for (const f of frames) {
+      const b = by[f.line]; if (!b) continue;
+      if (f.f0 > 0) b.f0.push(f.f0);
+      if (Number.isFinite(f.res)) b.res.push(f.res);
+    }
+    return by.map((b, i) => {
+      const voiced = b.f0.length >= 18;
+      const lo = voiced ? quantile(b.f0, 0.1) : null, hi = voiced ? quantile(b.f0, 0.9) : null;
+      return {
+        line: i, voicedFrames: b.f0.length, vowelFrames: b.res.length,
+        f0: voiced ? median(b.f0) : null, lo, hi, span: voiced ? 12 * Math.log2(hi / lo) : null,
+        res: b.res.length >= 8 ? median(b.res) : null,
+      };
+    });
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     yin, lpc, polyRoots, formants, fitVowel, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
+    parseLyrics, lyricLineAt, singSummary,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;
