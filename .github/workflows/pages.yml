@@ -35,6 +35,7 @@ jobs:
       - run: node test/focus.test.js
       - run: node test/follow.test.js
       - run: node test/embody.test.js
+      - run: node test/wordvowels.test.js
       - run: node build.js
       - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp pwa/* site/
       - uses: actions/configure-pages@v5

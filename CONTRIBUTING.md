@@ -13,6 +13,8 @@ The easiest way to help is to add practice content: reading texts, practice word
 
 Only add texts that are free to share, and credit the source in the title. A blank line (`\n\n` inside the string) starts a new paragraph.
 
+The reading checks each vowel it hears against the word being read, so every word of a text needs an entry in `data/pron.json`. The check tells you if one is missing; a maintainer then reruns `node scripts/make-pron.js` (or adds the word to its hand-coded list).
+
 ```json
 {
   "id": "b-lighthouse",

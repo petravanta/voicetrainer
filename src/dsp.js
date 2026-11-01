@@ -291,7 +291,50 @@
     res.sort((p, q) => p.cost - q.cost);
     const best = res[0];
     const scored = fitVowel(F, best.v);
-    return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res[1].cost - best.cost };
+    return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res.length > 1 ? res[1].cost - best.cost : Infinity };
+  }
+
+  // ---------- the vowels a word should have ----------
+  // In a reading the text is known, so a vowel heard on a word is checked against the vowels that word should
+  // have (its stressed syllables, from data/pron.json) instead of being guessed from sound among all twelve.
+  // Short function words are reduced in connected speech ("the" is a quick schwa), so they are not scored;
+  // nor are glides ("sign", "round", "boil") and r-coloured vowels ("arch", "there"), which don't hold one
+  // vowel shape. The cot/caught pair is accepted either way, since many speakers say them alike.
+  const FUNCTION_WORDS = new Set(('a an the and or but nor if as than that this these those of to in on at by for from with into onto upon '
+    + 'off out up via per is am are was were be been being have has had do does did will would shall should can could may might must '
+    + 'i me my he him his she her it its we us our you your they them their there theirs who whom whose which what so not '
+    + "it's i'm i've i'll i'd you're you've you'll he's she's we're we've they're they've that's there's isn't wasn't don't doesn't didn't can't won't").split(' '));
+  const CODE_KEY = { A: 'ae' }; // pron.json writes the two-letter key "ae" as one letter
+  const VOWEL_ALT = { a: ['c'], c: ['a'] };
+  // pron: { words: { code: "word word ..." } } -> Map word -> code
+  function pronIndex(pron) {
+    const m = new Map();
+    for (const [code, ws] of Object.entries((pron && pron.words) || {})) for (const w of ws.split(' ')) m.set(w, code);
+    return m;
+  }
+  // -> { keys: [vowel keys], why: 'ok' | 'function' | 'glide' | 'unknown' }; keys is empty unless why is 'ok'
+  function wordVowels(text, idx) {
+    const w = String(text || '').toLowerCase().replace(/[‘’]/g, "'").replace(/^[^a-z']+|[^a-z']+$/g, '').replace(/^'+|'+$/g, '');
+    if (!w) return { keys: [], why: 'unknown' };
+    if (FUNCTION_WORDS.has(w)) return { keys: [], why: 'function' };
+    const look = (x) => idx.get(x) || (/'s$/.test(x) ? idx.get(x.slice(0, -2)) : null) || (/s$/.test(x) && !/ss$/.test(x) ? idx.get(x.slice(0, -1)) : null);
+    // a hyphenated word ("ninety-three", "mmm-me") has the vowels of its parts; a part we can't look up
+    // (a hum like "mmm") is skipped, and a short part is said in full here, so it counts
+    const code = w.includes('-') ? w.split('-').map(look).filter(Boolean).join('') : look(w);
+    if (!code) return { keys: [], why: 'unknown' };
+    const keys = [...new Set([...code].filter(c => c !== 'x').map(c => CODE_KEY[c] || c))];
+    return keys.length ? { keys, why: 'ok' } : { keys: [], why: 'glide' };
+  }
+  // A steady frame heard on a word with vowels `keys`: the best fit among those vowels, or null when the
+  // frame doesn't sound like any of them (a consonant transition, an unstressed syllable, or the highlight
+  // being on a neighbouring word). Same rule as a vowel drill: a close fit, or the free guess agrees.
+  function matchWordVowel(F, keys, guess = classifyVowel(F)) {
+    const cands = [...new Set(keys.flatMap(k => [k].concat(VOWEL_ALT[k] || [])))].map(k => VOWEL_BY_KEY[k]).filter(Boolean);
+    if (!cands.length) return null;
+    const v = cands.includes(guess.vowel) ? guess.vowel : classifyVowel(F, cands).vowel;
+    const fit = fitVowel(F, v);
+    if (!(cands.includes(guess.vowel) || fit.rms < 0.085) || fit.alpha < -1 || fit.alpha > 2) return null;
+    return { vowel: v, alpha: fit.alpha, per: fit.per };
   }
 
   // Live coaching for a held vowel. Positions use the same 0 (male avg) .. 100 (female avg) scale
@@ -895,7 +938,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
   };
