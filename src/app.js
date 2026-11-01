@@ -3326,6 +3326,7 @@
       try { ta.value = localStorage.getItem(SING_KEY) || ''; } catch (e) {}
       ta.addEventListener('input', () => { try { localStorage.setItem(SING_KEY, ta.value); } catch (e) {} this.parse(); });
       $('sg-find').addEventListener('submit', (e) => { e.preventDefault(); this.search(); });
+      $('sg-q').addEventListener('input', () => this.syncWeb());
       $('sg-results').addEventListener('click', (e) => {
         const b = e.target.closest('button[data-k]'); if (b) this.pick(+b.dataset.k);
       });
@@ -3349,44 +3350,85 @@
       });
       this.parse();
     },
-    // Lyrics search on LRCLIB. Only the typed query leaves the device; manual paste always works.
+    // Lyrics search: LRCLIB first (timed lyrics), lyrics.ovh as the backup when LRCLIB is busy or finds nothing.
+    // Only the typed query leaves the device; manual paste and a web search link always work.
     found: [], seq: 0, ctl: null,
+    io(signal) {
+      return { fetch: (u, o) => fetch(u, o), signal, online: navigator.onLine };
+    },
+    srcName(k) { return (D.LYRICS_SOURCES[k] || {}).name || k; },
+    // One short phrase per failed source: "LRCLIB is busy (503)", "lyrics.ovh didn't answer in time".
+    triedText(t) {
+      const n = this.srcName(t.src);
+      return t.outcome === 'busy' ? `${n} is busy${t.status ? ` (${t.status})` : ''}`
+        : t.outcome === 'timeout' ? `${n} didn't answer in time`
+        : t.outcome === 'empty' || t.outcome === 'notfound' ? `${n} found nothing`
+        : t.outcome === 'error' ? `${n} answered with an error${t.status ? ` (${t.status})` : ''}`
+        : `${n} couldn't be reached`;
+    },
+    webLink(q, lower) {
+      const u = D.lyricsWebUrl(q);
+      return u ? ` <a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer">${lower ? 's' : 'S'}earch the web for these lyrics</a> and paste them below.` : '';
+    },
+    syncWeb() {
+      const u = D.lyricsWebUrl($('sg-q').value), a = $('sg-web');
+      a.hidden = !u; if (u) a.href = u;
+    },
     async search() {
-      const q = $('sg-q').value, url = D.lyricsSearchUrl(q), msg = $('sg-find-msg'), list = $('sg-results'), go = $('sg-find-go');
-      if (!url) { msg.textContent = 'Type an artist and a song title first.'; $('sg-q').focus(); return; }
+      const q = $('sg-q').value, msg = $('sg-find-msg'), list = $('sg-results'), go = $('sg-find-go');
+      if (!D.lyricsSearchUrl(q)) { msg.textContent = 'Type an artist and a song title first.'; $('sg-q').focus(); return; }
       if (this.ctl) this.ctl.abort();
-      const seq = ++this.seq, ctl = this.ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 12000);
+      const seq = ++this.seq, ctl = this.ctl = new AbortController();
       msg.textContent = 'Searching LRCLIB…'; go.disabled = true; list.hidden = true; list.innerHTML = '';
-      let rows = null, why = '';
-      try {
-        const r = await fetch(url, { signal: ctl.signal, headers: { Accept: 'application/json' }, credentials: 'omit', referrerPolicy: 'no-referrer' });
-        if (r.status === 429) why = 'The lyrics service is busy right now. Wait a minute and search again, or paste the lyrics.';
-        else if (!r.ok) why = `The lyrics service answered with an error (${r.status}). Try again later, or paste the lyrics.`;
-        else rows = D.lyricsResults(await r.json());
-      } catch (e) {
-        if (seq !== this.seq) return; // a newer search replaced this one
-        why = navigator.onLine === false ? 'You seem to be offline. Paste the lyrics instead, or search again once you are connected.'
-          : e && e.name === 'AbortError' ? 'The lyrics service took too long to answer. Try again, or paste the lyrics.'
-          : "Couldn't reach the lyrics service. Check your connection and try again, or paste the lyrics.";
-      } finally { clearTimeout(timer); }
-      if (seq !== this.seq) return;
+      const io = this.io(ctl.signal);
+      io.onStep = (k) => { if (seq === this.seq && k === 'ovh') msg.textContent = 'No luck with LRCLIB, trying lyrics.ovh…'; };
+      const res = await D.findLyrics(q, io);
+      if (seq !== this.seq || res.aborted) return; // a newer search replaced this one
       go.disabled = false; this.ctl = null;
-      if (!rows) { msg.textContent = why; return; }
-      this.found = rows;
-      if (!rows.length) { msg.textContent = `No lyrics found for "${q.trim()}". Try the artist and title spelled another way, or paste them.`; return; }
+      const rows = this.found = res.rows, lrc = res.tried[0];
+      if (!rows.length) {
+        const failed = res.tried.filter(t => t.outcome !== 'empty' && t.outcome !== 'notfound');
+        let head;
+        if (navigator.onLine === false) head = 'You seem to be offline.';
+        else if (!failed.length) head = `No lyrics found for "${q.trim()}". Try the artist and title spelled another way.`;
+        else head = `Couldn't get lyrics right now: ${res.tried.map(t => this.triedText(t)).join(', and ')}. These free services are sometimes overloaded; try again in a minute.`;
+        msg.innerHTML = escapeHtml(head) + this.webLink(q);
+        return;
+      }
       const mmss = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-      msg.textContent = `${rows.length} result${rows.length > 1 ? 's' : ''}. Pick one to load its lyrics${rows.some(r => r.timed) ? '; timed ones scroll by themselves' : ''}.`;
+      let lead = `${rows.length} result${rows.length > 1 ? 's' : ''} from ${this.srcName(res.source)}. Pick one to load its lyrics`;
+      if (res.source === 'lrclib') lead += rows.some(r => r.timed) ? '; timed ones scroll by themselves.' : '.';
+      else lead = `${this.triedText(lrc)}, so these come from ${this.srcName(res.source)} instead. Its lyrics are plain (not timed). ` + lead + '.';
+      msg.textContent = lead;
       list.innerHTML = rows.map((r, k) => `<li><button type="button" data-k="${k}"><span class="t">${escapeHtml(r.title)}</span>`
-        + `<span class="a">${escapeHtml([r.artist, r.album, r.duration ? mmss(r.duration) : ''].filter(Boolean).join(' · '))}</span>`
+        + `<span class="a">${escapeHtml([r.artist, r.album, r.duration ? mmss(r.duration) : '', this.srcName(r.src)].filter(Boolean).join(' · '))}</span>`
         + `<span class="k${r.timed ? ' timed' : ''}">${r.timed ? 'Timed' : 'Plain'}</span></button></li>`).join('');
       list.hidden = false;
     },
-    pick(k) {
+    async pick(k) {
       const r = this.found[k]; if (!r) return;
-      const ta = $('sg-lyrics'), prev = ta.value, msg = $('sg-find-msg');
+      const ta = $('sg-lyrics'), msg = $('sg-find-msg'), list = $('sg-results');
+      if (!r.text) {
+        if (this.ctl) this.ctl.abort();
+        const seq = ++this.seq, ctl = this.ctl = new AbortController();
+        msg.textContent = `Getting the lyrics for ${r.title} from ${this.srcName(r.src)}…`;
+        list.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const got = await D.loadLyricsText(r, this.io(ctl.signal));
+        if (seq !== this.seq || got.outcome === 'aborted') return;
+        this.ctl = null;
+        list.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        if (!got.text) {
+          const why = got.outcome === 'notfound' ? `${this.srcName(r.src)} has no lyrics for ${r.title}. Pick another result, or`
+            : `${this.triedText({ src: r.src, outcome: got.outcome, status: got.status })}. Try again in a minute, pick another result, or`;
+          msg.innerHTML = escapeHtml(why) + this.webLink(`${r.artist} ${r.title}`, true);
+          return;
+        }
+        r.text = got.text;
+      }
+      const prev = ta.value;
       ta.value = r.text; ta.dispatchEvent(new Event('input'));
-      $('sg-results').hidden = true;
-      let note = `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''}.`;
+      list.hidden = true;
+      let note = `Loaded ${r.timed ? 'timed' : 'plain'} lyrics for ${r.title}${r.artist ? ' by ' + r.artist : ''} from ${this.srcName(r.src)}.`;
       if (r.timed && this.audio && Number.isFinite(this.audio.duration) && r.duration && Math.abs(this.audio.duration - r.duration) > 4)
         note += ` Your song file is ${Math.round(Math.abs(this.audio.duration - r.duration))} s ${this.audio.duration > r.duration ? 'longer' : 'shorter'}, so this may be another version; nudge the timing while singing if lines drift.`;
       msg.innerHTML = escapeHtml(note) + (prev.trim() && prev !== r.text ? ' <button type="button" class="btn sm sg-find-msg-btn" id="sg-undo">Undo</button>' : '')

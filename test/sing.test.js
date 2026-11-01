@@ -79,5 +79,86 @@ check(!found[1].timed && found[1].text === 'La la', 'a song with plain lyrics on
 check(D.lyricsResults({ message: 'error' }).length === 0 && D.lyricsResults(null).length === 0, 'an error body gives no results');
 check(D.lyricsResults(Array.from({ length: 20 }, (_, i) => ({ trackName: 'S' + i, artistName: 'A', plainLyrics: 'x' }))).length === 8, 'at most 8 results');
 
-console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
-process.exit(fails ? 1 : 0);
+
+// Backup source (lyrics.ovh) and the fallback chain, with a scripted fake fetch (no network here)
+check(D.ovhSearchUrl(' AC/DC  Back in Black ') === 'https://api.lyrics.ovh/suggest/AC%20DC%20Back%20in%20Black', 'lyrics.ovh search URL is tidied and has no slashes in the path');
+check(D.ovhLyricsUrl('Sigur Rós', 'Hoppípolla') === 'https://api.lyrics.ovh/v1/Sigur%20R%C3%B3s/Hopp%C3%ADpolla', 'lyrics.ovh lyrics URL encodes artist and title');
+check(D.ovhLyricsUrl('', 'x') === null && D.ovhSearchUrl(' ') === null, 'nothing is sent without artist and title');
+const ovh = D.ovhResults({ data: [
+  { id: 7, title: 'Made Up Song (Remastered)', title_short: 'Made Up Song', artist: { name: 'Nobody' }, album: { title: 'Single' }, duration: 202 },
+  { id: 8, title: 'Made Up Song', title_short: 'Made Up Song', artist: { name: 'nobody' }, album: { title: 'Live' }, duration: 240 },
+  { id: 9, title: 'No Artist' }, null,
+] });
+check(ovh.length === 1 && ovh[0].title === 'Made Up Song' && ovh[0].src === 'ovh' && !ovh[0].timed && ovh[0].text === null, 'lyrics.ovh results: short title, deduplicated, plain, text fetched on pick');
+check(D.ovhResults({ error: 'x' }).length === 0 && D.ovhResults(null).length === 0, 'a lyrics.ovh error body gives no results');
+check(D.ovhLyrics({ lyrics: 'Paroles de la chanson Made Up Song par Nobody\r\nOne\r\n\r\n\r\n\r\nTwo  \r\n' }) === 'One\n\nTwo', 'lyrics.ovh text loses its heading, CR and extra blank lines');
+check(D.lyricsWebUrl('Nobody  Made Up') === 'https://duckduckgo.com/?q=Nobody%20Made%20Up%20lyrics', 'web search link');
+
+const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
+function fakeFetch(script) {
+  const calls = [];
+  const f = async (url, opts) => {
+    calls.push(url);
+    const host = url.includes('lrclib') ? 'lrclib' : url.includes('/suggest/') ? 'suggest' : 'ovh';
+    const step = script[host].shift();
+    if (!step) throw new Error('unexpected call ' + url);
+    if (step === 'hang') return new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    if (step === 'neterr') throw new TypeError('Failed to fetch');
+    return step;
+  };
+  f.calls = calls; return f;
+}
+const sleeps = [], sleep = async (ms) => { sleeps.push(ms); };
+const lrcOk = [{ id: 3, trackName: 'Made Up Song', artistName: 'Nobody', plainLyrics: 'One', syncedLyrics: '[00:05.00]One' }];
+const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'Nobody' }, duration: 202 }] };
+
+(async () => {
+  let f = fakeFetch({ lrclib: [reply(200, lrcOk)], suggest: [], ovh: [] });
+  let r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep });
+  check(r.source === 'lrclib' && r.rows[0].timed && r.rows[0].src === 'lrclib' && f.calls.length === 1, 'LRCLIB working: one request, timed result, no fallback');
+
+  f = fakeFetch({ lrclib: [reply(503, null, { 'Retry-After': '1' }), reply(200, lrcOk)], suggest: [], ovh: [] });
+  sleeps.length = 0;
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep });
+  check(r.source === 'lrclib' && f.calls.length === 2 && sleeps[0] === 1000, 'LRCLIB 503 then OK: retried once after its Retry-After');
+
+  f = fakeFetch({ lrclib: [reply(503, null), reply(503, null)], suggest: [reply(200, ovhOk)], ovh: [] });
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep });
+  check(r.source === 'ovh' && r.rows.length === 1 && r.tried[0].outcome === 'busy' && r.tried[0].status === 503 && f.calls.length === 3, 'LRCLIB 503 twice: falls back to lyrics.ovh and says LRCLIB was busy');
+
+  f = fakeFetch({ lrclib: ['hang', 'hang'], suggest: [reply(200, ovhOk)], ovh: [] });
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep, timeoutMs: 30 });
+  check(r.source === 'ovh' && r.tried[0].outcome === 'timeout', 'LRCLIB hanging: times out, retries once, then lyrics.ovh');
+
+  f = fakeFetch({ lrclib: [reply(200, [])], suggest: [reply(200, ovhOk)], ovh: [] });
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep });
+  check(r.source === 'ovh' && r.tried[0].outcome === 'empty' && f.calls.length === 2, 'LRCLIB finds nothing: asks lyrics.ovh without retrying LRCLIB');
+
+  f = fakeFetch({ lrclib: ['neterr', 'neterr'], suggest: [reply(502, null), reply(200, { data: [] })], ovh: [] });
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: f, sleep });
+  check(r.source === null && !r.rows.length && r.tried.map(t => t.outcome).join() === 'network,empty', 'both failing: no rows, and each source says what went wrong');
+
+  f = fakeFetch({ lrclib: [reply(400, null)], suggest: [reply(200, ovhOk)], ovh: [] });
+  r = await D.findLyrics('x', { fetch: f, sleep });
+  check(r.tried[0].outcome === 'error' && f.calls.length === 2, 'a 400 from LRCLIB is not retried');
+
+  const ctl = new AbortController();
+  f = fakeFetch({ lrclib: ['hang'], suggest: [], ovh: [] });
+  const p = D.findLyrics('x', { fetch: f, sleep, signal: ctl.signal, timeoutMs: 5000 });
+  setTimeout(() => ctl.abort(), 10);
+  r = await p;
+  check(r.aborted && f.calls.length === 1, 'a newer search cancels the old one without falling back');
+
+  const row = { src: 'ovh', title: 'Made Up Song', artist: 'Nobody', timed: false, text: null };
+  f = fakeFetch({ lrclib: [], suggest: [], ovh: [reply(503, null), reply(200, { lyrics: 'One\r\nTwo' })] });
+  let got = await D.loadLyricsText(row, { fetch: f, sleep });
+  check(got.text === 'One\nTwo' && f.calls[0].endsWith('/v1/Nobody/Made%20Up%20Song'), 'picking a lyrics.ovh result fetches its text (with one retry)');
+  f = fakeFetch({ lrclib: [], suggest: [], ovh: [reply(404, { error: 'No lyrics found' })] });
+  got = await D.loadLyricsText(row, { fetch: f, sleep });
+  check(got.outcome === 'notfound' && f.calls.length === 1, 'lyrics.ovh without lyrics for a title: not found, no retry');
+  got = await D.loadLyricsText({ ...row, text: 'Have it' }, { fetch: () => { throw new Error('no'); }, sleep });
+  check(got.text === 'Have it', 'rows that already have text need no request');
+
+  console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
+  process.exit(fails ? 1 : 0);
+})();
