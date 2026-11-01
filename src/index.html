@@ -296,6 +296,7 @@
         <button type="button" class="btn sm" id="sg-track-clear" hidden>Remove</button>
       </div>
       <label class="sg-check" id="sg-aec-wrap" hidden><input type="checkbox" id="sg-aec"> No headphones: take the song file out of the microphone <small>(echo cancellation; it can colour your voice a little, so headphones are still better)</small></label>
+      <label class="sg-check" id="sg-follow-wrap" hidden><input type="checkbox" id="sg-follow"> <span>Follow my singing <small id="sg-follow-note"></small></span></label>
       <div class="btn-row"><button type="button" class="btn primary" id="sg-start">Start singing</button></div>
     </div>
     <div class="sg-stage panel" id="sg-stage" hidden>
@@ -309,8 +310,9 @@
         <figcaption class="legend"><span>Pitch over the last 8 seconds, coloured by resonance:</span><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span></figcaption>
       </figure>
       <div class="sg-controls">
-        <button type="button" class="btn primary" id="sg-tap">Next line</button>
+        <span class="btn-pair" id="sg-step"><button type="button" class="btn" id="sg-prev" title="Back a line (Backspace)">Back a line</button><button type="button" class="btn primary" id="sg-tap" title="Next line (space bar)">Next line</button></span>
         <span class="btn-pair" id="sg-nudge" hidden><button type="button" class="btn" id="sg-back" title="Lyrics are ahead of the song: hold them back half a second" aria-label="Hold the lyrics back half a second">−0.5 s</button><button type="button" class="btn" id="sg-fwd" title="Lyrics are behind the song: move them on half a second" aria-label="Move the lyrics on half a second">+0.5 s</button></span>
+        <button type="button" class="btn" id="sg-follow-btn" aria-pressed="false" hidden>Follow my singing</button>
         <button type="button" class="btn" id="sg-pause" aria-pressed="false">Pause</button>
         <button type="button" class="btn" id="sg-finish">Finish</button>
       </div>
