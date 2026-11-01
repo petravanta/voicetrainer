@@ -149,6 +149,14 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   r = await p;
   check(r.aborted && f.calls.length === 1, 'a newer search cancels the old one without falling back');
 
+  // Lrclib-Client identifies the app to LRCLIB only; a request that gets no answer at all is retried without it
+  const seen = [];
+  const hdrFetch = async (url, opts) => { seen.push([url.includes('lrclib') ? 'lrclib' : 'ovh', opts.headers ? opts.headers['Lrclib-Client'] : null]); if (seen.length === 1) throw new TypeError('Failed to fetch'); return url.includes('lrclib') ? reply(200, []) : reply(200, ovhOk); };
+  r = await D.findLyrics('Nobody Made Up Song', { fetch: hdrFetch, sleep });
+  check(/^VoiceTrainer \S+ \(https:\/\/github\.com\/petravanta\/voicetrainer\)$/.test(D.LRCLIB_CLIENT) && seen[0][1] === D.LRCLIB_CLIENT, `LRCLIB gets the Lrclib-Client header (${D.LRCLIB_CLIENT})`);
+  check(seen[1][0] === 'lrclib' && seen[1][1] === null, 'after a no-answer failure (maybe a blocked preflight) the retry drops the header');
+  check(seen[2][0] === 'ovh' && seen[2][1] === null, 'lyrics.ovh gets no custom header');
+
   const row = { src: 'ovh', title: 'Made Up Song', artist: 'Nobody', timed: false, text: null };
   f = fakeFetch({ lrclib: [], suggest: [], ovh: [reply(503, null), reply(200, { lyrics: 'One\r\nTwo' })] });
   let got = await D.loadLyricsText(row, { fetch: f, sleep });
