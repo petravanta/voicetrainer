@@ -273,19 +273,19 @@
     <p class="muted sg-lead">Play a song anywhere you like (Spotify, YouTube, a CD) and sing along. The app listens to your microphone and shows your pitch and resonance as you sing, with lyrics you find or paste here. At the end you get each line's resonance and range.</p>
     <p class="note sg-bleed"><b>Use headphones for the music.</b> The microphone hears everything in the room, so music from speakers mixes into the readings and makes them unreliable. On a phone, starting the microphone can pause or quiet music playing in another app; playing the music on a second device, or loading the song file below, avoids that.</p>
     <div class="panel sg-setup" id="sg-setup">
+      <section class="sg-saved" id="sg-saved" aria-labelledby="sg-saved-h">
+        <div class="sg-saved-head"><h3 id="sg-saved-h">Your songs <span class="sg-saved-n" id="sg-saved-n"></span></h3><button type="button" class="btn sm" id="sg-saved-clear" hidden>Clear all</button></div>
+        <p class="vd-note" id="sg-saved-msg" role="status"></p>
+        <ul class="sg-results sg-saved-list" id="sg-saved-list" aria-labelledby="sg-saved-h"></ul>
+      </section>
       <div class="sg-find">
         <form class="sg-find-row" id="sg-find" role="search">
           <label class="reader-field"><span>Find lyrics</span><input type="search" id="sg-q" placeholder="Artist and song title" autocomplete="off" enterkeyhint="search" maxlength="200"></label>
           <button type="submit" class="btn" id="sg-find-go">Search</button>
         </form>
-        <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved on this device too, so you can sing them again without searching; remove them below any time. You can always paste lyrics yourself instead. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
+        <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved on this device too, and listed under Your songs above, so you can pick them again without searching; × removes one. You can always paste lyrics yourself instead. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
         <p class="vd-note" id="sg-find-msg" role="status"></p>
         <ul class="sg-results" id="sg-results" hidden></ul>
-        <div class="sg-saved" id="sg-saved" hidden>
-          <div class="sg-saved-head"><h3 id="sg-saved-h">Saved lyrics <span class="sg-saved-n" id="sg-saved-n"></span></h3><button type="button" class="btn sm" id="sg-saved-clear">Clear all</button></div>
-          <p class="vd-note" id="sg-saved-msg" role="status"></p>
-          <ul class="sg-results sg-saved-list" id="sg-saved-list" aria-labelledby="sg-saved-h"></ul>
-        </div>
       </div>
       <label class="reader-field"><span>Lyrics</span><textarea id="sg-lyrics" rows="9" spellcheck="false" placeholder="Paste the lyrics here, one line per line.&#10;&#10;Timed lyrics in LRC format scroll by themselves:&#10;[00:12.40] First line of the song&#10;[00:16.10] Second line"></textarea></label>
       <p class="vd-note" id="sg-parse" role="status"></p>
