@@ -1206,19 +1206,22 @@
     function vowelStats(x, key) {
       if (!x || x.length < sr * 0.5) return null;
       const an = new Analyzer(sr), hop = Math.round(sr / 60), v = VOWEL_BY_KEY[key];
-      let voiced = 0, steady = 0, ok = 0, airy = 0; const f0 = [], br = [], sc = [];
+      let voiced = 0, steady = 0, ok = 0, airy = 0, withF = 0; const f0 = [], br = [], sc = [], Fs = [], why = { dark: 0, bright: 0, shape: 0 };
       for (let end = an.needed; end <= x.length; end += hop) {
         const fr = an.analyze(x.subarray(0, end));
         if (fr.kind === 'other' && fr.breath != null) { airy++; br.push(fr.breath); }
         if (fr.kind !== 'voiced') continue;
         voiced++; f0.push(fr.f0); if (fr.breath != null) br.push(fr.breath);
         if (!fr.formants) continue;
+        withF++;
         if (!fr.steady) continue;
-        steady++;
+        steady++; Fs.push(fr.formants);
         const fit = scoreVowel(fr.formants, v, fr.f0);
         if (fit.ok) { ok++; sc.push(resScore(fit.alpha)); }
+        else why[fit.alpha < SCORE_RANGE[0] ? 'dark' : fit.alpha > SCORE_RANGE[1] ? 'bright' : 'shape']++; // why a held frame was refused
       }
-      return { voiced, airy, steady: voiced ? steady / voiced : 0, ok: voiced ? ok / voiced : 0,
+      return { voiced, airy, withF: voiced ? withF / voiced : 0, steady: voiced ? steady / voiced : 0, ok: voiced ? ok / voiced : 0, why,
+        F: Fs.length ? [0, 1, 2].map(i => Math.round(median(Fs.map(f => f[i])))) : null,
         f0: f0.length ? median(f0) : 0, breath: br.length ? median(br) : NaN, score: sc.length ? median(sc) : NaN };
     }
     const ah = vowelStats(seg.ah, 'a'), ee = vowelStats(seg.ee, 'i');
@@ -1234,8 +1237,16 @@
       else if (Number.isFinite(b)) add('breath', 'good', 'Clear voicing', `Breathiness ${Math.round(b)}, clear enough to read.`);
       const okFrac = median(held.map(s => s.ok));
       data.read = Math.round(100 * okFrac);
-      if (okFrac < 0.3) add('vowels', 'bad', 'Held vowels hard to read', `Only ${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.`);
-      else if (okFrac < 0.6) add('vowels', 'warn', 'Held vowels partly readable', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.`);
+      // what the app heard on each held vowel, next to the reference, so a misread formant shows
+      const pc = (x) => Math.round(100 * x) + '%';
+      const detail = [[ah, 'a', 'ah'], [ee, 'i', 'ee']].filter(([st]) => st && st.voiced >= 30).map(([st, k, nm]) => {
+        const v = VOWEL_BY_KEY[k], top = Object.entries(st.why).sort((a, b) => b[1] - a[1])[0];
+        return ` "${nm}": formants found in ${pc(st.withF)} of voiced moments, held still in ${pc(st.steady)}, read in ${pc(st.ok)}`
+          + (st.F ? `; heard F1-F3 ${st.F.join('/')} Hz (typical woman ${v.W.join('/')}, man ${v.M.join('/')})` : '')
+          + (top && top[1] > 0 && st.ok < 0.6 ? `; refused mostly as ${top[0] === 'shape' ? "not the shape of this vowel" : top[0] === 'dark' ? 'far darker than any adult' : 'far brighter than any adult'}` : '') + '.';
+      }).join('');
+      if (okFrac < 0.3) add('vowels', 'bad', 'Held vowels hard to read', `Only ${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.${detail}`);
+      else if (okFrac < 0.6) add('vowels', 'warn', 'Held vowels partly readable', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.${detail}`);
       else add('vowels', 'good', 'Held vowels read well', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading${held.length === 2 && Number.isFinite(ah.score) && Number.isFinite(ee.score) ? ` (ah ${Math.round(ah.score)}, ee ${Math.round(ee.score)})` : ''}.`);
       const f0 = median(held.map(s => s.f0));
       data.f0 = Math.round(f0);
