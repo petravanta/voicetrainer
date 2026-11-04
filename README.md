@@ -12,6 +12,10 @@ A browser-based voice training app for tracking **resonance** and **pitch**, aim
 
 Phones get a tab bar along the bottom; the screen stays awake while the microphone runs.
 
+## Microphone and voice check
+
+Settings has a 15-second check for when readings come back mostly empty: 2 seconds of quiet, a held "ah" and "ee", then one sentence. It names the most likely limit: a microphone that only passes phone-call sound (a Bluetooth headset drops to this while its mic is on; found from the highest frequency the voice reaches 10 dB above the room and within 60 dB of its peak, about 8–12 kHz for a normal mic and 3.5–4.5 kHz for a phone line), clipping, background noise, processing that cuts the room to digital silence, a quiet signal, a voice too airy to read, or held vowels the app can't read. Nasality isn't checked: on test voices a nasal resonance didn't show up reliably enough to name. Nothing is saved or sent.
+
 ## Saved data and themes
 
 Readings, practice history, settings, your own texts and Your songs (lyrics plus attached video links; song files stay in the browser) live in one file (`VoiceTrainer data.json`) in your own Google Drive, using the shared sign-in of [petravanta's apps](https://github.com/petravanta/general/blob/main/STANDARDS.md) (drive.file scope: the app only sees the file it creates). Until Drive is connected, or when the app runs from a file or a claude.ai Artifact, the browser keeps them. The Settings tab holds the goal (feminine or masculine; every target follows it), your own target pitch range per goal (or the typical band, with a reset), and the theme (system, light or dark). The theme is shared with the switch in the header and with petravanta's other apps on this device.
@@ -56,6 +60,7 @@ node test/reading.test.js   # syllable counting and tracking for reading along
 node test/heldnotes.test.js   # Notes you held: semitone binning, vibrato across a bin edge, slides, short notes, gaps and pauses
 node test/singfollow.test.js # Follow my singing: a synthetic singer (detached and legato notes, held notes, a breath, a break, room hum) moves the lyrics once per line, and timed-lyrics drift correction
 node test/readres.test.js   # a reading's resonance: running speech gets enough vowel readings, the pooled score keeps its accuracy, and a reading with too few says why
+node test/miccheck.test.js  # microphone and voice check: phone-band mic (Bluetooth call mode), clipping, noise, gated silence and a very breathy voice are each named; a clean setup isn't blamed
 node test/rigor.test.js     # known weak spots: raised pitch earns no resonance, nasal misreads are refused, the ± widens with pitch
 node test/sing.test.js      # lyrics parsing (plain and LRC), lyrics search results, the LRCLIB to lyrics.ovh fallback (with a fake network), the saved-lyrics list and the per-line sing-along summary
 ```

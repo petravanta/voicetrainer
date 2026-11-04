@@ -373,6 +373,13 @@
       </div>
       <p class="vd-note" id="pr-msg" role="status"></p>
     </div>
+    <div class="panel set-card" id="mc-card">
+      <h3>Microphone and voice check</h3>
+      <p class="vd-note">Few readings? 15 seconds to see whether the microphone or the voice is the limit.<button type="button" class="info-btn inline" data-info aria-controls="info-mc" aria-describedby="info-mc" aria-expanded="false" aria-label="About the check">i</button><span class="info-pop" id="info-mc" role="note" hidden>You stay quiet for 2 seconds, hold "ah" and "ee", then read one sentence. The app checks how much of the sound range your microphone passes (a Bluetooth headset in call mode cuts it to phone quality), background noise, clipping, sound processing that cuts the room to silence, how breathy the voice is, and how many of your held vowels it can read. Nothing is saved or sent anywhere.</span></p>
+      <div class="mc-run" id="mc-run" hidden><p class="mc-step" id="mc-step" aria-live="polite"></p><div class="mc-bar"><i id="mc-prog"></i></div></div>
+      <ul class="mc-list" id="mc-list" hidden></ul>
+      <div class="btn-row"><button type="button" class="btn" id="mc-start">Run the check</button></div>
+    </div>
     <div class="panel set-card">
       <h3>Theme</h3>
       <div class="vd-type theme-pick" role="radiogroup" aria-label="Theme">
