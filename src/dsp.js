@@ -298,8 +298,43 @@
   }
   // A fit this far off the male-female line is a measuring error (a nasal resonance or a harmonic taken for a
   // formant, the vowel misheard), not a voice: say "couldn't measure" rather than pin it to 0 or 100.
-  const SCORE_RANGE = [-1, 2];
+  // Wide enough for real adults: in Hillenbrand et al.'s (1995) recordings 3% of women's vowels sit above 2 (refused
+  // before 2026-11), none of the adults' below -1.5 or above 2.5. The nasal and harmonic misreads land far outside.
+  const SCORE_RANGE = [-1.5, 2.5];
   function plausible(fit) { return fit.alpha >= SCORE_RANGE[0] && fit.alpha <= SCORE_RANGE[1] && fit.rms < 0.15; }
+
+  // ---------- the resonance scale people see ----------
+  // alpha (0 = average man, 1 = average woman for the vowel) is spread over 0..100 so that the whole plausible
+  // range fits and nothing a real voice does is pinned at an end: 0 and 100 are the edges of SCORE_RANGE, the
+  // average man is 37.5 and the average woman 62.5, and one point is a 1/25 step of the male-female gap
+  // (about 0.6% in the formants). Scale 1 (before 2026-11) was alpha * 100 clamped to 0..100.
+  const RES_SCALE = 2;
+  const RES_PER_ALPHA = 100 / (SCORE_RANGE[1] - SCORE_RANGE[0]);
+  const resScore = (alpha) => (alpha - SCORE_RANGE[0]) * RES_PER_ALPHA;
+  const resAlpha = (score) => score / RES_PER_ALPHA + SCORE_RANGE[0];
+  const RES_AVG = { masc: resScore(0), fem: resScore(1) };
+  // Target bands: where 90% of real adult speakers of each group sit. Each speaker's median alpha over their
+  // vowels, in Hillenbrand et al. (1995) (45 men, 48 women; the same recordings the averages come from):
+  // men 5th-95th percentile -0.31..0.27, women 0.60..1.46. Rounded out to alpha -0.35..0.3 and 0.6..1.5.
+  // Past the band's far end (brighter than most women for a feminine goal) still counts as on target.
+  const band = (a, b) => [Math.floor(resScore(a)), Math.ceil(resScore(b))]; // rounded outwards, to whole points
+  const RES_BANDS = { masc: band(-0.35, 0.3), fem: band(0.6, 1.5) };
+  // A score saved on scale 1, moved to this one. Scale 1 clamped at 0 and 100, so those two stay at the
+  // scale-1 ends (37.5 and 62.5 here): the real value was that or further out.
+  const fromScale1 = (s) => (typeof s === 'number' && Number.isFinite(s) ? Math.round(resScore(s / 100) * 10) / 10 : s);
+  // Move one saved reading or practice record to this scale (a copy; records already on it are returned as they are).
+  // Practice kinds 'sound' (vowel, consonant, word and whispered-vowel drills) and 'spot' hold resonance scores;
+  // the others are breathiness, semitones, percentages or Hz.
+  function migrateRecord(r, list) {
+    if (!r || r.rs >= RES_SCALE) return r;
+    const o = Object.assign({}, r, { rs: RES_SCALE, rsFrom: r.rs || 1 }); // rsFrom: converted, so the History can say so
+    if (list === 'practice') { if ((r.kind || 'sound') === 'sound' || r.kind === 'spot') o.score = fromScale1(r.score); return o; }
+    o.resonance = fromScale1(r.resonance); o.sibS = fromScale1(r.sibS); o.sibSh = fromScale1(r.sibSh);
+    if (r.vowels) o.vowels = Object.fromEntries(Object.entries(r.vowels).map(([k, v]) => [k, fromScale1(v)]));
+    if (r.vmap) o.vmap = Object.fromEntries(Object.entries(r.vmap).map(([k, e]) => [k, Array.isArray(e) ? e.map((x, i) => (i === 3 ? fromScale1(x) : x)) : e]));
+    if (Array.isArray(r.byWord)) o.byWord = r.byWord.map(w => (Array.isArray(w) ? w.map((x, i) => (i === 2 || i === 3 ? fromScale1(x) : x)) : w));
+    return o;
+  }
   // The resonance score for formants F heard as vowel v at pitch f0 (0 = unknown):
   // { alpha, rms, per, pitchLimited, ok (plausible), spread (± score points) }
   function scoreVowel(F, v, f0 = 0) {
@@ -372,7 +407,9 @@
   // per formant. A formant is fine inside the goal band; outside it, `need` says which way it must
   // move. `focus` is the single most useful change: one formant, or 'all' when every formant is off
   // the same way (a whole-tract change such as larynx height).
-  const COACH_BAND = { fem: [75, 135], masc: [-35, 25] };
+  // Each formant's zone on its own alpha x 100 line. The near edges are the target bands' (see RES_BANDS), so a
+  // voice the meter calls on target isn't told to change; the far edges stay tight, to catch one formant overdone.
+  const COACH_BAND = { fem: [60, 135], masc: [-35, 30] };
   const COACH_WEIGHT = [0.6, 1, 0.8]; // F1 swings with jaw opening and is the noisiest
   // F1 moves about twice as far on this scale as F2/F3 for the same real change, its estimate is the
   // noisiest, and it varies naturally with jaw opening: give it a much wider zone.
@@ -1482,7 +1519,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
