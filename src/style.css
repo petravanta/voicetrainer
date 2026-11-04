@@ -153,6 +153,13 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .meter-card, .chart, .drill-panel, .session, .history { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .meter-card { padding: 18px 20px; display: grid; gap: 14px; align-content: start; }
 .meter-row { display: flex; align-items: center; gap: 18px; }
+.res-score { display: flex; align-items: baseline; gap: 6px; flex: none; }
+.res-pm { font-family: var(--f-mono); font-size: 1rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.method { margin-top: 10px; }
+.method summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+.method ol, .method ul { padding-left: 1.3em; }
+.method li { margin: 4px 0; }
+.method a { color: inherit; }
 .big { font-family: var(--font-mono); font-size: 3.8rem; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; min-width: 2.2ch; }
 .meter-desc { color: var(--muted); max-width: 46ch; }
 .meter { position: relative; overflow: visible; height: 18px; border-radius: 9px; background: linear-gradient(90deg, var(--masc), color-mix(in srgb, var(--masc) 50%, var(--fem)) 50%, var(--fem)); }

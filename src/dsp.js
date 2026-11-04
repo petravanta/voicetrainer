@@ -278,9 +278,39 @@
     return { alpha, rms: Math.sqrt(resid / wsum), per };
   }
 
+  // ---------- what a score can be trusted for ----------
+  // LPC pulls F1 towards the nearest strong harmonic once the pitch gets close to F1 (Kent & Vorperian 2018:
+  // accuracy is about F0/4 at best; Shadle, Nam & Whalen 2016: every automatic method has this bias). Measured on
+  // the synthetic voice, a male-average tract's "ee" scored ~40 at 220 Hz from F1 alone. So above this share of
+  // the vowel's typical F1 the resonance score is read from F2 and F3 only, which hold up far better.
+  const F1_PITCH_RATIO = 0.45;
+  const PITCH_WEIGHTS = [0, 1, 0.8];
+  function pitchLimited(v, f0) { return f0 > 0 && f0 > F1_PITCH_RATIO * Math.sqrt(v.M[0] * v.W[0]); }
+  // Rough best-case spread of a single reading, in score points: each formant read to within F0/4 Hz,
+  // (Kent & Vorperian 2018), passed through the same weighted fit. Grows with pitch; never below a 100 Hz voice.
+  function scoreSpread(F, v, f0, weights) {
+    let num = 0, den = 0;
+    for (let i = 0; i < 3; i++) {
+      const s = Math.log(v.W[i] / v.M[i]), sd = Math.log(1 + Math.max(f0 || 0, 100) / 4 / F[i]);
+      num += (weights[i] * s * sd) ** 2; den += weights[i] * s * s;
+    }
+    return den > 0 ? 100 * Math.sqrt(num) / den : Infinity;
+  }
+  // A fit this far off the male-female line is a measuring error (a nasal resonance or a harmonic taken for a
+  // formant, the vowel misheard), not a voice: say "couldn't measure" rather than pin it to 0 or 100.
+  const SCORE_RANGE = [-1, 2];
+  function plausible(fit) { return fit.alpha >= SCORE_RANGE[0] && fit.alpha <= SCORE_RANGE[1] && fit.rms < 0.15; }
+  // The resonance score for formants F heard as vowel v at pitch f0 (0 = unknown):
+  // { alpha, rms, per, pitchLimited, ok (plausible), spread (± score points) }
+  function scoreVowel(F, v, f0 = 0) {
+    const lim = pitchLimited(v, f0), w = lim ? PITCH_WEIGHTS : FIT_WEIGHTS;
+    const fit = fitVowel(F, v, w);
+    return Object.assign(fit, { pitchLimited: lim, ok: plausible(fit), spread: scoreSpread(F, v, f0, w) });
+  }
+
   // Jointly identify the vowel and its resonance. Out-of-range alphas are penalised so a
   // stretched vowel does not masquerade as a neighbour.
-  function classifyVowel(F, candidates = VOWELS) {
+  function classifyVowel(F, candidates = VOWELS, f0 = 0) {
     const res = [];
     for (const v of candidates) {
       const fit = fitVowel(F, v, [1, 1, 0.7]);
@@ -290,8 +320,9 @@
     }
     res.sort((p, q) => p.cost - q.cost);
     const best = res[0];
-    const scored = fitVowel(F, best.v);
-    return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res.length > 1 ? res[1].cost - best.cost : Infinity };
+    const scored = scoreVowel(F, best.v, f0);
+    return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res.length > 1 ? res[1].cost - best.cost : Infinity,
+      ok: scored.ok, pitchLimited: scored.pitchLimited, spread: scored.spread };
   }
 
   // ---------- the vowels a word should have ----------
@@ -328,13 +359,13 @@
   // A steady frame heard on a word with vowels `keys`: the best fit among those vowels, or null when the
   // frame doesn't sound like any of them (a consonant transition, an unstressed syllable, or the highlight
   // being on a neighbouring word). Same rule as a vowel drill: a close fit, or the free guess agrees.
-  function matchWordVowel(F, keys, guess = classifyVowel(F)) {
+  function matchWordVowel(F, keys, guess = classifyVowel(F), f0 = 0) {
     const cands = [...new Set(keys.flatMap(k => [k].concat(VOWEL_ALT[k] || [])))].map(k => VOWEL_BY_KEY[k]).filter(Boolean);
     if (!cands.length) return null;
     const v = cands.includes(guess.vowel) ? guess.vowel : classifyVowel(F, cands).vowel;
-    const fit = fitVowel(F, v);
-    if (!(cands.includes(guess.vowel) || fit.rms < 0.085) || fit.alpha < -1 || fit.alpha > 2) return null;
-    return { vowel: v, alpha: fit.alpha, per: fit.per };
+    const fit = scoreVowel(F, v, f0);
+    if (!(cands.includes(guess.vowel) || fit.rms < 0.085) || !fit.ok) return null;
+    return { vowel: v, alpha: fit.alpha, per: fit.per, pitchLimited: fit.pitchLimited, spread: fit.spread };
   }
 
   // Live coaching for a held vowel. Positions use the same 0 (male avg) .. 100 (female avg) scale
@@ -1362,7 +1393,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

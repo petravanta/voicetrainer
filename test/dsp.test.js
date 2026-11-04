@@ -32,8 +32,8 @@ for (const fs of [48000, 44100]) {
     }
     const mErr = D.median(errs), mA = D.median(alphas);
     check(mErr < 0.06, `${label}: median formant error ${(mErr * 100).toFixed(1)}%`);
-    check(Math.abs(mA - t) < 0.3, `${label}: median resonance ${(mA * 100).toFixed(0)} (expected ${t * 100})`);
-    check(ids.filter(Boolean).length >= 8, `${label}: vowel identified for ${ids.filter(Boolean).length}/12`);
+    check(Math.abs(mA - t) < 0.1, `${label}: median resonance ${(mA * 100).toFixed(0)} (expected ${t * 100})`);
+    check(ids.filter(Boolean).length >= 11, `${label}: vowel identified for ${ids.filter(Boolean).length}/12`);
     check(D.median(pitch) < 0.03, `${label}: pitch error ${(D.median(pitch) * 100).toFixed(1)}%`);
   }
 
