@@ -3007,7 +3007,7 @@
     const more = {
       quiet: 'Too little voice reached the microphone to read your vowels.',
       high: 'Your voice sat above about 280 Hz, where the vowel shape can no longer be read from the voice reliably.',
-      unclear: "Vowels were heard, but their shape didn't fit any vowel the app knows. A nasal or buzzy tone, room echo or a phone microphone's processing can cause this. Try another microphone or a quieter room.",
+      unclear: "Vowels were heard, but their shape didn't fit any vowel the app knows. A nasal or buzzy tone, room echo or a phone microphone's processing can cause this. The microphone and voice check in Settings can tell which.",
       unsteady: "Resonance is read from vowels the mouth holds for a moment, and none held still long enough. Try reading a little slower and letting the long vowels last.",
     }[rec.resWhy];
     return `<small>${D.SING_WHY[rec.resWhy]}${more ? infoHtml('Why no resonance', more) : ''}</small>`;
@@ -3119,7 +3119,7 @@
   function gatesNote(g) {
     if (!g || !g.voiced) return '';
     const pc = (n) => Math.round(100 * n / g.voiced) + '%';
-    return ` In this reading: ${g.voiced} voiced moments; ${pc(g.formants)} gave formants, ${pc(g.steady)} held still, ${pc(g.scored)} got a reading${g.loose ? ` (plus ${pc(g.loose)} from short vowels)` : ''}${g.refused ? `, ${pc(g.refused)} were refused as unmeasurable` : ''}. Save audio below the result keeps a copy of what the microphone heard, if you want it checked.`;
+    return ` In this reading: ${g.voiced} voiced moments; ${pc(g.formants)} gave formants, ${pc(g.steady)} held still, ${pc(g.scored)} got a reading${g.loose ? ` (plus ${pc(g.loose)} from short vowels)` : ''}${g.refused ? `, ${pc(g.refused)} were refused as unmeasurable` : ''}. Few readings? The microphone and voice check in Settings shows whether the microphone or the voice is the limit.`;
   }
   function wordReportHtml(rec, spots) {
     const ws = rec.byWord;
@@ -4338,6 +4338,77 @@
   };
 
   let mode = 'home';
+  // ---- microphone and voice check (Settings): quiet, "ah", "ee", a sentence, then D.micVoiceCheck ----
+  const MicCheck = {
+    STEPS: [
+      { k: 'quiet', secs: 2, say: 'Stay quiet for a moment…' },
+      { k: 'ah', secs: 3, say: 'Hold "ah", as in "father"' },
+      { k: 'ee', secs: 3, say: 'Hold "ee", as in "see"' },
+      { k: 'speech', secs: 7, say: 'Read: "She sells sea shells by the seashore, and the shells she sells are surely seashells."' },
+    ],
+    on: false,
+    async start() {
+      if (this.on) return;
+      stop(); if (Run.on) cancelRun();
+      const list = $('mc-list'), run = $('mc-run'), step = $('mc-step'), prog = $('mc-prog'), btn = $('mc-start');
+      list.hidden = true; list.innerHTML = '';
+      let s;
+      try {
+        ensureCtx();
+        s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      } catch (e) {
+        run.hidden = false; step.textContent = 'The microphone could not be opened. Allow it for this page and try again.'; return;
+      }
+      this.on = true; btn.disabled = true; run.hidden = false;
+      const track = s.getAudioTracks()[0], label = (track && track.label) || '';
+      const src = ctx.createMediaStreamSource(s), proc = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
+      mute.gain.value = 0; src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+      const chunks = {}; let cur = null;
+      proc.onaudioprocess = (e) => { if (cur) (chunks[cur] = chunks[cur] || []).push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+      const total = this.STEPS.reduce((a, x) => a + x.secs, 0); let done = 0;
+      await new Promise(r => setTimeout(r, 400)); // let the microphone settle
+      for (const st of this.STEPS) {
+        step.textContent = st.say; cur = st.k;
+        const t0 = performance.now();
+        await new Promise(r => {
+          const tick = () => { const el = (performance.now() - t0) / 1000; prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; if (el >= st.secs) r(); else setTimeout(tick, 100); };
+          tick();
+        });
+        done += st.secs;
+      }
+      cur = null; proc.onaudioprocess = null;
+      try { src.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
+      s.getTracks().forEach(t => t.stop());
+      step.textContent = 'Reading the results…';
+      await new Promise(r => setTimeout(r, 30));
+      const join = (a) => { const out = new Float32Array((a || []).reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of a || []) { out.set(x, o); o += x.length; } return out; };
+      const seg = Object.fromEntries(this.STEPS.map(st => [st.k, join(chunks[st.k])]));
+      let res = null;
+      try { res = D.micVoiceCheck(seg, ctx.sampleRate, { label }); } catch (e) { console.error(e); }
+      this.on = false; btn.disabled = false; btn.textContent = 'Run it again'; run.hidden = true;
+      this.show(res, label);
+    },
+    show(res, label) {
+      const list = $('mc-list');
+      if (!res) { list.hidden = false; list.innerHTML = '<li><span></span><span>Something went wrong reading the check. Try again.</span></li>'; return; }
+      const ic = { good: '✓', warn: '!', bad: '✕' }, main = res.checks.find(c => c.id === res.main && c.level !== 'good');
+      list.innerHTML = '';
+      const head = document.createElement('li'); head.className = 'mc-main-li';
+      head.innerHTML = `<span></span><p class="mc-main">${main ? 'Most likely limit: ' + escapeHtml(main.title.toLowerCase()) : 'Nothing here limits your readings.'}</p>`;
+      list.appendChild(head);
+      const order = { bad: 0, warn: 1, good: 2 };
+      for (const c of res.checks.slice().sort((a, b) => order[a.level] - order[b.level])) {
+        const li = document.createElement('li'); li.className = c.level;
+        li.innerHTML = `<span class="mc-ic" aria-label="${c.level === 'good' ? 'fine' : c.level === 'warn' ? 'worth a look' : 'problem'}">${ic[c.level]}</span><div><b>${escapeHtml(c.title)}</b><span class="mc-say"></span></div>`;
+        shortWithInfo(li.querySelector('.mc-say'), c.say, c.title);
+        list.appendChild(li);
+      }
+      const d = res.data, foot = document.createElement('li');
+      foot.innerHTML = `<span></span><span class="mc-say">${escapeHtml(label || 'Microphone')} · ${Math.round(d.sr / 100) / 10} kHz sampling${d.f0 ? ` · pitch ${d.f0} Hz` : ''}</span>`;
+      list.appendChild(foot);
+      list.hidden = false;
+    },
+  };
   function setMode(m) {
     if (!['home', 'readings', 'freestyle', 'practice', 'sing', 'settings'].includes(m)) m = 'home';
     if (m !== 'sing' && Sing.on) Sing.finish();
@@ -5000,6 +5071,7 @@
     // The shared theme switch in the header (general/shared/theme-switch.js)
     document.addEventListener('petravanta:themechange', (e) => { applyTheme(e.detail.mode); Data.setting('theme', e.detail.mode); });
     $('settings-voice').addEventListener('click', () => $('btn-demo-set').click());
+    $('mc-start').addEventListener('click', () => MicCheck.start());
     $('home-goal').addEventListener('click', () => setMode('settings'));
     for (const id of ['pr-lo', 'pr-hi']) $(id).addEventListener('change', savePitchRange);
     $('pr-reset').addEventListener('click', resetPitchRange);
