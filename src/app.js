@@ -4111,7 +4111,7 @@
       if (this.fol) this.followFrame(fr);
       this.follow();
       const f0 = fr.kind === 'voiced' ? fr.f0 : 0, now = performance.now();
-      if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res });
+      if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res, t: now });
       this.trace.push({ t: now, f0, res });
       while (this.trace.length && now - this.trace[0].t > SING_VIEW_MS + 500) this.trace.shift();
       if (Number.isFinite(res)) this.lastResAt = now;
@@ -4167,6 +4167,36 @@
       $('sg-stage').hidden = true; $('sg-setup').hidden = false;
       if (this.empty) this.lyr = D.parseLyrics($('sg-lyrics').value);
     },
+    // Histogram of time spent holding each semitone (D.heldNotes), with the goal's speaking range
+    // shaded behind and the pitch tracker's ceiling marked. Tapping or hovering a bar reads it out.
+    heldHtml() {
+      const h = D.heldNotes(this.frames);
+      const secs = (v) => v >= 60 ? `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}` : `${v < 10 ? v.toFixed(1) : Math.round(v)} s`;
+      const head = `<h4 class="eyebrow"><span>Notes you held${infoHtml('About notes you held', 'Time spent on each note when you held it steady for a quarter second or more. Slides, scoops and quick passing notes are left out. The shaded band is the typical speaking range for your goal. Pitch is read up to about 500 Hz (B4), so higher notes are missing.')}</span><span>seconds per note</span></h4>`;
+      if (!h.bins.length) return `${head}<p class="small muted">No steady notes long enough to count.</p>`;
+      const [bLo, bHi] = pitchBand(), toM = (f) => 12 * Math.log2(f / 440) + 69, CEIL = 71;
+      let a = Math.min(h.lo, Math.floor(toM(bLo))) - 1, b = Math.max(h.hi, Math.ceil(toM(bHi))) + 1;
+      while (b - a < 14) { a--; if (b - a < 14) b++; }
+      const n = b - a + 1, W = 340, H = 150, L = 28, R = 4, T = 16, B = 20, cw = (W - L - R) / n, x = (m) => L + (m - a) * cw;
+      const step = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300].find(s => h.peak.secs / s <= 4) || 600, top = Math.max(step, Math.ceil(h.peak.secs / step) * step);
+      const y = (v) => H - B - v / top * (H - B - T);
+      let g = `<rect class="hn-band" x="${x(toM(bLo)) - cw / 2}" y="${T}" width="${(toM(bHi) - toM(bLo)) * cw + cw}" height="${H - B - T}"/><text class="hn-lab" x="${x(toM(bLo)) - cw / 2 + 3}" y="${T - 4}">speaking range</text>`;
+      for (let v = step; v <= top + 1e-9; v += step) g += `<line class="hn-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="hn-tick" x="${L - 4}" y="${y(v) + 3.5}" text-anchor="end">${v >= 60 ? Math.round(v / 60) + 'm' : v}</text>`;
+      if (CEIL >= a && CEIL <= b) g += `<line class="hn-ceil" x1="${x(CEIL) + cw / 2}" x2="${x(CEIL) + cw / 2}" y1="${T}" y2="${H - B}"/><text class="hn-lab" x="${x(CEIL) + cw / 2 - 3}" y="${T - 4}" text-anchor="end">tracker limit</text>`;
+      for (let m = a; m <= b; m++) {
+        const bin = h.bins.find(q => q.midi === m), nm = D.midiName(m);
+        if ((m % 12 === 0 && Math.abs(m - h.peak.midi) !== 1) || m === h.peak.midi) g += `<text class="hn-tick${m === h.peak.midi ? ' pk' : ''}" x="${x(m)}" y="${H - 6}" text-anchor="middle">${nm}</text>`;
+        if (!bin) continue;
+        const bw = Math.max(2, cw - 2), yt = Math.min(y(bin.secs), H - B - 2);
+        const say = `${nm}: ${secs(bin.secs)} held${bin.res != null ? `, resonance ${Math.round(bin.res)}` : ''}`;
+        g += `<path class="hn-bar" d="M${x(m) - bw / 2},${H - B}V${yt + 2}q0,-2 2,-2h${bw - 4}q2,0 2,2V${H - B}Z"/>`;
+        g += `<rect class="hn-hit" data-hn="${escapeHtml(say)}" x="${x(m) - cw / 2}" y="${T}" width="${cw}" height="${H - B - T}" tabindex="0" role="img" aria-label="${escapeHtml(say)}"><title>${escapeHtml(say)}</title></rect>`;
+      }
+      if (h.peak) g += `<text class="hn-val" x="${x(h.peak.midi)}" y="${Math.min(y(h.peak.secs), H - B - 2) - 4}" text-anchor="middle">${secs(h.peak.secs)}</text>`;
+      g += `<line class="hn-base" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/>`;
+      const sum = `Most time on ${h.peak.note} (${secs(h.peak.secs)}). Held notes from ${D.midiName(h.lo)} to ${D.midiName(h.hi)}, ${secs(h.total)} in all.`;
+      return `${head}<figure class="hn"><svg class="hn-svg" viewBox="0 0 ${W} ${H}" role="group" aria-label="Seconds held per note. ${escapeHtml(sum)}">${g}</svg><figcaption class="small"><span class="hn-say" aria-live="polite">${escapeHtml(sum)}</span></figcaption></figure>`;
+    },
     result() {
       const lines = this.lyr.lines, sum = D.singSummary(this.frames, lines.length), box = $('sg-result');
       const res = this.frames.map(f => f.res).filter(Number.isFinite), f0 = this.frames.map(f => f.f0).filter(v => v > 0);
@@ -4191,11 +4221,19 @@
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a reading was inside your target band.</p>' : ''}
+          ${this.heldHtml()}
           ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
           <p class="small muted">Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.")}</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
       box.hidden = false;
+      const say = box.querySelector('.hn-say'), sum0 = say && say.textContent;
+      box.querySelectorAll('[data-hn]').forEach(r => {
+        const on = () => { say.textContent = r.dataset.hn; box.querySelectorAll('.hn-hit.on').forEach(o => o.classList.remove('on')); r.classList.add('on'); };
+        r.addEventListener('pointerenter', on); r.addEventListener('focus', on); r.addEventListener('click', on);
+      });
+      const svg = box.querySelector('.hn-svg');
+      if (svg) svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { say.textContent = sum0; box.querySelectorAll('.hn-hit.on').forEach(o => o.classList.remove('on')); } });
       box.querySelectorAll('[data-sg]').forEach(b => b.addEventListener('click', () => {
         if (b.dataset.sg === 'again') this.start(); else { box.hidden = true; $(this.song ? 'sg-lyrics' : 'sg-q').focus(); }
       }));
