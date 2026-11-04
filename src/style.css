@@ -770,16 +770,19 @@ a { color: var(--accent); }
 .sg-sum .t { min-width: 0; overflow-wrap: anywhere; }
 .sg-sum .n { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
 .sg-sum .r { font-family: var(--f-mono); font-size: 13px; color: var(--muted); white-space: nowrap; }
-.sg-sum .none { grid-column: 2 / -1; font-size: 13px; color: var(--faint); }
+.sg-sum .why { grid-column: 2 / 4; font-size: 13px; color: var(--faint); }
+.sg-sum .n.shaky { color: var(--muted); }
 .sg-bar { position: relative; height: 8px; border-radius: 4px; background: var(--sunk); }
 .sg-bar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--accent); }
 .sg-bar i.in { background: var(--good); }
+.sg-bar.shaky i { opacity: 0.55; }
+.sg-bar u { position: absolute; top: -2px; bottom: -2px; border-radius: 3px; background: var(--ink); opacity: 0.14; text-decoration: none; pointer-events: none; }
 .sg-bar s { position: absolute; top: -3px; bottom: -3px; border: 1.5px dashed var(--ink); border-radius: 4px; opacity: 0.45; text-decoration: none; }
 @media (max-width: 600px) {
   .sg-hud { gap: 8px; }
   .sg-sum li { grid-template-columns: minmax(0, 1fr) 3em 7.5em; }
   .sg-sum .t { grid-column: 1 / -1; }
-  .sg-sum .none { grid-column: 1 / -1; }
+  .sg-sum .why { grid-column: 1 / 3; }
 }
 .sg-result .stat small { display: block; font-size: 12px; color: var(--muted); }
 .sg-result q { font-weight: 600; }

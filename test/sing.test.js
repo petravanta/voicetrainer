@@ -60,6 +60,32 @@ check(sum[1].res != null && sum[1].res <= 25, 'dark line scores in the masculine
 check(D.hzToNote(sum[0].lo) === 'G3' && D.hzToNote(sum[0].hi) === 'C4', 'bright line range G3 to C4');
 check(D.hzToNote(sum[1].lo) === 'C3' && D.hzToNote(sum[1].hi) === 'E3', 'dark line range C3 to E3');
 check(sum[2].f0 === null && sum[2].res === null, 'a line with no frames has no summary');
+check(sum[2].why === 'quiet', 'a line with no frames says too little voice');
+check(!sum[0].shaky && sum[0].pm >= 2, 'a well-sung line is a solid reading with a ± band');
+
+// every sung line gets an explicit state: a score (solid or shaky) or a reason
+{
+  const fr = [];
+  const add = (line, n, f) => { for (let k = 0; k < n; k++) fr.push(Object.assign({ line, f0: 0, res: NaN }, f(k))); };
+  add(0, 30, k => ({ f0: 220, res: k < 5 ? 40 + k : NaN, u: 6 }));       // 5 vowel readings: shaky score
+  add(1, 30, () => ({ f0: 330 }));                                       // high, nothing scored
+  add(2, 30, k => ({ f0: 200, miss: k % 3 === 0 }));                     // vowels heard, none measurable
+  add(3, 30, () => ({ f0: 200 }));                                       // voiced but never steady
+  add(4, 2, () => ({ f0: 200 }));                                        // a breath of voice
+  add(5, 30, k => ({ f0: 200, res: 20 + k, u: 4 }));                     // 30 readings, far off target: still shown
+  add(6, 30, k => ({ f0: 200, res: k < 2 ? 50 : NaN }));                 // 2 readings: not enough
+  const ss = D.singSummary(fr, 7);
+  check(ss[0].res === 42 && ss[0].shaky && ss[0].pm > 0, `5 readings give a shaky score (got ${ss[0].res}, ±${ss[0].pm})`);
+  check(ss[1].res === null && ss[1].why === 'high', 'a high line with no reading says it was too high');
+  check(ss[2].why === 'unclear', 'unmeasurable vowels say so');
+  check(ss[3].why === 'unsteady', 'voice with no held vowel says so');
+  check(ss[4].why === 'quiet', 'barely any voice says so');
+  check(ss[5].res != null && !ss[5].shaky && ss[5].res < 40, 'a low, off-target line still gets its score');
+  check(ss[5].pm < ss[0].pm, 'more readings give a tighter ± band');
+  check(ss[6].res === null && ss[6].why === 'unsteady', 'under 3 readings is no score, with a reason');
+  check(ss.every(x => x.res != null || D.SING_WHY[x.why]), 'every line has a score or a reason to show');
+  check(D.instrumentalLine('♪ ♪') && D.instrumentalLine('(Instrumental)') && D.instrumentalLine('[Guitar solo]') && !D.instrumentalLine('Solo in the night'), 'instrumental lines are spotted');
+}
 
 // lyrics search (LRCLIB): request URL and turning a made-up response into the result list (no network here)
 check(D.lyricsSearchUrl('  Some  Artist & Song ') === 'https://lrclib.net/api/search?q=Some%20Artist%20%26%20Song', 'search URL sends only the tidied, encoded query');
