@@ -523,6 +523,19 @@ body[data-mode="readings"]:not(.reading-full) .sourcebar { display: none; }
 .vd-type button[aria-checked="true"]#goal-masc { background: var(--masc); color: var(--surface); }
 .settings { display: grid; gap: 16px; max-width: 640px; }
 .set-card h3 { margin: 0 0 8px; }
+.mc-run { margin: 4px 0 12px; }
+.mc-step { margin: 0 0 8px; font-size: 1.05rem; }
+.mc-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 25%, transparent); overflow: hidden; }
+.mc-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s linear; }
+.mc-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.mc-list li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; align-items: start; }
+.mc-list .mc-ic { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font: 700 12px/1 var(--font-body); }
+.mc-list .good .mc-ic { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+.mc-list .warn .mc-ic { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); border-radius: 4px; }
+.mc-list .bad .mc-ic { background: var(--warn); color: var(--panel); border-radius: 2px; }
+.mc-list b { display: block; font-weight: 600; }
+.mc-list .mc-say { font-size: 0.88rem; color: var(--muted); }
+.mc-main { margin: 0 0 10px; font-weight: 600; }
 .set-card > .vd-note:first-of-type { margin: 0 0 12px; }
 .pr-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 .pr-fields input { width: 7.5em; }

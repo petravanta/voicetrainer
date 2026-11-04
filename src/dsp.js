@@ -1121,6 +1121,130 @@
     return { res: null, n, shaky: false, pm: null, why };
   }
 
+  // ---------- mic & voice check ----------
+  // A short guided recording, read back to find what limits the readings: the microphone (a narrow phone-call band,
+  // noise, clipping, sound cut to silence between words, too quiet) or the voice (breathy, a nasal resonance, a pitch
+  // high enough to hide F1). seg: { quiet, ah, ee, speech } Float32Arrays at sample rate sr; info: { label } (device name).
+  // -> { checks: [{ id, level: 'good' | 'warn' | 'bad', title, say }], main (the check most likely limiting readings,
+  // or null), data (the numbers behind them) }
+  // Not checked: nasality. A nasal pole (250-350 Hz) on a synthetic "ah" doesn't show up in this LPC's candidates, and
+  // the usual measure (A1-P0) mixes with the first harmonic at a higher pitch, so it can't be told reliably here.
+  const MIC_PRIORITY = ['clip', 'noise', 'band', 'gate', 'level', 'breath', 'vowels', 'pitch'];
+  function micVoiceCheck(seg, sr, info = {}) {
+    const db = (p) => 10 * Math.log10(p + 1e-20);
+    const rmsBlocks = (x, ms = 10) => {
+      const n = Math.max(1, Math.round(sr * ms / 1000)), out = [];
+      for (let i = 0; i + n <= x.length; i += n) { let e = 0; for (let k = i; k < i + n; k++) e += x[k] * x[k]; out.push(e / n); }
+      return out;
+    };
+    // long-term average spectrum in 250 Hz bands, from ~43 ms frames (only frames above `minE` mean power)
+    const N = 1 << Math.round(Math.log2(sr * 0.043)), binHz = sr / N;
+    function ltas(x, minE = -1) {
+      const frames = [];
+      for (let end = N; end <= x.length; end += N >> 1) {
+        let e = 0; for (let k = end - N; k < end; k++) e += x[k] * x[k];
+        frames.push({ end, e });
+      }
+      if (!frames.length) return null;
+      const cut = minE * N;
+      const acc = new Float64Array(N / 2 + 1); let n = 0;
+      for (const f of frames) if (f.e >= cut) { const p = powerSpectrum(x.subarray(0, f.end), N); for (let k = 0; k < p.length; k++) acc[k] += p[k]; n++; }
+      const bands = [];
+      for (let lo = 0; lo + 250 <= sr / 2; lo += 250) {
+        let sum = 0, c = 0;
+        for (let k = Math.ceil(lo / binHz); k * binHz < lo + 250 && k < acc.length; k++) { sum += acc[k] / n; c++; }
+        bands.push({ f: lo + 125, db: db(c ? sum / c : 0) });
+      }
+      return bands;
+    }
+    const voiceAll = new Float32Array((seg.ah ? seg.ah.length : 0) + (seg.ee ? seg.ee.length : 0) + (seg.speech ? seg.speech.length : 0));
+    { let o = 0; for (const x of [seg.ah, seg.ee, seg.speech]) if (x) { voiceAll.set(x, o); o += x.length; } }
+    const data = { sr, label: info.label || '' };
+    const checks = [];
+    const add = (id, level, title, say) => checks.push({ id, level, title, say });
+
+    // level, noise, clipping, silence between words
+    const vb = rmsBlocks(voiceAll), qb = seg.quiet ? rmsBlocks(seg.quiet) : [];
+    const voiceDb = vb.length ? db(quantile(vb, 0.9)) : -200, quietDb = qb.length ? db(median(qb)) : -200;
+    data.voiceDb = Math.round(voiceDb); data.quietDb = Math.round(quietDb); data.snr = Math.round(voiceDb - quietDb);
+    let clip = 0; for (let i = 0; i < voiceAll.length; i++) if (Math.abs(voiceAll[i]) >= 0.985) clip++;
+    data.clip = voiceAll.length ? clip / voiceAll.length : 0;
+    const dead = qb.length ? qb.filter(e => e < 1e-10).length / qb.length : 0; // below -100 dBFS: digital silence
+    data.deadQuiet = Math.round(100 * dead);
+
+    // bandwidth: the highest 250 Hz band where your voice stands 10 dB clear of the room and of a floor 60 dB under its peak
+    // (a real voice reaches 8-12 kHz on that rule, a phone line or 8 kHz Bluetooth call 3.5-4.5 kHz), searched from the top down
+    // sound, not pauses: frames at least 10x the room's power (the hiss of "s" is far quieter than a vowel, so all of it counts)
+    const L = ltas(voiceAll, Math.max(1e-9, 10 * (qb.length ? median(qb) : 0))), Q = seg.quiet ? ltas(seg.quiet) : null;
+    let top = 0;
+    if (L) {
+      const peak = Math.max(...L.filter(b => b.f > 200 && b.f < 4000).map(b => b.db));
+      for (let i = L.length - 1; i >= 0; i--) {
+        const floor = Math.max(Q ? Q[i].db : -300, peak - 60); // 60 dB down: past where real speech still has energy
+        if (L[i].f > 300 && L[i].db > floor + 10) { top = L[i].f + 125; break; }
+      }
+    }
+    data.topHz = top;
+    const bt = /hands-?free|headset|bluetooth|airpods|buds|\bbt\b/i.test(info.label || '');
+    // in a noisy room the noise hides the top of the voice, so a narrow reading there is only a maybe
+    if (top && top < 4600 && data.snr < 25) add('band', 'warn', 'Top end unclear', `Your voice only stands out from the noise up to about ${(top / 1000).toFixed(1)} kHz. That may be the noise, or a phone-quality microphone${bt ? ' (it looks like a Bluetooth headset, which drops to call quality while its mic is on)' : ''}. Try again somewhere quieter.`);
+    else if (top && top < 4600) add('band', 'bad', 'Phone-call sound', `Your microphone only passes sound up to about ${(top / 1000).toFixed(1)} kHz, like a phone call. F3 and the hiss of "s" sit above that, so most vowels can't be read.${bt ? ' It looks like a Bluetooth headset: these drop to call quality whenever their mic is in use.' : ''} Use the computer's or phone's built-in microphone, or a wired one.`);
+    else if (top && top < 6000) add('band', 'warn', 'Muffled top end', `Your microphone passes sound up to about ${(top / 1000).toFixed(1)} kHz. Vowels can be read, but /s/ brightness may read low.${bt ? ' A Bluetooth headset does this; a wired or built-in mic is better.' : ''}`);
+    else add('band', 'good', 'Full sound range', `Your microphone passes sound up to about ${Math.round(Math.min(top || sr / 2, sr / 2) / 1000)} kHz.`);
+
+    if (data.clip > 0.002) add('clip', 'bad', 'Too loud: clipping', 'Your voice is cut off at the top of the range, which smears the vowels. Move back a little or turn the microphone level down.');
+    else if (data.clip > 0.0003) add('clip', 'warn', 'Almost clipping', 'Your loudest moments touch the top of the range. Move back a little.');
+    else add('clip', 'good', 'No clipping', 'Your voice stays inside the microphone\'s range.');
+
+    if (dead > 0.5) add('gate', 'warn', 'Silence between words', 'The room reads as total silence, so something (the system, the headset or a noise cancelling app) is gating or cleaning the sound. That processing can also blur vowels: turn off "noise suppression", "audio enhancements" or "voice isolation" if you can.');
+    else if (data.snr < 15) add('noise', 'bad', 'Noisy room', `Your voice is only ${data.snr} dB above the background. Find a quieter spot or move closer to the microphone.`);
+    else if (data.snr < 25) add('noise', 'warn', 'Some background noise', `Your voice is ${data.snr} dB above the background. Quieter is better for reading vowels.`);
+    else add('noise', 'good', 'Quiet background', `Your voice is ${Math.min(data.snr, 99)} dB above the background.`);
+    if (voiceDb < -42) add('level', 'warn', 'Quiet signal', 'The microphone picks you up quietly. Move closer or turn its level up.');
+
+    // the voice: run the same analysis as the app over the held vowels
+    function vowelStats(x, key) {
+      if (!x || x.length < sr * 0.5) return null;
+      const an = new Analyzer(sr), hop = Math.round(sr / 60), v = VOWEL_BY_KEY[key];
+      let voiced = 0, steady = 0, ok = 0, airy = 0; const f0 = [], br = [], sc = [];
+      for (let end = an.needed; end <= x.length; end += hop) {
+        const fr = an.analyze(x.subarray(0, end));
+        if (fr.kind === 'other' && fr.breath != null) { airy++; br.push(fr.breath); }
+        if (fr.kind !== 'voiced') continue;
+        voiced++; f0.push(fr.f0); if (fr.breath != null) br.push(fr.breath);
+        if (!fr.formants) continue;
+        if (!fr.steady) continue;
+        steady++;
+        const fit = scoreVowel(fr.formants, v, fr.f0);
+        if (fit.ok) { ok++; sc.push(resScore(fit.alpha)); }
+      }
+      return { voiced, airy, steady: voiced ? steady / voiced : 0, ok: voiced ? ok / voiced : 0,
+        f0: f0.length ? median(f0) : 0, breath: br.length ? median(br) : NaN, score: sc.length ? median(sc) : NaN };
+    }
+    const ah = vowelStats(seg.ah, 'a'), ee = vowelStats(seg.ee, 'i');
+    data.ah = ah; data.ee = ee;
+    const held = [ah, ee].filter(s => s && s.voiced >= 30);
+    const airy = [ah, ee].filter(s => s && s.airy > s.voiced && s.airy >= 30);
+    if (!held.length && airy.length) add('breath', 'bad', 'Too airy to read', 'Your held vowels came through as breath more than tone, so there are no clear resonances to read. Try the same vowels with a little more voice in them.');
+    else if (!held.length) add('vowels', 'bad', 'No held vowel heard', 'Not enough voice reached the microphone while you held "ah" and "ee". Check the right microphone is picked and try again.');
+    else {
+      const b = median(held.map(s => s.breath).filter(Number.isFinite));
+      data.breath = Number.isFinite(b) ? Math.round(b) : null;
+      if (b > 65) add('breath', 'warn', 'Very breathy voice', `Your held vowels read ${Math.round(b)} on breathiness. Air noise blurs the formants, so a slightly firmer, clearer tone gives more readings.`);
+      else if (Number.isFinite(b)) add('breath', 'good', 'Clear voicing', `Breathiness ${Math.round(b)}, clear enough to read.`);
+      const okFrac = median(held.map(s => s.ok));
+      data.read = Math.round(100 * okFrac);
+      if (okFrac < 0.3) add('vowels', 'bad', 'Held vowels hard to read', `Only ${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.`);
+      else if (okFrac < 0.6) add('vowels', 'warn', 'Held vowels partly readable', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading.`);
+      else add('vowels', 'good', 'Held vowels read well', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading${held.length === 2 && Number.isFinite(ah.score) && Number.isFinite(ee.score) ? ` (ah ${Math.round(ah.score)}, ee ${Math.round(ee.score)})` : ''}.`);
+      const f0 = median(held.map(s => s.f0));
+      data.f0 = Math.round(f0);
+      if (pitchLimited(VOWEL_BY_KEY.i, f0)) add('pitch', 'good', 'Pitch above F1 of "ee"', `At ${Math.round(f0)} Hz your pitch is close to the first formant of "ee" and "oo", so those are read from F2 and F3. That's expected for a higher voice and handled.`);
+    }
+    const bad = (lv) => MIC_PRIORITY.find(id => checks.some(c => c.id === id && c.level === lv));
+    return { checks, main: bad('bad') || bad('warn') || null, data };
+  }
+
   // a lyric line that isn't words to sing: "♪", "(Instrumental)", "[Guitar solo]", "--"
   const instrumentalLine = (text) => !/\p{L}/u.test(text || '') || /^[\s([{]*(instrumental|interlude|(guitar |piano |sax )?solo|music|break)[\s)\]}.!]*$/i.test(text || '');
   const SING_WHY = {
@@ -1591,7 +1715,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
