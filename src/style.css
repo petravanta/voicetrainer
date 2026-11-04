@@ -624,6 +624,7 @@ a { color: var(--accent); }
 .wr-bar { fill: var(--good); } .wr-bar.off { fill: var(--warn); } .wr-bar.rough { fill-opacity: 0.45; }
 .wr-word { fill: var(--ink); font: 12px var(--font-body); }
 .wr-word.off { fill: var(--warn); font-weight: 600; }
+.wr-word.fn { fill: var(--muted); font-style: italic; }
 .wr-lane { fill: var(--muted); font: 11px var(--font-mono); }
 .wr-hit { fill: transparent; }
 .wr-w { cursor: pointer; outline: none; }

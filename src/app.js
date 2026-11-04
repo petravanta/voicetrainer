@@ -442,6 +442,7 @@
       node = ctx.createMediaStreamSource(stream);
       node.connect(analyser);
       begin('mic', 'Listening to your microphone');
+      if (Run.on && !Spot.cur) startRunAudio(stream);
       $('mic-note').hidden = true;
     } catch (err) {
       const note = $('mic-note');
@@ -738,7 +739,9 @@
           // a clear vowel still counts towards the word and the overall score, but not per vowel
           else if (cls.cost < 0.07 && cls.ok) { vowel = cls.vowel; score = score100(cls.alpha); ok = true; fit = cls; mapIt = false; }
           else if (cls.cost < 0.07) unmeasured = true;
+          else if (Run.gates) Run.gates.nomatch = (Run.gates.nomatch || 0) + 1;
         } else if (wv && wv.why === 'function') {
+          if (Run.gates) Run.gates.fnword = (Run.gates.fnword || 0) + 1;
           // "the", "of", "with": reduced in running speech, so not scored at all
         } else if (cls.cost < 0.07 && !cls.ok) {
           unmeasured = true;
@@ -823,7 +826,14 @@
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
     if (Sing.on && !gated) Sing.frame(fr, frLoose ? NaN : frRes, frU, frMiss);
-    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, loose: frLoose || undefined, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
+    if (Run.on && !gated && Run.gates) {
+      const g = Run.gates;
+      if (fr.kind === 'voiced') g.voiced++;
+      if (fr.kind === 'voiced' && fr.formants) { g.formants++; if (fr.steady) g.steady++; }
+      if (Number.isFinite(frRes)) g[frLoose ? 'loose' : 'scored']++; else if (frMiss) g.refused++;
+    }
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, loose: frLoose || undefined, sib: frSib, k: Reader.idx === frWord ? frVowel : null,
+      t: performance.now(), F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: frWord });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -2894,7 +2904,37 @@
   }
 
   // ---------------- readings ----------------
-  const Run = { on: false, text: null, maxIdx: 0, start: 0, frames: [] };
+  const Run = { on: false, text: null, maxIdx: 0, start: 0, frames: [], gates: null };
+  // The reading's own audio, kept in this browser only so it can be saved (to share for troubleshooting). Never uploaded.
+  const RunAudio = { mr: null, chunks: [], blob: null, recId: null };
+  function startRunAudio(s) {
+    RunAudio.blob = null; RunAudio.recId = null; RunAudio.chunks = [];
+    if (!s || typeof MediaRecorder === 'undefined') return;
+    try {
+      const mr = new MediaRecorder(s, { audioBitsPerSecond: 128000 });
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) RunAudio.chunks.push(e.data); };
+      mr.onstop = () => {
+        RunAudio.blob = RunAudio.chunks.length ? new Blob(RunAudio.chunks, { type: mr.mimeType || 'audio/webm' }) : null;
+        const b = $('rd-audio'), box = $('rd-result');
+        if (b && RunAudio.blob && box.rec && box.rec.id === RunAudio.recId) b.hidden = false;
+      };
+      mr.start(1000); RunAudio.mr = mr;
+    } catch (e) { RunAudio.mr = null; }
+  }
+  function stopRunAudio(keepFor) {
+    const mr = RunAudio.mr; RunAudio.mr = null; RunAudio.recId = keepFor || null;
+    if (!keepFor) { RunAudio.blob = null; RunAudio.chunks = []; }
+    if (mr && mr.state !== 'inactive') { if (!keepFor) mr.onstop = null; try { mr.stop(); } catch (e) {} }
+  }
+  function saveRunAudio(rec) {
+    const b = RunAudio.blob; if (!b) return;
+    const ext = /ogg/.test(b.type) ? 'ogg' : /mp4|aac/.test(b.type) ? 'm4a' : 'webm';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = `voicetrainer-${(rec.title || 'reading').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${rec.at.slice(0, 16).replace(/[:T]/g, '-')}.${ext}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
   function startReading(id) {
     endSpots();
     Reader.show();
@@ -2905,6 +2945,8 @@
   function beginRun() {
     const t = Reader.current; if (!t) return;
     Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now(); Run.frames = [];
+    Run.gates = { voiced: 0, formants: 0, steady: 0, scored: 0, loose: 0, refused: 0 };
+    stopRunAudio(); if (stream && state.running === 'mic') startRunAudio(stream);
     session = newSession();
     $('reader').classList.add('run');
     $('reader-finish').hidden = false;
@@ -2912,6 +2954,7 @@
     if (state.running !== 'mic') startMic();
   }
   function endRun() {
+    if (RunAudio.mr) stopRunAudio();
     Run.on = false; Run.frames = [];
     $('reader').classList.remove('run');
     $('reader-finish').hidden = true;
@@ -2935,8 +2978,10 @@
       // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
       // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
       vmap: readingVowelMap(st.map, Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
+      gates: Run.gates || undefined, // how many voiced moments passed each step, for "How word by word works"
       byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)].concat(w.rough && w.r != null ? [1] : [])),
     };
+    stopRunAudio(rec.id);
     endRun();
     Reader.hide();
     if (state.running === 'mic') stop();
@@ -2953,7 +2998,7 @@
     renderReadings(); renderHome();
     $('rd-hist-pick').value = t.id; renderReadingHistory();
   }
-  function cancelRun() { if (Run.on) { endRun(); session = newSession(); resetSessionViews(); } }
+  function cancelRun() { if (Run.on) { stopRunAudio(); endRun(); session = newSession(); resetSessionViews(); } }
   const fullReadings = (id) => Data.d.readings.filter(r => r.text === id && r.goal === state.goal && !r.partial);
   // under the reading's resonance: how sure it is, or why there isn't one (older readings have neither)
   function resNote(rec) {
@@ -2989,11 +3034,12 @@
       ${focusHtml(rec, spots)}
       ${vowelMapHtml(rec)}
       ${wordReportHtml(rec, spots)}
-      <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
+      <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-audio"${RunAudio.blob && RunAudio.recId === rec.id ? '' : ' hidden'}>Save audio</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
     wireWordReport(box, rec);
     wireFocus(box, rec, spots);
     box.querySelectorAll('[data-weak], [data-vm]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === (b.dataset.weak || b.dataset.vm)); if (def) openDrill(def); }));
     $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
+    $('rd-audio').onclick = () => saveRunAudio(rec);
     $('rd-close').onclick = () => { box.hidden = true; };
     $('rd-discard').onclick = (e) => {
       const b = e.currentTarget;
@@ -3069,6 +3115,12 @@
     if (pitch == null) return 'too little voice heard';
     return 'no vowel held long enough to read';
   }
+  // one line on how many voiced moments made it through each step (readings since 2026-11)
+  function gatesNote(g) {
+    if (!g || !g.voiced) return '';
+    const pc = (n) => Math.round(100 * n / g.voiced) + '%';
+    return ` In this reading: ${g.voiced} voiced moments; ${pc(g.formants)} gave formants, ${pc(g.steady)} held still, ${pc(g.scored)} got a reading${g.loose ? ` (plus ${pc(g.loose)} from short vowels)` : ''}${g.refused ? `, ${pc(g.refused)} were refused as unmeasurable` : ''}. Save audio below the result keeps a copy of what the microphone heard, if you want it checked.`;
+  }
   function wordReportHtml(rec, spots) {
     const ws = rec.byWord;
     if (!ws || !ws.some(w => w[1] != null || w[2] != null)) return '';
@@ -3103,11 +3155,12 @@
         + (p != null ? `<circle class="wr-dot${pitchOff(p) ? ' off' : ''}" cx="${f1(xs[i])}" cy="${f1(py(p))}" r="3.5"/>` : '')
         + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(xs[i] - 6)}" y="${f1(ry(r))}" width="12" height="${f1(Math.max(3, RT + RH - ry(r)))}" rx="2"/>`
           // no reading: a hollow, struck-through ring under the axis, never a bar (a very low score is a short filled bar)
+          : D.wordVowels(t, PRON).why === 'function' ? '' // "the", "of", "a": never scored, shown as a muted word rather than a miss
           : `<g class="wr-none"><circle cx="${f1(xs[i])}" cy="${RT + RH + 7}" r="4"/><line x1="${f1(xs[i] - 3)}" y1="${RT + RH + 10}" x2="${f1(xs[i] + 3)}" y2="${RT + RH + 4}"/></g>`)
-        + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
+        + `<text class="wr-word${resOff(r) ? ' off' : ''}${r == null && D.wordVowels(t, PRON).why === 'function' ? ' fn' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. Some short words still have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${ws.some(w => w[2] == null) ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}</span></div>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${ws.some(w => w[2] == null && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}</span></div>
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
@@ -4987,5 +5040,5 @@
   init();
 
   // test hook for automated checks
-  window.__vt = { onFrame, state, sessionStats, Sing, showReadingResult, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
+  window.__vt = { onFrame, state, sessionStats, Sing, showReadingResult, startReading, finishReading, get runFrames() { return Run.frames; }, get readerWords() { return Reader.words.map(w => w.text); }, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
 })();
