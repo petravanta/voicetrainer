@@ -39,6 +39,7 @@ jobs:
       - run: node test/sing.test.js
       - run: node test/singfollow.test.js
       - run: node test/rigor.test.js
+      - run: node test/scale.test.js
       - run: node build.js
       - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp pwa/* site/
       - uses: actions/configure-pages@v5
