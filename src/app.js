@@ -4384,9 +4384,24 @@
       const join = (a) => { const out = new Float32Array((a || []).reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of a || []) { out.set(x, o); o += x.length; } return out; };
       const seg = Object.fromEntries(this.STEPS.map(st => [st.k, join(chunks[st.k])]));
       let res = null;
+      this.last = { seg, sr: ctx.sampleRate };
       try { res = D.micVoiceCheck(seg, ctx.sampleRate, { label }); } catch (e) { console.error(e); }
       this.on = false; btn.disabled = false; btn.textContent = 'Run it again'; run.hidden = true;
       this.show(res, label);
+    },
+    // the check's own audio as a lossless WAV (quiet, ah, ee, sentence with short gaps), only when you ask for it
+    save() {
+      const L = this.last; if (!L) return;
+      const gap = new Float32Array(Math.round(L.sr * 0.3)), parts = [];
+      for (const st of this.STEPS) parts.push(L.seg[st.k] || new Float32Array(0), gap);
+      const n = parts.reduce((a, x) => a + x.length, 0), b = new DataView(new ArrayBuffer(44 + n * 2));
+      const w = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
+      w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+      b.setUint32(24, L.sr, true); b.setUint32(28, L.sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+      let o = 44; for (const x of parts) for (let i = 0; i < x.length; i++, o += 2) b.setInt16(o, Math.max(-32768, Math.min(32767, Math.round(x[i] * 32767))), true);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+      a.download = `voicetrainer-mic-check-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.wav`;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     },
     show(res, label) {
       const list = $('mc-list');
@@ -4404,8 +4419,9 @@
         list.appendChild(li);
       }
       const d = res.data, foot = document.createElement('li');
-      foot.innerHTML = `<span></span><span class="mc-say">${escapeHtml(label || 'Microphone')} · ${Math.round(d.sr / 100) / 10} kHz sampling${d.f0 ? ` · pitch ${d.f0} Hz` : ''}</span>`;
+      foot.innerHTML = `<span></span><span class="mc-say">${escapeHtml(label || 'Microphone')} · ${Math.round(d.sr / 100) / 10} kHz sampling${d.f0 ? ` · pitch ${d.f0} Hz` : ''} · <button type="button" class="linkish" id="mc-save">Save the recording</button></span>`;
       list.appendChild(foot);
+      $('mc-save').onclick = () => this.save();
       list.hidden = false;
     },
   };
