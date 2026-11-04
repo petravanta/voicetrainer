@@ -68,9 +68,10 @@
     </div>
     <div class="meter" aria-hidden="true">
       <div class="meter-target" id="meter-target"></div>
+      <i class="meter-avg" style="left:37.5%"></i><i class="meter-avg" style="left:62.5%"></i>
       <div class="needle" id="meter-needle" hidden></div>
     </div>
-    <div class="meter-scale"><span>0 masculine avg</span><span class="mid">50</span><span>100 feminine avg</span></div>
+    <div class="meter-scale"><span>0 darker</span><span class="avg" style="left:37.5%">avg man</span><span class="avg" style="left:62.5%">avg woman</span><span class="end">brighter 100</span></div>
     <dl class="readouts">
       <div><dt>Vowel heard</dt><dd id="ro-vowel">--</dd></div>
       <div><dt>Formants <small>F1 · F2 · F3, Hz</small></dt><dd id="ro-formants">--</dd></div>
@@ -152,9 +153,10 @@
       <p id="rd-hist-empty" class="empty">No readings of this passage yet.</p>
       <div id="rd-usual" class="fs rd-usual" hidden></div>
       <figure class="chart" id="rd-chart-wrap" hidden>
-        <figcaption>Resonance per reading <small>0 masculine avg, 100 feminine avg; the band is your target</small></figcaption>
+        <figcaption>Resonance per reading <small>dashed lines: average man (37.5) and woman (62.5); the band is your target</small></figcaption>
         <canvas id="cv-hist" height="200"></canvas>
         <div class="legend"><span><i class="dot res"></i>resonance</span><span><i class="dot sib"></i>/s/ brightness</span></div>
+        <p class="small muted" id="rd-hist-old" hidden>Hollow dots are readings from before November 2026, converted from the old scale. That scale stopped at the averages, so a hollow dot on a dashed line may have been further out.</p>
       </figure>
       <div class="table-wrap" id="rd-table-wrap" hidden>
         <table id="hist-table">
@@ -391,16 +393,17 @@
   </section>
 
   <footer class="foot">
-    <p>Scores run from 0 (average man) to 100 (average woman). They are estimates.<button type="button" class="info-btn inline" data-info aria-controls="info-foot" aria-describedby="info-foot" aria-expanded="false" aria-label="About the scores">i</button><span class="info-pop" id="info-foot" role="note" hidden>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; higher pitch, background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</span></p>
+    <p>Scores run from 0 (darker) to 100 (brighter); the average man is 37.5 and the average woman 62.5. They are estimates.<button type="button" class="info-btn inline" data-info aria-controls="info-foot" aria-describedby="info-foot" aria-expanded="false" aria-label="About the scores">i</button><span class="info-pop" id="info-foot" role="note" hidden>Scores place your measurements on a 0&ndash;100 scale where the average adult man sits at 37.5 and the average adult woman at 62.5 for the same sound, with room on both sides for darker and brighter voices. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; higher pitch, background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</span></p>
     <details class="method" id="method">
       <summary>How the resonance score works</summary>
       <ol>
         <li><strong>Pitch.</strong> The YIN method finds how often your vocal folds vibrate (your pitch, in Hz).</li>
         <li><strong>Formants.</strong> Linear prediction (LPC), the same family of method the research tool Praat uses, finds the three lowest resonances of your mouth and throat: F1, F2 and F3. A shorter or more forward-shaped space raises them, which is what people hear as brighter resonance.</li>
         <li><strong>Which vowel.</strong> The formants are matched to 12 American English vowels. In Read mode the app already knows the words, so it only checks the vowels each word should have.</li>
-        <li><strong>The score.</strong> Your F1&ndash;F3 are placed on a line from the average man's values (0) to the average woman's (100) for that vowel, measured on a log scale. It is not normalised for your size, on purpose: size and shape are what it measures.</li>
+        <li><strong>The score.</strong> Your F1&ndash;F3 are placed on a line from the average man's values (37.5) to the average woman's (62.5) for that vowel, measured on a log scale, and the line carries on past both. 0 and 100 are the edges of what an adult voice plausibly measures, so no real voice is pinned at an end. It is not normalised for your size, on purpose: size and shape are what it measures.</li>
+        <li><strong>The target bands.</strong> Most people are not average, so the target is a band, not a point: where 90% of real adults of each group sit. In the recordings the averages come from (Hillenbrand et al. 1995: 45 men, 48 women), taking each speaker's middle value across their vowels, 90% of the men fall between 28 and 45 and 90% of the women between 52 and 75. Brighter than the feminine band (or darker than the masculine one) still counts as on target. Between 45 and 52 is the overlap where voices read as neither.</li>
       </ol>
-      <p><strong>Limits, honestly.</strong> The whole 0&ndash;100 range is only a 10&ndash;20% change in the formants, so small measuring errors move the score a lot; the &plusmn; next to the number is a rough guide to that. In a higher voice F1 gets pulled towards your pitch's harmonics, so above about 175&ndash;190 Hz on &ldquo;ee&rdquo; and &ldquo;oo&rdquo; (higher on open vowels) the score uses F2 and F3 only. Readings far off any real voice, such as a nasal sound, show as &ldquo;couldn't measure&rdquo; instead of 0 or 100. Average is not a target: real women and men spread widely around these averages, and listeners judge gender mostly by pitch, then resonance, intonation and more. The score has been tested on synthetic voices and compared with Praat, not yet against listener ratings. Treat it as a coach for direction and trends, not a verdict.</p>
+      <p><strong>Limits, honestly.</strong> The 25 points between the two averages are only a 10&ndash;20% change in the formants, so small measuring errors move the score a lot; the &plusmn; next to the number is a rough guide to that. In a higher voice F1 gets pulled towards your pitch's harmonics, so above about 175&ndash;190 Hz on &ldquo;ee&rdquo; and &ldquo;oo&rdquo; (higher on open vowels) the score uses F2 and F3 only. Readings far off any real voice, such as a nasal sound, show as &ldquo;couldn't measure&rdquo;. Scores saved before November 2026 used an older scale that stopped at the averages; they have been converted, and show as hollow dots in a passage's history. The bands come from one study of American English speakers recorded in the 1990s (an older study, Peterson &amp; Barney 1952, sits 6 to 10 points darker for both groups), so treat their edges as soft. Listeners judge gender mostly by pitch, then resonance, intonation and more. The score has been tested on synthetic voices and compared with Praat, not yet against listener ratings. Treat it as a coach for direction and trends, not a verdict.</p>
       <p><strong>Learn more.</strong></p>
       <ul>
         <li><a href="https://en.wikipedia.org/wiki/Formant" target="_blank" rel="noopener">Formant</a> (Wikipedia) and the <a href="https://www.fon.hum.uva.nl/praat/manual/Sound__To_Formant__burg____.html" target="_blank" rel="noopener">Praat manual on formant analysis</a>: friendly starting points.</li>
