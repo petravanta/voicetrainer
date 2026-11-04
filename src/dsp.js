@@ -298,6 +298,10 @@
   // the vowel's typical F1 the resonance score is read from F2 and F3 only, which hold up far better.
   const F1_PITCH_RATIO = 0.45;
   const PITCH_WEIGHTS = [0, 1, 0.8];
+  // An "F1" this close to the pitch is usually the voice's own first harmonic, which LPC can take for a resonance
+  // (common in running speech with a strong fundamental); it says nothing about the vowel's F1.
+  const F1_ON_PITCH = 1.5;
+  function f1OnPitch(F, f0) { return f0 > 0 && F[0] < F1_ON_PITCH * f0; }
   function pitchLimited(v, f0) { return f0 > 0 && f0 > F1_PITCH_RATIO * Math.sqrt(v.M[0] * v.W[0]); }
   // Rough best-case spread of a single reading, in score points: each formant read to within F0/4 Hz,
   // (Kent & Vorperian 2018), passed through the same weighted fit. Grows with pitch; never below a 100 Hz voice.
@@ -355,7 +359,7 @@
   // score is then read from F2 and F3 as at high pitch, and marked f1Off.
   const F1_OFF_RMS = 0.06, F1_OFF_FULL = 0.1;
   function scoreVowel(F, v, f0 = 0) {
-    const lim = pitchLimited(v, f0), w = lim ? PITCH_WEIGHTS : FIT_WEIGHTS;
+    const lim = pitchLimited(v, f0) || f1OnPitch(F, f0), w = lim ? PITCH_WEIGHTS : FIT_WEIGHTS;
     const fit = fitVowel(F, v, w);
     if (!lim && fit.rms >= F1_OFF_FULL) {
       const f23 = fitVowel(F, v, PITCH_WEIGHTS);
@@ -370,7 +374,7 @@
   function classifyVowel(F, candidates = VOWELS, f0 = 0) {
     const res = [];
     for (const v of candidates) {
-      const fit = fitVowel(F, v, [1, 1, 0.7]);
+      const fit = fitVowel(F, v, f1OnPitch(F, f0) ? [0, 1, 0.7] : [1, 1, 0.7]);
       const excess = Math.max(0, -0.6 - fit.alpha, fit.alpha - 1.6);
       const cost = Math.hypot(fit.rms, excess * 0.12);
       res.push({ v, cost, fitRms: fit.rms });
@@ -1762,7 +1766,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
