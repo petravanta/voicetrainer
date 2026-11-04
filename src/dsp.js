@@ -1562,6 +1562,19 @@
   // LRCLIB asks apps to identify themselves. Browsers won't let a page set User-Agent, so this goes in the
   // Lrclib-Client header, which LRCLIB's CORS setup allows (Access-Control-Allow-Headers). build.js stamps the version.
   const APP_BUILD = /*BUILD*/'dev';
+  const APP_BUILT = /*BUILT*/'';
+  // Footer line for the build: 'Build 3f2a9c1 · 4 Nov 2026 10:52 UTC', or 'dev' for an unbuilt page.
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function buildLabel(build, built) {
+    if (!build || build === 'dev') return 'dev build';
+    const sha = build.split('+')[1] || build;
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(built || '');
+    return 'Build ' + sha + (m ? ` · ${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]} ${m[4]} UTC` : '');
+  }
+  // version.json from the server names a different build than the running page: a newer deploy is out.
+  function newerBuild(current, remote) {
+    return !!(current && current !== 'dev' && remote && typeof remote.build === 'string' && remote.build && remote.build !== current);
+  }
   const LRCLIB_CLIENT = `VoiceTrainer ${APP_BUILD} (https://github.com/petravanta/voicetrainer)`;
   const LYRICS_SOURCES = {
     lrclib: { name: 'LRCLIB', site: 'https://lrclib.net', timed: true },
@@ -1730,7 +1743,7 @@
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
-    LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
+    LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, APP_BUILT, buildLabel, newerBuild, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
   };
