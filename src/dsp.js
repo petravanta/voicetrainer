@@ -236,7 +236,7 @@
 
   // Returns up to 4 formant candidates [{f, bw}] from a segment sampled at fs (expected ~11-12 kHz).
   // maxBw: poles wider than this are taken for spectral shaping, not a formant.
-  function formants(seg, fs, order, lagHz = 50, maxBw = 500) {
+  function formants(seg, fs, order, lagHz = 50, maxBw = 500, maxN = 4) {
     const n = seg.length, w = hamming(n);
     const x = new Float64Array(n);
     const pre = Math.exp(-2 * Math.PI * 50 / fs);
@@ -254,7 +254,19 @@
       if (f > 180 && f < fs / 2 - 200 && bw > 0 && bw < maxBw) cands.push({ f, bw });
     }
     cands.sort((p, q) => p.f - q.f);
-    return cands.slice(0, 4);
+    return cands.slice(0, maxN);
+  }
+
+  // Formants from all candidate poles (sorted by frequency, up to WIDE_F1_BW wide): the narrow ones (< VOICED_MAX_BW),
+  // except that some voices have a soft, wide first resonance (an open "ah" with a lot of air): when no narrow pole
+  // sits low enough to be F1, the clearest wide one there is taken instead of letting F2 slide into F1's place.
+  function pickFormants(all) {
+    const fm = all.filter(q => q.bw < VOICED_MAX_BW).slice(0, 4);
+    if (!fm.length || fm[0].f > WIDE_F1_RANGE[1]) {
+      const w = all.filter(q => q.bw >= VOICED_MAX_BW && q.f >= WIDE_F1_RANGE[0] && q.f <= WIDE_F1_RANGE[1]).sort((p, q) => p.bw - q.bw)[0];
+      if (w) { fm.unshift(w); if (fm.length > 4) fm.pop(); fm.wideF1 = true; }
+    }
+    return fm;
   }
 
   // ---------- scoring ----------
@@ -338,9 +350,18 @@
   }
   // The resonance score for formants F heard as vowel v at pitch f0 (0 = unknown):
   // { alpha, rms, per, pitchLimited, ok (plausible), spread (± score points) }
+  // When the three formants don't line up but F2 and F3 agree closely, only F1 is off. F1 is the least reliable
+  // formant (a soft, wide F1, or a voice whose F1 sits outside both references, like a very closed "ee"), so the
+  // score is then read from F2 and F3 as at high pitch, and marked f1Off.
+  const F1_OFF_RMS = 0.06, F1_OFF_FULL = 0.1;
   function scoreVowel(F, v, f0 = 0) {
     const lim = pitchLimited(v, f0), w = lim ? PITCH_WEIGHTS : FIT_WEIGHTS;
     const fit = fitVowel(F, v, w);
+    if (!lim && fit.rms >= F1_OFF_FULL) {
+      const f23 = fitVowel(F, v, PITCH_WEIGHTS);
+      if (f23.rms < F1_OFF_RMS && plausible(f23))
+        return Object.assign(f23, { pitchLimited: false, f1Off: true, ok: true, spread: scoreSpread(F, v, f0, PITCH_WEIGHTS) });
+    }
     return Object.assign(fit, { pitchLimited: lim, ok: plausible(fit), spread: scoreSpread(F, v, f0, w) });
   }
 
@@ -692,7 +713,7 @@
   // a score, so a short reading often got none. Real vowels last ~80-150 ms and glide into their consonants, and
   // a higher voice's formants come out wider. Up to 700 Hz bandwidth (800 starts letting nasal misreads through)
   // and 0.10 steadiness for speech roughly double the scored frames with the same median. Drills keep 0.06.
-  const VOICED_MAX_BW = 700, SPEECH_SPREAD = 0.10;
+  const VOICED_MAX_BW = 700, SPEECH_SPREAD = 0.10, WIDE_F1_BW = 1200, WIDE_F1_RANGE = [250, 1100];
 
   class Analyzer {
     constructor(sampleRate) {
@@ -765,7 +786,9 @@
         out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
         const ln = Math.round(this.fsd * this.winMs / 1000);
         const lag = typeof this.lagHz === 'function' ? this.lagHz(out.f0) : this.lagHz;
-        const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, lag, VOICED_MAX_BW);
+        const all = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8);
+        const fm = pickFormants(all);
+        if (fm.wideF1) out.wideF1 = true;
         if (fm.length >= 3) {
           this.hist.push(fm.slice(0, 3).map(q => q.f));
           out.rawF = this.hist[this.hist.length - 1]; // this frame alone, unsmoothed
@@ -1739,7 +1762,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
