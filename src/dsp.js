@@ -234,8 +234,9 @@
     return out;
   }
 
-  // Returns up to 3 formants [{f, bw}] from a segment sampled at fs (expected ~11-12 kHz).
-  function formants(seg, fs, order, lagHz = 50) {
+  // Returns up to 4 formant candidates [{f, bw}] from a segment sampled at fs (expected ~11-12 kHz).
+  // maxBw: poles wider than this are taken for spectral shaping, not a formant.
+  function formants(seg, fs, order, lagHz = 50, maxBw = 500) {
     const n = seg.length, w = hamming(n);
     const x = new Float64Array(n);
     const pre = Math.exp(-2 * Math.PI * 50 / fs);
@@ -250,7 +251,7 @@
       const f = Math.atan2(im, re) * fs / (2 * Math.PI);
       const r = Math.hypot(re, im);
       const bw = -Math.log(r) * fs / Math.PI;
-      if (f > 180 && f < fs / 2 - 200 && bw > 0 && bw < 500) cands.push({ f, bw });
+      if (f > 180 && f < fs / 2 - 200 && bw > 0 && bw < maxBw) cands.push({ f, bw });
     }
     cands.sort((p, q) => p.f - q.f);
     return cands.slice(0, 4);
@@ -686,6 +687,13 @@
   }
 
   // ---------- streaming analyzer ----------
+  // Formant gates for real running speech, measured on a real reader (8 LJSpeech clips, a woman, median 229 Hz):
+  // with poles up to 500 Hz wide and the drill's 0.06 steadiness, only 26% of voiced frames held still and 5% got
+  // a score, so a short reading often got none. Real vowels last ~80-150 ms and glide into their consonants, and
+  // a higher voice's formants come out wider. Up to 700 Hz bandwidth (800 starts letting nasal misreads through)
+  // and 0.10 steadiness for speech roughly double the scored frames with the same median. Drills keep 0.06.
+  const VOICED_MAX_BW = 700, SPEECH_SPREAD = 0.10;
+
   class Analyzer {
     constructor(sampleRate) {
       this.sr = sampleRate;
@@ -755,7 +763,7 @@
         const vq = voiceQuality(y, this.fsd, out.f0);
         out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
         const ln = Math.round(this.fsd * 0.03);
-        const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder);
+        const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, 50, VOICED_MAX_BW);
         if (fm.length >= 3) {
           this.hist.push(fm.slice(0, 3).map(q => q.f));
           if (this.hist.length > 5) this.hist.shift();
@@ -769,7 +777,9 @@
             }
           } else spread = 1;
           out.formants = F;
-          out.stable = this.hist.length >= 3 && spread < 0.06;
+          out.spread = spread;
+          out.stable = this.hist.length >= 3 && spread < 0.06; // a held vowel (drills)
+          out.steady = this.hist.length >= 3 && spread < SPEECH_SPREAD; // steady enough for running speech
         }
       } else if (hfRatio < 0.6 && p.f0 > 0 && p.aperiodicity < 0.5) {
         // too airy to count as clean voicing, but still a voice: measure how breathy it is
@@ -1073,6 +1083,26 @@
       };
     });
   }
+  // A whole reading's resonance, pooled from every frame that got a score ({f0 (0 when unvoiced), res (NaN unless
+  // scored), u (± of res, optional), miss (heard but not measurable, optional)}). 20 scored frames (~0.3 s of
+  // vowels) give a solid score; 6 to 19 still give one, marked shaky. With fewer it says why, with the same
+  // reasons as a sung line (SING_WHY). -> { res, n, shaky, pm, why }
+  const READ_RES_SOLID = 20, READ_RES_MIN = 6;
+  function pooledResonance(frames) {
+    const res = [], u = [], f0 = []; let miss = 0;
+    for (const f of frames || []) {
+      if (f.f0 > 0) f0.push(f.f0);
+      if (Number.isFinite(f.res)) { res.push(f.res); if (Number.isFinite(f.u)) u.push(f.u); } else if (f.miss) miss++;
+    }
+    const n = res.length;
+    if (n >= READ_RES_MIN) {
+      const shaky = n < READ_RES_SOLID, uu = u.length ? median(u) : 8;
+      return { res: median(res), n, shaky, pm: Math.max(2, Math.round(uu * 1.25 / Math.sqrt(n) * (shaky ? 1.5 : 1))), why: null };
+    }
+    const why = f0.length < 30 ? 'quiet' : median(f0) > SING_RES_HIGH ? 'high' : miss >= 3 ? 'unclear' : 'unsteady';
+    return { res: null, n, shaky: false, pm: null, why };
+  }
+
   // a lyric line that isn't words to sing: "♪", "(Instrumental)", "[Guitar solo]", "--"
   const instrumentalLine = (text) => !/\p{L}/u.test(text || '') || /^[\s([{]*(instrumental|interlude|(guitar |piano |sax )?solo|music|break)[\s)\]}.!]*$/i.test(text || '');
   const SING_WHY = {
@@ -1543,7 +1573,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, pooledResonance, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
