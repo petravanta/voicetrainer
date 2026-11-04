@@ -39,7 +39,7 @@ function voice(f0, F, o = {}) {
     x[i] = (ph < op ? 0.5 * (1 - Math.cos(Math.PI * ph / op)) : ph < op + cl ? Math.cos(0.5 * Math.PI * (ph - op) / cl) : 0) + 0.01 * (rand() - 0.5);
   }
   for (let i = n - 1; i > 0; i--) x[i] -= x[i - 1];
-  [F[0], F[1], F[2], F[2] * 1.22 + 250, F[2] * 1.38 + 500].forEach((f, k) => reson(x, f, [70, 100, 140, 200, 250][k]));
+  [F[0], F[1], F[2], F[2] * 1.22 + 250, F[2] * 1.38 + 500].forEach((f, k) => reson(x, f, (o.bw || [70, 100, 140, 200, 250])[k]));
   if (o.nasal) { reson(x, o.nasal[0], 80); reson(x, o.nasal[1], 100, true); }
   let e = 0; for (const v of x) e += v * v;
   const g = 0.3 / Math.sqrt(e / n); for (let i = 0; i < n; i++) x[i] *= g;
@@ -67,16 +67,33 @@ for (const k of ['i', 'u']) {
   const v = D.VOWEL_BY_KEY[k], r = score(voice(220, tract(v, 0), { open: 0.3, close: 0.08 }), v);
   check(r && r.s < 30, `pressed ${v.cue} at 220 Hz scores ${r ? Math.round(r.s) : '--'} (under 30)`);
 }
-console.log('\n# a nasal resonance that breaks the formant picking is refused, not shown as 0 or 100');
+console.log('\n# a nasal resonance that breaks the formant picking is refused or read from F2/F3, never shown as 0 or 100');
 {
   const v = D.VOWEL_BY_KEY.a;
   for (const [f0, t] of [[120, 0], [210, 1]]) {
     const fr = run(voice(f0, tract(v, t), { nasal: [250, 600] }));
     const raw = fr.map(f => D.fitVowel(f.formants, v).alpha);
-    const kept = fr.filter(f => D.scoreVowel(f.formants, v, f.f0).ok).length;
-    check(fr.length > 0 && kept <= 0.1 * fr.length, `nasal "ah" (${t ? 'female' : 'male'} tract): raw ${Math.round(100 * D.median(raw))}, ${kept}/${fr.length} frames kept`);
+    const fits = fr.map(f => D.scoreVowel(f.formants, v, f.f0)), kept = fits.filter(s => s.ok);
+    const wrong = kept.filter(s => Math.abs(s.alpha - t) > 0.35).length; // kept frames must land near the true tract
+    check(fr.length > 0 && wrong <= 0.1 * fr.length, `nasal "ah" (${t ? 'female' : 'male'} tract): raw ${Math.round(100 * D.median(raw))}, ${kept.length}/${fr.length} frames kept`
+      + (kept.length ? ` at ${Math.round(100 * D.median(kept.map(s => s.alpha)))} (true ${100 * t})` : '') + `, ${wrong} wrong`);
   }
   check(!D.plausible({ alpha: 4.06, rms: 0.05 }) && !D.plausible({ alpha: -2.3, rms: 0.05 }) && D.plausible({ alpha: 1.3, rms: 0.05 }), 'plausible range is -100 to 200');
+}
+console.log('\n# a voice whose F1 alone is off still gets read, from F2 and F3');
+{
+  const v = D.VOWEL_BY_KEY.i, W = tract(v, 1);
+  const fr = run(voice(165, [240, W[1], W[2]]));
+  const fits = fr.map(f => D.scoreVowel(f.formants, v, f.f0)), kept = fits.filter(s => s.ok);
+  const a = kept.length ? D.median(kept.map(s => s.alpha)) : NaN;
+  check(kept.length > 0.8 * fr.length && kept.every(s => s.f1Off) && Math.abs(a - 1) < 0.25, `"ee" with F1 240 Hz, woman's F2/F3: ${kept.length}/${fr.length} read, at ${Math.round(100 * a)} (true 100), F1 set aside`);
+  const m = D.fitVowel([240, ...tract(v, 0).slice(1)], v);
+  check(!D.scoreVowel([240, 1500, 3300], v, 165).ok, 'F2 and F3 that disagree are still refused');
+  // a soft, wide F1 (seen on a real woman's held "ah": 630-830 Hz wide in Praat too) is kept rather than F2 taking its place
+  const p = D.pickFormants([{ f: 760, bw: 820 }, { f: 1580, bw: 120 }, { f: 3400, bw: 200 }, { f: 3900, bw: 300 }]);
+  check(p.wideF1 && p.map(q => q.f).join() === '760,1580,3400,3900', `a wide F1 with no narrow pole below 1100 Hz is kept as F1 (${p.map(q => q.f).join('/')})`);
+  const p2 = D.pickFormants([{ f: 600, bw: 900 }, { f: 780, bw: 150 }, { f: 1580, bw: 120 }, { f: 3400, bw: 200 }]);
+  check(!p2.wideF1 && p2[0].f === 780, 'a narrow F1 wins over a wide pole');
 }
 console.log('\n# the ± widens with pitch');
 {
