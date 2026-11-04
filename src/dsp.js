@@ -707,6 +707,7 @@
       this.needed = Math.max(this.decLen * this.dec + this.taps, this.fricN);
       this.noise = 0.003;
       this.hist = [];   // recent formant frames for smoothing
+      this.histN = 5; this.winMs = 30; this.lagHz = 50; // formant smoothing frames, LPC window, LPC lag window
       this.pitchHist = [];
       this.gap = 0;
       this.whist = []; // recent whispered-vowel formant frames
@@ -762,11 +763,14 @@
         out.f0 = median(this.pitchHist);
         const vq = voiceQuality(y, this.fsd, out.f0);
         out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
-        const ln = Math.round(this.fsd * 0.03);
-        const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, 50, VOICED_MAX_BW);
+        const ln = Math.round(this.fsd * this.winMs / 1000);
+        const lag = typeof this.lagHz === 'function' ? this.lagHz(out.f0) : this.lagHz;
+        const fm = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, lag, VOICED_MAX_BW);
         if (fm.length >= 3) {
           this.hist.push(fm.slice(0, 3).map(q => q.f));
-          if (this.hist.length > 5) this.hist.shift();
+          out.rawF = this.hist[this.hist.length - 1]; // this frame alone, unsmoothed
+          out.cands = fm.map(q => q.f); // every formant candidate of this frame (up to 4)
+          if (this.hist.length > this.histN) this.hist.shift();
           const F = [0, 1, 2].map(i => median(this.hist.map(h => h[i])));
           // stability: spread of the recent frames relative to their median
           let spread = 0;
@@ -879,19 +883,31 @@
   }
 
   // ---------- reading report ----------
-  // Per-word summary of a reading. frames: [{ i: word index, f0: Hz or 0, res: score or NaN, sib: score or NaN }].
-  // Returns one { p, r, s } per word (median pitch, resonance, sibilant score; null when too little was heard).
+  // Per-word summary of a reading. frames: [{ i: word index, f0: Hz or 0, res: score or NaN, sib: score or NaN,
+  // loose (res is from a single frame that wasn't steady, optional) }].
+  // Returns one { p, r, s, rough } per word (median pitch, resonance, sibilant score; null when too little was heard).
+  // Resonance: 2 steady frames, or else 3 frames counting loose ones (rough: true). See LOOSE_WORD_MIN.
   function wordReport(frames, nWords) {
-    const acc = Array.from({ length: nWords }, () => ({ p: [], r: [], s: [] }));
+    const acc = Array.from({ length: nWords }, () => ({ p: [], r: [], l: [], s: [] }));
     for (const f of frames) {
       const a = acc[f.i]; if (!a) continue;
       if (f.f0 > 0) a.p.push(f.f0);
-      if (Number.isFinite(f.res)) a.r.push(f.res);
+      if (Number.isFinite(f.res)) (f.loose ? a.l : a.r).push(f.res);
       if (Number.isFinite(f.sib)) a.s.push(f.sib);
     }
     const m = (arr, n) => (arr.length >= n ? median(arr) : null);
-    return acc.map(a => ({ p: m(a.p, 3), r: m(a.r, 2), s: m(a.s, 2) }));
+    return acc.map(a => {
+      const r = m(a.r, 2), rl = r == null ? m(a.r.concat(a.l), LOOSE_WORD_MIN) : null;
+      return { p: m(a.p, 3), r: r != null ? r : rl, s: m(a.s, 2), rough: rl != null };
+    });
   }
+  // Shorter vowels: in a reading, a frame whose formants didn't hold still is still read on its own (its own 30 ms,
+  // not smoothed across the consonant next to it) when it fits one of the word's vowels. One such frame is noisy,
+  // so a word needs 3 of them, and they only fill words and readings the steady frames leave empty. On 8 clips of a
+  // real reader this lifts content words with a score from 65% to 79%; on synthetic speech at 1.6x speed the word
+  // error stays at 2-4 points (median) with more words scored. Shorter LPC windows, 3-frame smoothing, a
+  // pitch-scaled lag window and re-picking formants from all candidates were tried and gained 0-4 points of coverage.
+  const LOOSE_WORD_MIN = 3;
   // ---------- vowel map ----------
   // The vowels of a passage, each on its own: byKey maps a vowel key to the steady frames classified as
   // that vowel, [[F1, F2, F3, score], ...]. Returns [{ k, F: median formants, s: median score, n }] for each
@@ -1088,12 +1104,14 @@
   // vowels) give a solid score; 6 to 19 still give one, marked shaky. With fewer it says why, with the same
   // reasons as a sung line (SING_WHY). -> { res, n, shaky, pm, why }
   const READ_RES_SOLID = 20, READ_RES_MIN = 6;
+  // Loose frames (see wordReport) only count when the steady ones are too few for a solid score.
   function pooledResonance(frames) {
-    const res = [], u = [], f0 = []; let miss = 0;
+    let res = [], u = [], f0 = [], lres = [], lu = []; let miss = 0;
     for (const f of frames || []) {
       if (f.f0 > 0) f0.push(f.f0);
-      if (Number.isFinite(f.res)) { res.push(f.res); if (Number.isFinite(f.u)) u.push(f.u); } else if (f.miss) miss++;
+      if (Number.isFinite(f.res)) { (f.loose ? lres : res).push(f.res); if (Number.isFinite(f.u)) (f.loose ? lu : u).push(f.u); } else if (f.miss) miss++;
     }
+    if (res.length < READ_RES_SOLID) { res = res.concat(lres); u = u.concat(lu); }
     const n = res.length;
     if (n >= READ_RES_MIN) {
       const shaky = n < READ_RES_SOLID, uu = u.length ? median(u) : 8;
@@ -1573,7 +1591,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, pooledResonance, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
