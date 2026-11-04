@@ -82,7 +82,8 @@
   function newSession() {
     return { start: Date.now(), vowels: {}, vf: {}, sibs: { s: [], sh: [] }, all: [], pitch: [], breath: [], drills: [] };
   }
-  const target = () => (state.goal === 'fem' ? [75, 100] : [0, 25]);
+  // Resonance target band for the goal, on the 0..100 scale (see D.RES_BANDS for where the numbers come from)
+  const target = () => D.RES_BANDS[state.goal === 'fem' ? 'fem' : 'masc'];
 
   // ---------------- theme colours for canvases ----------------
   let C = {};
@@ -485,7 +486,7 @@
     const ab = ctx.createBuffer(1, x.length, ctx.sampleRate);
     ab.copyToChannel(x, 0);
     playBuffer(ab, 'demo', sweep ? 'Demo voice: sibilant and vowels, moving from masculine to feminine resonance'
-      : `Demo voice: s and four vowels at ${v.pitch} Hz, resonance ${v.res}, brightness ${v.bright}`);
+      : `Demo voice: s and four vowels at ${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))}, brightness ${v.bright}`);
   }
 
   // Demo voice settings, shared by the synthetic demo and the reading voice.
@@ -507,7 +508,7 @@
       const v = this.get();
       for (const t of ['fem', 'masc']) $('vd-' + t).setAttribute('aria-checked', String(v.type === t));
       $('vd-pitch').value = v.pitch; $('vd-pitch-out').textContent = v.pitch + ' Hz';
-      $('vd-res').value = v.res; $('vd-res-out').textContent = v.res;
+      $('vd-res').value = v.res; $('vd-res-out').textContent = Math.round(D.resScore(v.res / 100)); // stored as alpha x 100, shown on the meter's scale
       $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
       $('vd-rate').value = v.rate; $('vd-rate-out').textContent = (+v.rate).toFixed(2) + '×';
       $('reader-voice-wrap').hidden = this.voiceCount < 2;
@@ -742,7 +743,7 @@
         if (ok) {
           frAny = score;
           if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; }
-          pushMeter(score, gated, fit ? fit.spread : NaN);
+          pushMeter(score, gated, fit ? fit.spread * D.RES_PER_ALPHA / 100 : NaN);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
           if (!gated || exSrc) {
@@ -813,7 +814,7 @@
 
   // Scores shown and saved stay on the 0 (masculine average) .. 100 (feminine average) scale.
   // Going past an average is not extra credit, so it reads as the end of the scale.
-  function score100(alpha) { return clamp(alpha * 100, 0, 100); }
+  function score100(alpha) { return clamp(D.resScore(alpha), 0, 100); } // 0..100 is the plausible range, so the clamp only catches sibilants and whispers
   function pushMeter(score, demo = false, spread = NaN) {
     // average over the last ~1.5 s so the needle moves calmly; a demo voice and yours never mix
     const now = performance.now();
@@ -862,11 +863,11 @@
     t.style.left = clamp(lo, 0, 100) + '%';
     t.style.width = clamp(hi, 0, 100) - clamp(lo, 0, 100) + '%';
     if (Number.isFinite(v)) {
-      const inT = v >= lo && v <= hi;
+      const inT = onTarget(v), mid = (D.RES_AVG.masc + D.RES_AVG.fem) / 2;
       if (state.meterDemo) $('res-desc').textContent = `This is the ${state.meterName}, not you: ${inT ? 'inside' : 'outside'} your target range. It is not scored or saved.`;
-      else $('res-desc').textContent = inT ? 'In your target range. Keep this shape.'
-        : state.goal === 'fem' ? (v < 40 ? 'Darker than typical feminine resonance. Try a smaller, brighter mouth space.' : 'Getting brighter. A little more forward and lighter to reach the target.')
-          : (v > 60 ? 'Brighter than typical masculine resonance. Try more space in the throat and slightly rounded lips.' : 'Getting darker. A little more depth to reach the target.');
+      else $('res-desc').textContent = inT ? (state.goal === 'fem' ? v > hi : v < lo) ? `${state.goal === 'fem' ? 'Brighter' : 'Darker'} than most ${state.goal === 'fem' ? 'women' : 'men'}: past the target band, which is fine. No need to push further.` : 'In your target range. Keep this shape.'
+        : state.goal === 'fem' ? (v < mid ? 'Darker than typical feminine resonance. Try a smaller, brighter mouth space.' : 'Getting brighter. A little more forward and lighter to reach the target.')
+          : (v > mid ? 'Brighter than typical masculine resonance. Try more space in the throat and slightly rounded lips.' : 'Getting darker. A little more depth to reach the target.');
     }
   }
 
@@ -2364,7 +2365,8 @@
     on('plan-resume', goToStep);
   }
 
-  function onTarget(score) { const [lo, hi] = target(); return score >= lo && score <= hi; }
+  // past the band's far end (brighter than most women for a feminine goal, darker than most men for a masculine one) is on target too
+  function onTarget(score) { const [lo, hi] = target(); return state.goal === 'fem' ? score >= lo : score <= hi; }
   function vowelTip(res) {
     const fem = state.goal === 'fem';
     if (onTarget(res.vowelScore)) return 'On target for this vowel. Hold the same mouth shape and try it inside a word drill.';
@@ -2510,8 +2512,9 @@
     const sa = a.settings || {}, sb = b.settings || {};
     return {
       settings: (sa.upd || '') >= (sb.upd || '') ? sa : sb,
-      readings: union('readings').sort((x, y) => (x.at < y.at ? -1 : 1)),
-      practice: union('practice').sort((x, y) => (x.at < y.at ? -1 : 1)),
+      // scores saved on the old resonance scale are moved to the current one (D.migrateRecord)
+      readings: union('readings').map(r => D.migrateRecord(r, 'readings')).sort((x, y) => (x.at < y.at ? -1 : 1)),
+      practice: union('practice').map(r => D.migrateRecord(r, 'practice')).sort((x, y) => (x.at < y.at ? -1 : 1)),
       texts: union('texts', true),
       ...D.songsMerge(a, b), // Your songs (Sing): newest change per song wins, removals included
       deleted: [...del].slice(-2000),
@@ -2822,7 +2825,7 @@
   const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'whisper' ? '%' : kind === 'spotpitch' ? ' Hz' : '');
   function recordPractice(entry) {
     if (!entry) return;
-    Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score });
+    Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score, rs: D.RES_SCALE });
     renderPracticeHistory(); renderHome();
   }
   const practiceFor = (id) => Data.d.practice.filter(p => p.drill === id && p.goal === state.goal);
@@ -2901,7 +2904,7 @@
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
     const rec = {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-      at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title,
+      at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, // resonance scale version
       cover: Math.round(cover * 100), partial: cover < 0.7, seconds: Math.round((Date.now() - Run.start) / 1000),
       resonance: round(st.resonance),
       vowels: Object.fromEntries(Object.entries(st.vowels).map(([k, v]) => [k, round(v.score)])),
@@ -2987,7 +2990,7 @@
     for (const f of [800, 1000, 1500, 2000, 2500, 3000]) g += `<line class="vm-grid" x1="${f1(x(f))}" x2="${f1(x(f))}" y1="${T}" y2="${H - B}"/><text class="vm-tick" x="${f1(x(f))}" y="${H - 8}" text-anchor="middle">${f >= 1000 ? f / 1000 + 'k' : f}</text>`;
     for (const f of [300, 400, 500, 600, 800, 1000]) g += `<line class="vm-grid" x1="${L}" x2="${W - R}" y1="${f1(y(f))}" y2="${f1(y(f))}"/><text class="vm-tick" x="${L - 5}" y="${f1(y(f) + 4)}" text-anchor="end">${f}</text>`;
     // a point on the masculine-to-feminine line of vowel v, at score a (0..100), on the same log scale as the score
-    const along = (v, a, i) => Math.exp(Math.log(v.M[i]) + a / 100 * (Math.log(v.W[i]) - Math.log(v.M[i])));
+    const along = (v, a, i) => Math.exp(Math.log(v.M[i]) + D.resAlpha(a) * (Math.log(v.W[i]) - Math.log(v.M[i])));
     let refs = '', you = '';
     for (const it of items) {
       const v = D.VOWEL_BY_KEY[it.k], off = Math.round(it.s) < lo || Math.round(it.s) > hi, cue = v.cue.split(' ')[0];
@@ -3323,6 +3326,10 @@
     g.fillRect(pad.l, y(Math.min(hi, 100)), w - pad.l - pad.r, y(lo) - y(Math.min(hi, 100))); g.globalAlpha = 1;
     g.fillStyle = C.muted; g.textAlign = 'right';
     for (const v of [0, 25, 50, 75, 100]) { g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(w - pad.r, y(v)); g.stroke(); g.fillText(v, pad.l - 6 * dpr, y(v) + 4 * dpr); }
+    // the two averages, dashed
+    g.setLineDash([4 * dpr, 4 * dpr]);
+    for (const [k, col] of [['masc', C.masc], ['fem', C.fem]]) { g.strokeStyle = col; g.beginPath(); g.moveTo(pad.l, y(D.RES_AVG[k])); g.lineTo(w - pad.r, y(D.RES_AVG[k])); g.stroke(); }
+    g.setLineDash([]); g.strokeStyle = C.line;
     g.textAlign = 'center';
     const every = Math.max(1, Math.ceil(n / 8));
     items.forEach((r, i) => { if (i % every === 0 || i === n - 1) g.fillText(new Date(r.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), x(i), h - 8 * dpr); });
@@ -3331,8 +3338,10 @@
       if (!pts.length) return;
       g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 2 * dpr;
       g.beginPath(); pts.forEach(([i, v], j) => (j ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)))); g.stroke();
-      pts.forEach(([i, v], j) => { g.beginPath(); g.arc(x(i), y(v), (j === pts.length - 1 ? 5 : 3) * dpr, 0, 7); g.fill(); });
+      // hollow: converted from the old scale, which stopped at the averages, so the real value may have been further out
+      pts.forEach(([i, v], j) => { g.beginPath(); g.arc(x(i), y(v), (j === pts.length - 1 ? 5 : 3) * dpr, 0, 7); if (items[i].rsFrom) { g.fillStyle = C.panel; g.fill(); g.stroke(); g.fillStyle = color; } else g.fill(); });
     };
+    const old = $('rd-hist-old'); if (old) old.hidden = !items.some(r => r.rsFrom);
     series('resonance', C.accent);
     series('sibS', C.warn);
   }
@@ -4092,7 +4101,7 @@
     badge(k) {
       const li = $('sg-lines').children[k]; if (!li) return;
       const s = this.lineSum(k), [lo, hi] = target(), bits = [];
-      if (s.res != null) bits.push(`<b class="${s.res >= lo && s.res <= hi ? 'in' : ''}">${Math.round(s.res)}</b> resonance`);
+      if (s.res != null) bits.push(`<b class="${onTarget(s.res) ? 'in' : ''}">${Math.round(s.res)}</b> resonance`);
       if (s.f0 != null) bits.push(`${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}`);
       li.querySelector('.sg-badge').innerHTML = bits.join(' · ');
     },
@@ -4141,7 +4150,7 @@
       for (const p of this.trace) {
         if (!p.f0) continue;
         const x = w - (now - p.t) * sx; if (x < axisW) continue;
-        if (Number.isFinite(p.res)) { const u = clamp(p.res / 100, 0, 1); g.fillStyle = `rgb(${m.map((c, k) => Math.round(c + (fm[k] - c) * u)).join(',')})`; }
+        if (Number.isFinite(p.res)) { const u = clamp((p.res - D.RES_AVG.masc) / (D.RES_AVG.fem - D.RES_AVG.masc), 0, 1); g.fillStyle = `rgb(${m.map((c, k) => Math.round(c + (fm[k] - c) * u)).join(',')})`; }
         else g.fillStyle = C.ink;
         g.beginPath(); g.arc(x, y(clamp(p.f0, SING_HZ[0], SING_HZ[1])), (Number.isFinite(p.res) ? 2.6 : 1.7) * dpr, 0, 7); g.fill();
       }
@@ -4160,7 +4169,7 @@
     result() {
       const lines = this.lyr.lines, sum = D.singSummary(this.frames, lines.length), box = $('sg-result');
       const res = this.frames.map(f => f.res).filter(Number.isFinite), f0 = this.frames.map(f => f.f0).filter(v => v > 0);
-      const [lo, hi] = target(), inT = (r) => r >= lo && r <= hi;
+      const [lo, hi] = target(), inT = onTarget;
       const secs = (performance.now() - this.t0) / 1000, sung = this.frames.length ? secs * f0.length / this.frames.length : 0;
       if (f0.length < 18) {
         box.innerHTML = `<h3>No singing heard</h3><p class="muted">The microphone didn't pick up enough voice to summarise. Check it's the right microphone and sing a little closer to it.</p><div class="btn-row"><button type="button" class="btn primary" data-sg="again">Try again</button></div>`;
@@ -4181,7 +4190,7 @@
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a reading was inside your target band.</p>' : ''}
-          ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>0 masculine avg · 100 feminine avg</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
+          ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
           <p class="small muted">Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
