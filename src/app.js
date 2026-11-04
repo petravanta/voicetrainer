@@ -685,6 +685,7 @@
   function onFrame(fr) {
     frameCount++;
     let frRes = NaN, frSib = NaN, frVowel = null; // this frame's scores, for the per-word reading report
+    let frU = NaN, frMiss = false; // ± of frRes in score points; a vowel heard but not measurable (for Sing's per-line reasons)
     const frWord = Reader.idx; // the word this frame's vowel was checked against (the highlight may move on below)
     let frAny = NaN; // this frame's resonance, demo voice included (for the embody view)
     drawSpecColumn(fr, an.fsd);
@@ -742,7 +743,7 @@
         }
         if (ok) {
           frAny = score;
-          if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; }
+          if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; frU = fit ? fit.spread * D.RES_PER_ALPHA / 100 : NaN; }
           pushMeter(score, gated, fit ? fit.spread * D.RES_PER_ALPHA / 100 : NaN);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
@@ -756,6 +757,7 @@
           $('res-context').textContent = (gated ? 'demo voice, ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue)
             + (fit && fit.pitchLimited ? ' · high pitch: F2 and F3 only' : '');
         } else if (unmeasured && !gated) {
+          frMiss = true;
           // a reading far off any voice (a nasal sound, a harmonic taken for a formant): not shown as 0 or 100
           $('res-context').textContent = "couldn't measure that sound";
         }
@@ -804,7 +806,7 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
-    if (Sing.on && !gated) Sing.frame(fr, frRes);
+    if (Sing.on && !gated) Sing.frame(fr, frRes, frU, frMiss);
     if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
@@ -4098,20 +4100,20 @@
       }
       if (r.onset) this.progress();
     },
-    lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => ({ line: 0, f0: f.f0, res: f.res })), 1)[0]; },
+    lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => Object.assign({}, f, { line: 0 })), 1)[0]; },
     badge(k) {
       const li = $('sg-lines').children[k]; if (!li) return;
       const s = this.lineSum(k), [lo, hi] = target(), bits = [];
-      if (s.res != null) bits.push(`<b class="${onTarget(s.res) ? 'in' : ''}">${Math.round(s.res)}</b> resonance`);
+      if (s.res != null) bits.push(`<b class="${onTarget(s.res) ? 'in' : ''}">${s.shaky ? '≈' : ''}${Math.round(s.res)}</b> resonance`);
       if (s.f0 != null) bits.push(`${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}`);
       li.querySelector('.sg-badge').innerHTML = bits.join(' · ');
     },
-    frame(fr, res) {
+    frame(fr, res, u, miss) {
       if (!this.on || this.paused) return;
       if (this.fol) this.followFrame(fr);
       this.follow();
       const f0 = fr.kind === 'voiced' ? fr.f0 : 0, now = performance.now();
-      if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res, t: now });
+      if (this.cur >= 0) this.frames.push({ line: this.cur, f0, res, u, miss, t: now });
       this.trace.push({ t: now, f0, res });
       while (this.trace.length && now - this.trace[0].t > SING_VIEW_MS + 500) this.trace.shift();
       if (Number.isFinite(res)) this.lastResAt = now;
@@ -4206,24 +4208,27 @@
         box.innerHTML = `<h3>No singing heard</h3><p class="muted">The microphone didn't pick up enough voice to summarise. Check it's the right microphone and sing a little closer to it.</p><div class="btn-row"><button type="button" class="btn primary" data-sg="again">Try again</button></div>`;
       } else {
         const pLo = D.quantile(f0, 0.05), pHi = D.quantile(f0, 0.95), mRes = res.length >= 8 ? D.median(res) : null;
-        const scored = sum.filter(s => s.res != null && lines[s.line].text);
+        const scored = sum.filter(s => s.res != null && !s.shaky && lines[s.line].text && !D.instrumentalLine(lines[s.line].text));
         const worst = scored.slice().sort((a, b) => (state.goal === 'fem' ? a.res - b.res : b.res - a.res)).filter(s => !inT(s.res)).slice(0, 2);
         const stat = (k, v, sub) => `<div class="stat"><b>${v}</b><span>${k}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
         const rows = this.empty ? '' : sum.map((s, i) => {
           const l = lines[i]; if (!l.text) return '';
-          const bar = s.res != null ? `<span class="sg-bar"><s style="left:${lo}%;width:${hi - lo}%"></s><i class="${inT(s.res) ? 'in' : ''}" style="width:${clamp(s.res, 2, 100)}%"></i></span><span class="n">${Math.round(s.res)}</span>` : '';
-          const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '';
-          return `<li><span class="t">${escapeHtml(l.text)}</span>${bar || rng ? (bar || '<span></span><span></span>') + (rng || '<span></span>') : '<span class="none">not enough voice on this line</span>'}</li>`;
+          const inst = D.instrumentalLine(l.text);
+          const v = s.res != null ? Math.round(s.res) : null, tip = v != null ? `Resonance ${v} ± ${s.pm}, from ${s.vowelFrames} vowel readings${s.shaky ? ' (only a few, so a rough guide)' : ''}` : '';
+          const bar = v != null && !inst ? `<span class="sg-bar${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}"><s style="left:${lo}%;width:${hi - lo}%"></s><i class="${inT(s.res) ? 'in' : ''}" style="width:${clamp(s.res, 2, 100)}%"></i><u style="left:${clamp(s.res - s.pm, 0, 100)}%;width:${clamp(s.res + s.pm, 0, 100) - clamp(s.res - s.pm, 0, 100)}%"></u></span><span class="n${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}">${s.shaky ? '≈' : ''}${v}</span>`
+            : `<span class="why">${inst ? 'instrumental' : D.SING_WHY[s.why]}</span>`;
+          const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '<span class="r">--</span>';
+          return `<li><span class="t">${escapeHtml(l.text)}</span>${bar}${rng}</li>`;
         }).join('');
         box.innerHTML = `<div class="section-head"><h3>${this.song && this.song.title.trim() ? escapeHtml(this.song.title.trim()) : this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
           <div class="stats">${stat('Resonance', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
           ${stat('In your target', res.length >= 8 ? Math.round(100 * res.filter(inT).length / res.length) + '%' : '--', `band ${lo} to ${hi}`)}
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
-          ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a reading was inside your target band.</p>' : ''}
+          ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a solid reading was inside your target band.</p>' : ''}
           ${this.heldHtml()}
           ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
-          <p class="small muted">Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.")}</p>
+          <p class="small muted">≈ means only a few vowels were read. Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Every line gets a score once 3 vowel readings land on it; under 8 it's marked ≈ and is a rough guide. The pale band on each bar is how far the score could be off. A line with no score says why: too little voice, too high, vowels that couldn't be measured (often a nasal or buzzy sound), or no held vowel (quick words and slides). Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.")}</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
       box.hidden = false;
@@ -4944,5 +4949,5 @@
   init();
 
   // test hook for automated checks
-  window.__vt = { onFrame, state, sessionStats, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
+  window.__vt = { onFrame, state, sessionStats, Sing, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
 })();

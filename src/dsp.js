@@ -1038,25 +1038,49 @@
     return ans;
   }
   // After a song: one summary per lyric line from the frames heard while it was current
-  // ({line, f0 (0 when unvoiced), res (NaN unless a vowel was scored)}). A line needs 0.3 s of voice
-  // for a pitch summary and 8 scored vowel frames for a resonance one.
+  // ({line, f0 (0 when unvoiced), res (NaN unless a vowel was scored), u (± of res, score points, optional),
+  // miss (a vowel was heard but couldn't be measured, optional)}). A line needs 0.3 s of voice for a pitch
+  // summary. Resonance: 8 scored vowel frames (~0.13 s) give a solid reading; 3 to 7 still give one, marked
+  // shaky. pm = rough ± of the line's median: the frames' own ± shrunk by how many there were (1.25/√n for a
+  // median), floored at 2 and widened for shaky lines. A line with no reading says why (why):
+  // 'quiet' (barely any voice), 'high' (sung above SING_RES_HIGH Hz), 'unclear' (vowels heard, none measurable),
+  // 'unsteady' (voice but no held vowel, e.g. fast words or slides).
+  const SING_RES_SOLID = 8, SING_RES_MIN = 3, SING_RES_HIGH = 280;
   function singSummary(frames, nLines) {
-    const by = Array.from({ length: nLines }, () => ({ f0: [], res: [] }));
+    const by = Array.from({ length: nLines }, () => ({ f0: [], res: [], u: [], miss: 0 }));
     for (const f of frames) {
       const b = by[f.line]; if (!b) continue;
       if (f.f0 > 0) b.f0.push(f.f0);
-      if (Number.isFinite(f.res)) b.res.push(f.res);
+      if (Number.isFinite(f.res)) { b.res.push(f.res); if (Number.isFinite(f.u)) b.u.push(f.u); }
+      else if (f.miss) b.miss++;
     }
     return by.map((b, i) => {
       const voiced = b.f0.length >= 18;
       const lo = voiced ? quantile(b.f0, 0.1) : null, hi = voiced ? quantile(b.f0, 0.9) : null;
+      const n = b.res.length, has = n >= SING_RES_MIN, shaky = has && n < SING_RES_SOLID;
+      let pm = null, why = null;
+      if (has) {
+        const u = b.u.length ? median(b.u) : 8; // no per-frame ± given: a typical speaking-pitch reading
+        pm = Math.max(2, Math.round(u * 1.25 / Math.sqrt(n) * (shaky ? 1.5 : 1)));
+      } else if (b.f0.length < 6) why = 'quiet';
+      else if (median(b.f0) > SING_RES_HIGH) why = 'high';
+      else if (b.miss >= 3) why = 'unclear';
+      else why = 'unsteady';
       return {
-        line: i, voicedFrames: b.f0.length, vowelFrames: b.res.length,
+        line: i, voicedFrames: b.f0.length, vowelFrames: n, missFrames: b.miss,
         f0: voiced ? median(b.f0) : null, lo, hi, span: voiced ? 12 * Math.log2(hi / lo) : null,
-        res: b.res.length >= 8 ? median(b.res) : null,
+        res: has ? median(b.res) : null, shaky, pm, why,
       };
     });
   }
+  // a lyric line that isn't words to sing: "♪", "(Instrumental)", "[Guitar solo]", "--"
+  const instrumentalLine = (text) => !/\p{L}/u.test(text || '') || /^[\s([{]*(instrumental|interlude|(guitar |piano |sax )?solo|music|break)[\s)\]}.!]*$/i.test(text || '');
+  const SING_WHY = {
+    quiet: 'too little voice heard',
+    high: 'too high to read resonance',
+    unclear: "vowels couldn't be measured",
+    unsteady: 'no held vowels to read',
+  };
 
   // Held notes after a song: seconds spent holding each semitone, from frames {f0 (0 when unvoiced),
   // res (NaN unless scored), t (ms)}. A hold is a run of voiced frames that stays within `tol`
@@ -1522,7 +1546,7 @@
     yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
-    parseLyrics, lyricLineAt, singSummary, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
+    parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
