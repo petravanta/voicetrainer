@@ -763,7 +763,7 @@
             tractLive.v = vowel; tractLive.at = performance.now();
           }
           $('res-context').textContent = (gated ? 'demo voice, ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue)
-            + (fit && fit.pitchLimited ? ' · high pitch: F2 and F3 only' : '');
+            + (fit && fit.pitchLimited ? ' · high pitch: F2 and F3 only' : fit && fit.f1Off ? ' · F1 set aside: F2 and F3 only' : '');
         } else if (unmeasured && !gated) {
           frMiss = true;
           // a reading far off any voice (a nasal sound, a harmonic taken for a formant): not shown as 0 or 100
