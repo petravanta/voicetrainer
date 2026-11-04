@@ -2492,7 +2492,7 @@
   // can't be used (a file opened from disk, a claude.ai Artifact), the browser keeps the copy.
   const GOOGLE_CLIENT_ID = /^(petravanta\.github\.io|localhost)$/.test(location.hostname) ? '326863468616-4hf2conk0ks0s4qdva9tphphdo7ht7eh.apps.googleusercontent.com' : '';
   const PRIVACY = '<a href="https://petravanta.github.io/general/privacy.html" target="_blank" rel="noopener">Privacy</a> · <a href="https://petravanta.github.io/general/terms.html" target="_blank" rel="noopener">Terms</a>';
-  const emptyData = () => ({ settings: {}, readings: [], practice: [], texts: [], deleted: [] });
+  const emptyData = () => ({ settings: {}, readings: [], practice: [], texts: [], songs: [], songsGone: {}, deleted: [] });
   // Combine two copies (Drive and this browser, or two devices): every record from both minus
   // deletions, the more recently changed settings, and the newer edit of each text.
   function mergeData(a, b) {
@@ -2513,6 +2513,7 @@
       readings: union('readings').sort((x, y) => (x.at < y.at ? -1 : 1)),
       practice: union('practice').sort((x, y) => (x.at < y.at ? -1 : 1)),
       texts: union('texts', true),
+      ...D.songsMerge(a, b), // Your songs (Sing): newest change per song wins, removals included
       deleted: [...del].slice(-2000),
     };
   }
@@ -2699,6 +2700,7 @@
       // Drive sign-ins last about an hour. After that, open with this browser's copy; the first tap reconnects and catches up with Drive
       if (this.store.configured && this.store.live()) this.connect(false);
       else if (this.store.configured && this.store.data) { this.d = mergeData(this.store.data, emptyData()); this.where = 'drive'; }
+      this.migrateSongs();
       this.paintStatus();
     },
     // Earlier versions kept your own texts and the goal in this browser; progress starts fresh (petravanta, 2026-10-16)
@@ -2707,6 +2709,16 @@
       try { d.texts = JSON.parse(localStorage.getItem('voicetrainer.texts.v1') || '[]').map(t => Object.assign({ upd: '' }, t)); } catch (e) {}
       try { const g = localStorage.getItem('voicetrainer.goal'); if (g) d.settings.goal = g; } catch (e) {}
       return d;
+    },
+    // Your songs used to live in their own browser key; they now travel with the rest of the data (and so to Drive)
+    migrateSongs() {
+      let old = null;
+      try { old = localStorage.getItem(SING_SAVED_KEY); } catch (e) {}
+      if (old == null) return;
+      let list = [];
+      try { list = D.lyricsCacheClean(JSON.parse(old)).map(r => ({ ...r, upd: r.at || 1 })); } catch (e) {}
+      if (list.length) { this.d = mergeData({ songs: list }, this.d); this.persist(); }
+      try { localStorage.removeItem(SING_SAVED_KEY); } catch (e) {}
     },
     async connect(interactive) {
       if (!this.store.configured) return;
@@ -2754,7 +2766,7 @@
     const st = Data.store;
     let html;
     if (!st.configured) html = `<p class="vd-note">This copy saves your readings and practice in this browser only. Open VoiceTrainer at petravanta.github.io/voicetrainer to keep them in your Google Drive.</p>`;
-    else if (Data.where !== 'drive') html = `<p class="vd-note">VoiceTrainer can keep your readings, practice history, settings and texts in one file in your own Google Drive, so they follow you to any device. It can only see the file it creates. Until then they are saved in this browser.</p>
+    else if (Data.where !== 'drive') html = `<p class="vd-note">VoiceTrainer can keep your readings, practice history, settings, texts and songs (lyrics and attached video links) in one file in your own Google Drive, so they follow you to any device. It can only see the file it creates. Until then they are saved in this browser.</p>
       ${Data.err ? `<p class="vd-note">${Data.err}</p>` : ''}
       <div class="btn-row"><button type="button" class="btn primary" data-act="drive-connect" data-drive="1">${st.known ? 'Reconnect Google Drive' : 'Connect Google Drive'}</button></div>`;
     else html = `<p class="vd-note">${st.status()}. Everything is saved to <b>${st.file}</b> in your Drive a moment after each change.</p>
@@ -2788,6 +2800,7 @@
     renderPitchTarget();
     Texts.sync();
     renderReadings(); renderPracticeHistory(); renderDrillGrid(); renderHome();
+    if (Sing.ready) Sing.renderSaved();
   }
 
   // ---------------- theme ----------------
@@ -3417,6 +3430,7 @@
     audio: null, url: null, trackName: '', rec: null, recKey: null, backKeys: new Set(), started: false, base: 0, at: 0, offset: 0, t0: 0,
     lastResAt: -1e9, cols: null, empty: false, fol: null,
     init() {
+      this.ready = true;
       let text = '', meta = null;
       try { text = localStorage.getItem(SING_KEY) || ''; meta = JSON.parse(localStorage.getItem(SING_SONG_KEY) || 'null'); } catch (e) {}
       $('sg-lyrics').addEventListener('input', () => this.edited());
@@ -3564,16 +3578,16 @@
       this.remember(r);
       $('sg-more').addEventListener('click', () => { $('sg-results').hidden = false; $('sg-more').remove(); });
     },
-    // Saved lyrics: every song loaded from a search is kept in this browser (newest first, capped in dsp.js),
-    // listed under the search box and filtered by what is typed there. Nothing leaves the device.
+    // Your songs: every song loaded from a search or saved as your own (newest first, capped in dsp.js), listed under
+    // the search box and filtered by what is typed there. They are part of the saved data, so once Google Drive is
+    // connected they follow you to every device (lyrics and video links only; song files stay in this browser).
     shown: [],
-    savedList() { try { return D.lyricsCacheClean(JSON.parse(localStorage.getItem(SING_SAVED_KEY) || '[]')); } catch (e) { return []; } },
+    savedList() { return D.lyricsCacheClean(Data.d.songs); },
     storeSaved(list) {
-      // A full store drops the oldest songs until the list fits.
-      for (let l = list; ; l = l.slice(0, -1)) {
-        try { if (l.length) localStorage.setItem(SING_SAVED_KEY, JSON.stringify(l)); else localStorage.removeItem(SING_SAVED_KEY); return l; }
-        catch (e) { if (l.length <= 1) return this.savedList(); }
-      }
+      const next = D.songsStamp(Data.d.songs, D.lyricsCacheCap(list), Data.d.songsGone);
+      Data.d.songs = next.songs; Data.d.songsGone = next.songsGone;
+      Data.persist();
+      return next.songs;
     },
     savedEntry(key) { return key ? this.savedList().find(r => r.key === key) || null : null; },
     remember(r) { if (r && r.text) this.storeSaved(D.lyricsCachePut(this.savedList(), r)); this.renderSaved(); },
@@ -3593,7 +3607,7 @@
       }).join('');
       list.hidden = !shown.length;
       if (msg.dataset.keep) return;
-      msg.textContent = !all.length ? 'No songs yet. Search for a song, or tap New song to type or paste your own. Songs are kept here on this device, so you can pick them again with one tap.'
+      msg.textContent = !all.length ? 'No songs yet. Search for a song, or tap New song to type or paste your own. ' + (Data.where === 'drive' ? 'Songs are saved in your Google Drive, so you can pick them again with one tap on any device.' : 'Songs are kept here on this device, so you can pick them again with one tap.')
         : !shown.length ? 'None of your songs match the search box; search to find more.'
         : 'Tap a song to load its lyrics; × removes it.';
     },
@@ -3625,7 +3639,7 @@
       this.storeSaved([]);
       this.unlink(before);
       this.renderSaved();
-      this.savedNote(`Deleted ${before.length} saved song${before.length > 1 ? 's' : ''} from this browser.`, () => { this.storeSaved(before); this.relink(before); this.renderSaved(); });
+      this.savedNote(`Deleted ${before.length} saved song${before.length > 1 ? 's' : ''} from your songs.`, () => { this.storeSaved(before); this.relink(before); this.renderSaved(); });
       $('sg-saved-undo').focus();
     },
     // Put lyrics into the box, with Undo when that replaces something, and an extra button or two after the note.
