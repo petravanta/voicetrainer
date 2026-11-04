@@ -779,3 +779,18 @@ a { color: var(--accent); }
 }
 .sg-result .stat small { display: block; font-size: 12px; color: var(--muted); }
 .sg-result q { font-weight: 600; }
+/* Sing review: notes you held */
+.hn { margin: 4px 0 10px; display: grid; gap: 4px; }
+.hn-svg { display: block; width: 100%; max-width: 560px; height: auto; overflow: visible; }
+.hn-band { fill: var(--accent-soft); }
+.hn-grid { stroke: var(--line); stroke-dasharray: 2 3; }
+.hn-base { stroke: var(--muted); }
+.hn-ceil { stroke: var(--warn); stroke-dasharray: 3 3; }
+.hn-bar { fill: var(--accent); }
+.hn-hit { fill: transparent; cursor: pointer; outline: none; }
+.hn-hit.on, .hn-hit:focus-visible { fill: var(--ink); fill-opacity: 0.07; }
+.hn-tick { fill: var(--muted); font: 10px var(--font-mono); }
+.hn-tick.pk { fill: var(--ink); font-weight: 700; }
+.hn-lab { fill: var(--muted); font: 10px var(--font-body); }
+.hn-val { fill: var(--ink); font: 600 11px var(--font-mono); }
+.hn-say { color: var(--muted); }
