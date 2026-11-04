@@ -1021,6 +1021,52 @@
     });
   }
 
+  // Held notes after a song: seconds spent holding each semitone, from frames {f0 (0 when unvoiced),
+  // res (NaN unless scored), t (ms)}. A hold is a run of voiced frames that stays within `tol`
+  // semitones of where it settled and lasts at least `minHold` seconds; gaps up to `maxGap` ms
+  // (a breath of noise, one octave blip) don't break it. Slides and scoops never settle, so they
+  // don't count. Each frame is worth the time to the next one, capped at 100 ms so pauses add nothing.
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const midiName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
+  function heldNotes(frames, opt) {
+    const o = Object.assign({ minHold: 0.25, tol: 0.6, maxGap: 60 }, opt);
+    const bins = new Map(); let run = null;
+    const dur = (i) => {
+      const a = frames[i].t, nx = frames[i + 1], pv = frames[i - 1];
+      const d = nx ? nx.t - a : pv ? a - pv.t : 1000 / 60;
+      return Math.min(Math.max(d, 0), 100) / 1000;
+    };
+    const close = () => {
+      if (run && run.secs >= o.minHold) {
+        const n = Math.round(median(run.m));
+        const b = bins.get(n) || { secs: 0, res: [] };
+        b.secs += run.secs; b.res.push(...run.res); bins.set(n, b);
+      }
+      run = null;
+    };
+    const open = (m, f, d) => { run = { m: [m], ref: m, secs: d, res: Number.isFinite(f.res) ? [f.res] : [], last: f.t }; };
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i], m = f.f0 > 0 ? 12 * Math.log2(f.f0 / 440) + 69 : null, d = dur(i);
+      if (run && m != null && Math.abs(m - run.ref) <= o.tol) {
+        run.m.push(m); run.secs += d; run.last = f.t;
+        if (Number.isFinite(f.res)) run.res.push(f.res);
+        if (run.m.length <= 10) run.ref = median(run.m); // settle on the note, then hold the reference still
+        continue;
+      }
+      if (run && f.t - run.last <= o.maxGap) continue;
+      close();
+      if (m != null) open(m, f, d);
+    }
+    close();
+    const list = [...bins.keys()].sort((a, b) => a - b).map(n => {
+      const b = bins.get(n);
+      return { midi: n, note: midiName(n), hz: 440 * Math.pow(2, (n - 69) / 12), secs: b.secs, res: b.res.length >= 4 ? median(b.res) : null };
+    });
+    const total = list.reduce((s, b) => s + b.secs, 0);
+    const peak = list.reduce((p, b) => (!p || b.secs > p.secs ? b : p), null);
+    return { bins: list, total, peak, lo: list.length ? list[0].midi : null, hi: list.length ? list[list.length - 1].midi : null };
+  }
+
   // ---------- following a singer through the lyrics ----------
   // Rough syllables a lyric line asks for: section labels like "[Chorus]" ask for none.
   function lineSyllables(text) {
@@ -1439,7 +1485,7 @@
     yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
-    parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
+    parseLyrics, lyricLineAt, singSummary, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
