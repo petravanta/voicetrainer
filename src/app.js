@@ -3019,7 +3019,7 @@
     const last = prev.at(-1), best = prev.reduce((m, r) => (r.resonance != null && (m == null || better(r.resonance, m)) ? r.resonance : m), null);
     const delta = (v, o) => (v == null || o == null ? '' : `<small class="${better(v, o) ? 'up' : v === o ? '' : 'down'}">${v - o > 0 ? '+' : ''}${Math.round(v - o)} vs last</small>`);
     const [lo, hi] = target();
-    const weak = Object.entries(rec.vowels || {}).filter(([, s]) => Math.round(s) < lo || Math.round(s) > hi).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
+    const weak = Object.entries(rec.vowels || {}).filter(([, s]) => !onTarget(Math.round(s))).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
     const spots = spotsFor(rec);
     const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}</h3><span class="muted small">${rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
@@ -3072,7 +3072,7 @@
     const along = (v, a, i) => Math.exp(Math.log(v.M[i]) + D.resAlpha(a) * (Math.log(v.W[i]) - Math.log(v.M[i])));
     let refs = '', you = '';
     for (const it of items) {
-      const v = D.VOWEL_BY_KEY[it.k], off = Math.round(it.s) < lo || Math.round(it.s) > hi, cue = v.cue.split(' ')[0];
+      const v = D.VOWEL_BY_KEY[it.k], off = !onTarget(Math.round(it.s)), cue = v.cue.split(' ')[0];
       const mx = x(v.M[1]), my = y(v.M[0]), wx = x(v.W[1]), wy = y(v.W[0]);
       const gx0 = x(along(v, lo, 1)), gy0 = y(along(v, lo, 0)), gx1 = x(along(v, hi, 1)), gy1 = y(along(v, hi, 0));
       refs += `<line class="vm-axis" x1="${f1(mx)}" y1="${f1(my)}" x2="${f1(wx)}" y2="${f1(wy)}"/>`
@@ -3096,7 +3096,7 @@
     if (!rows.length) return '';
     rows.sort((a, b) => gapOf(b.s) - gapOf(a.s) || a.s - b.s);
     const list = rows.map(r => {
-      const v = D.VOWEL_BY_KEY[r.k], off = Math.round(r.s) < lo || Math.round(r.s) > hi;
+      const v = D.VOWEL_BY_KEY[r.k], off = !onTarget(Math.round(r.s));
       return `<li><button type="button" class="vm-row${off ? ' off' : ''}" data-vm="${r.k}"><span class="vm-cue"><b>${escapeHtml(v.cue.split(' ')[0])}</b> <small class="muted">${escapeHtml(v.word)}</small></span>`
         + `<span class="track"><span class="mark" style="left:${clamp(r.s, 0, 100)}%"></span></span><span class="val">${Math.round(r.s)}</span>`
         + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
@@ -3125,7 +3125,8 @@
     const ws = rec.byWord;
     if (!ws || !ws.some(w => w[1] != null || w[2] != null)) return '';
     const [lo, hi] = target(), [plo, phi] = pitchBand();
-    const resOff = (r) => r != null && (Math.round(r) < lo || Math.round(r) > hi);
+    // past the far end of the goal band counts as on target, as on the meter
+    const resOff = (r) => r != null && !onTarget(Math.round(r));
     // pitch is off when it is on the far side of the goal band (above the band is fine for a feminine goal)
     const pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
     // one slot per word, wide enough for its label

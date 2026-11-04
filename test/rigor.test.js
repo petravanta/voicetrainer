@@ -89,6 +89,10 @@ console.log('\n# a voice whose F1 alone is off still gets read, from F2 and F3')
   check(kept.length > 0.8 * fr.length && kept.every(s => s.f1Off) && Math.abs(a - 1) < 0.25, `"ee" with F1 240 Hz, woman's F2/F3: ${kept.length}/${fr.length} read, at ${Math.round(100 * a)} (true 100), F1 set aside`);
   const m = D.fitVowel([240, ...tract(v, 0).slice(1)], v);
   check(!D.scoreVowel([240, 1500, 3300], v, 165).ok, 'F2 and F3 that disagree are still refused');
+  // in running speech LPC often puts a pole on the pitch itself (seen in a real 175 Hz voice: half the frames had F1 at 1.1-1.3x pitch)
+  const ae = D.VOWEL_BY_KEY.ae, Wae = tract(ae, 1), sp = D.scoreVowel([200, Wae[1], Wae[2]], ae, 175);
+  check(sp.ok && sp.pitchLimited && Math.abs(sp.alpha - 1) < 0.1, `an "F1" at 200 Hz on a 175 Hz voice is set aside: "ae" read at ${Math.round(100 * sp.alpha)} (true 100)`);
+  check(!D.f1OnPitch([240, 2800, 3400], 120), 'a low F1 well above the pitch is kept');
   // a soft, wide F1 (seen on a real woman's held "ah": 630-830 Hz wide in Praat too) is kept rather than F2 taking its place
   const p = D.pickFormants([{ f: 760, bw: 820 }, { f: 1580, bw: 120 }, { f: 3400, bw: 200 }, { f: 3900, bw: 300 }]);
   check(p.wideF1 && p.map(q => q.f).join() === '760,1580,3400,3900', `a wide F1 with no narrow pole below 1100 Hz is kept as F1 (${p.map(q => q.f).join('/')})`);
