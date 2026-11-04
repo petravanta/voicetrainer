@@ -54,6 +54,7 @@ node test/examples.test.js  # every reference example scores on target
 node test/coach.test.js     # live coaching cues point the right way
 node test/reading.test.js   # syllable counting and tracking for reading along
 node test/singfollow.test.js # Follow my singing: a synthetic singer (detached and legato notes, held notes, a breath, a break, room hum) moves the lyrics once per line, and timed-lyrics drift correction
+node test/rigor.test.js     # known weak spots: raised pitch earns no resonance, nasal misreads are refused, the ± widens with pitch
 node test/sing.test.js      # lyrics parsing (plain and LRC), lyrics search results, the LRCLIB to lyrics.ovh fallback (with a fake network), the saved-lyrics list and the per-line sing-along summary
 ```
 
@@ -82,9 +83,18 @@ Vowels and sibilant targets (measured formant data in `src/dsp.js`) and prosody 
 - `data/` – practice content (see *Extending the app*)
 - `build.js` – inlines everything into a single HTML file
 
+## How the resonance score works
+
+1. **Pitch**: YIN (de Cheveigné & Kawahara 2002) on about 65 ms of audio.
+2. **Formants**: the audio is resampled to about 11 kHz, pre-emphasised, windowed (30 ms Hamming) and fitted with a 10th-order linear prediction (LPC) model; the roots of that model give F1, F2 and F3, the three lowest resonances of the vocal tract. A median of the last five frames steadies them. On synthetic test vowels this agrees with Praat's Burg analysis within a few points.
+3. **Vowel**: F1–F3 are matched against the 12 American English vowels of [Hillenbrand et al. (1995)](https://doi.org/10.1121/1.411872). In Read mode only the vowels each word should have are tried.
+4. **Score**: on a log-frequency scale, F1–F3 are projected onto the line from the average man's values (0) to the average woman's (100) for that vowel, weighted 0.6 / 1 / 0.8. Nothing is normalised for speaker size, because size and shape are what the score measures.
+
+**Limits.** The whole 0–100 range is a 10–20% formant change, so a 1% measuring error moves the score 5–8 points; the meter shows a rough ± based on the F0/4 accuracy rule of thumb ([Kent & Vorperian 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6002811/)). In a higher voice LPC pulls F1 towards a harmonic ([Shadle, Nam & Whalen 2016](https://doi.org/10.1121/1.4940665)), which made a male-sized tract score about 40 on "ee" at 220 Hz; so once pitch passes 45% of a vowel's typical F1 (about 175–190 Hz for "ee" and "oo") the score uses F2 and F3 only. Readings outside −100 to 200 (usually a nasal resonance or a harmonic taken for a formant) are refused rather than shown as 0 or 100. The score has been tested on synthetic voices only, and the average is not a target: listeners rely most on pitch ([Leung, Oates & Chan 2018](https://doi.org/10.1044/2017_JSLHR-S-17-0067); [Gelfer & Mikos 2005](https://doi.org/10.1016/j.jvoice.2004.10.006)). The same summary, with links, is under "How the resonance score works" at the bottom of the app.
+
 ## Notes
 
-Formant accuracy drops for voices above roughly 280 Hz fundamental. Not a substitute for a voice coach or speech-language pathologist.
+Not a substitute for a voice coach or speech-language pathologist.
 
 ## License
 
