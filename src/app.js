@@ -716,7 +716,8 @@
       $('ro-formants').textContent = F.map(f => Math.round(f)).join(' · ');
       state.lastF = { F, at: Date.now() };
       state.trail.push([F[0], F[1]]); if (state.trail.length > 24) state.trail.shift();
-      if (fr.stable) {
+      // a drill wants a held vowel; running speech (readings, freestyle, singing) only glides through its vowels
+      if (fr.stable || (fr.steady && !d)) {
         let unmeasured = false;
         let score = NaN, vowel = null, ok = false, mapIt = true, fit = null;
         const cls = D.classifyVowel(F, D.VOWELS, fr.f0);
@@ -733,6 +734,10 @@
           // reading: only the vowels this word should have count, so a vowel is never pinned on the wrong word
           const m = D.matchWordVowel(F, wv.keys, cls, fr.f0);
           if (m) { vowel = m.vowel; score = score100(m.alpha); ok = true; fit = m; }
+          // not one of this word's vowels (the highlight can sit a syllable off, or the word is said another way):
+          // a clear vowel still counts towards the word and the overall score, but not per vowel
+          else if (cls.cost < 0.07 && cls.ok) { vowel = cls.vowel; score = score100(cls.alpha); ok = true; fit = cls; mapIt = false; }
+          else if (cls.cost < 0.07) unmeasured = true;
         } else if (wv && wv.why === 'function') {
           // "the", "of", "with": reduced in running speech, so not scored at all
         } else if (cls.cost < 0.07 && !cls.ok) {
@@ -807,7 +812,7 @@
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
     if (Sing.on && !gated) Sing.frame(fr, frRes, frU, frMiss);
-    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -2903,14 +2908,15 @@
   function finishReading() {
     if (!Run.on) return;
     if (Spot.cur) return finishSpot();
-    const t = Run.text, st = sessionStats(session);
+    const t = Run.text, st = sessionStats(session), pool = D.pooledResonance(Run.frames);
     const cover = Reader.words.length ? clamp((Run.maxIdx + 1) / Reader.words.length, 0, 1) : 0;
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
     const rec = {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, // resonance scale version
       cover: Math.round(cover * 100), partial: cover < 0.7, seconds: Math.round((Date.now() - Run.start) / 1000),
-      resonance: round(st.resonance),
+      // the whole reading's resonance; under 20 vowel readings it's rough (resShaky), with none it says why (resWhy)
+      resonance: round(pool.res), resPm: pool.pm, resN: pool.n, resShaky: pool.shaky || undefined, resWhy: pool.why || undefined,
       vowels: Object.fromEntries(Object.entries(st.vowels).map(([k, v]) => [k, round(v.score)])),
       sibS: st.sib.s ? round(st.sib.s.score) : null, sibSh: st.sib.sh ? round(st.sib.sh.score) : null,
       pitchMedian: st.pitch ? Math.round(st.pitch.median) : null, pitchP10: st.pitch ? Math.round(st.pitch.p10) : null, pitchP90: st.pitch ? Math.round(st.pitch.p90) : null,
@@ -2938,6 +2944,18 @@
   }
   function cancelRun() { if (Run.on) { endRun(); session = newSession(); resetSessionViews(); } }
   const fullReadings = (id) => Data.d.readings.filter(r => r.text === id && r.goal === state.goal && !r.partial);
+  // under the reading's resonance: how sure it is, or why there isn't one (older readings have neither)
+  function resNote(rec) {
+    if (rec.resonance != null) return rec.resPm != null ? `<small>± ${rec.resPm}${rec.resShaky ? `, few vowels${infoHtml('A rough resonance', `Only ${rec.resN} steady vowel moments could be read, so this is a rough guide. Longer vowels and a steady volume give more to measure.`)}` : ''}</small>` : '';
+    if (!rec.resWhy) return '';
+    const more = {
+      quiet: 'Too little voice reached the microphone to read your vowels.',
+      high: 'Your voice sat above about 280 Hz, where the vowel shape can no longer be read from the voice reliably.',
+      unclear: "Vowels were heard, but their shape didn't fit any vowel the app knows. A nasal or buzzy tone, room echo or a phone microphone's processing can cause this. Try another microphone or a quieter room.",
+      unsteady: "Resonance is read from vowels the mouth holds for a moment, and none held still long enough. Try reading a little slower and letting the long vowels last.",
+    }[rec.resWhy];
+    return `<small>${D.SING_WHY[rec.resWhy]}${more ? infoHtml('Why no resonance', more) : ''}</small>`;
+  }
   function showReadingResult(rec, msg) {
     const box = $('rd-result'); box.hidden = false; box.rec = rec;
     if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
@@ -2950,7 +2968,7 @@
     const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}</h3><span class="muted small">${rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
       <div class="stats">
-        ${stat('Resonance', rec.resonance != null ? Math.round(rec.resonance) : '--', delta(rec.resonance, last && last.resonance))}
+        ${stat('Resonance', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + delta(rec.resonance, last && last.resonance))}
         ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', delta(rec.sibS, last && last.sibS))}
         ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}<small>target ${pitchBand().join('-')} Hz</small>`)}
         ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
@@ -3069,7 +3087,7 @@
         + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only steady vowels get a resonance score, so short words often have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only vowels that hold still for a moment get a resonance score, so short words often have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
@@ -4949,5 +4967,5 @@
   init();
 
   // test hook for automated checks
-  window.__vt = { onFrame, state, sessionStats, Sing, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
+  window.__vt = { onFrame, state, sessionStats, Sing, showReadingResult, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
 })();
