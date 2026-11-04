@@ -715,30 +715,34 @@
       state.lastF = { F, at: Date.now() };
       state.trail.push([F[0], F[1]]); if (state.trail.length > 24) state.trail.shift();
       if (fr.stable) {
-        let score = NaN, vowel = null, ok = false, mapIt = true;
-        const cls = D.classifyVowel(F);
+        let unmeasured = false;
+        let score = NaN, vowel = null, ok = false, mapIt = true, fit = null;
+        const cls = D.classifyVowel(F, D.VOWELS, fr.f0);
         const wv = Run.on && !gated && !d ? readingWordVowels() : null;
         if (d && d.def.vowel) {
           const v = D.VOWEL_BY_KEY[d.def.vowel];
-          const fit = D.fitVowel(F, v);
+          fit = D.scoreVowel(F, v, fr.f0);
           vowel = v; score = score100(fit.alpha);
-          ok = fit.rms < 0.085 || cls.vowel.key === v.key;
+          ok = fit.ok && (fit.rms < 0.085 || cls.vowel.key === v.key);
           if (ok) d.vowelFr.push({ F, alpha: fit.alpha, per: fit.per });
-          else d.offTarget = { key: cls.vowel.key, n: (d.offTarget && d.offTarget.n || 0) + 1 };
+          else if (fit.ok) d.offTarget = { key: cls.vowel.key, n: (d.offTarget && d.offTarget.n || 0) + 1 };
+          else unmeasured = true;
         } else if (wv && wv.why === 'ok') {
           // reading: only the vowels this word should have count, so a vowel is never pinned on the wrong word
-          const m = D.matchWordVowel(F, wv.keys, cls);
-          if (m) { vowel = m.vowel; score = score100(m.alpha); ok = true; }
+          const m = D.matchWordVowel(F, wv.keys, cls, fr.f0);
+          if (m) { vowel = m.vowel; score = score100(m.alpha); ok = true; fit = m; }
         } else if (wv && wv.why === 'function') {
           // "the", "of", "with": reduced in running speech, so not scored at all
+        } else if (cls.cost < 0.07 && !cls.ok) {
+          unmeasured = true;
         } else if (cls.cost < 0.07) {
-          vowel = cls.vowel; score = score100(cls.alpha); ok = true;
+          vowel = cls.vowel; score = score100(cls.alpha); ok = true; fit = cls;
           mapIt = !wv; // a glide ("sign") or a word we can't look up still counts towards overall resonance, but not per vowel
         }
         if (ok) {
           frAny = score;
           if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; }
-          pushMeter(score, gated);
+          pushMeter(score, gated, fit ? fit.spread : NaN);
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
           if (!gated || exSrc) {
@@ -748,7 +752,11 @@
             tractLive.F = [0, 1, 2].map(i => D.median(tractLive.hist.map(f => f[i])));
             tractLive.v = vowel; tractLive.at = performance.now();
           }
-          $('res-context').textContent = gated ? 'demo voice, ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue;
+          $('res-context').textContent = (gated ? 'demo voice, ' + vowel.cue : d && d.def.vowel ? 'drill vowel ' + vowel.cue : 'vowel ' + vowel.cue)
+            + (fit && fit.pitchLimited ? ' · high pitch: F2 and F3 only' : '');
+        } else if (unmeasured && !gated) {
+          // a reading far off any voice (a nasal sound, a harmonic taken for a formant): not shown as 0 or 100
+          $('res-context').textContent = "couldn't measure that sound";
         }
       }
     } else if (fr.kind === 'fricative') {
@@ -806,13 +814,15 @@
   // Scores shown and saved stay on the 0 (masculine average) .. 100 (feminine average) scale.
   // Going past an average is not extra credit, so it reads as the end of the scale.
   function score100(alpha) { return clamp(alpha * 100, 0, 100); }
-  function pushMeter(score, demo = false) {
+  function pushMeter(score, demo = false, spread = NaN) {
     // average over the last ~1.5 s so the needle moves calmly; a demo voice and yours never mix
     const now = performance.now();
     if (!!state.meterDemo !== demo) { meterFrames = []; state.meterDemo = demo; state.meterName = demo ? demoName() : ''; }
-    meterFrames.push({ t: now, s: score });
+    meterFrames.push({ t: now, s: score, u: spread });
     while (meterFrames.length > 1 && now - meterFrames[0].t > AVG_MS) meterFrames.shift();
     state.meter = D.median(meterFrames.map(m => m.s));
+    const us = meterFrames.map(m => m.u).filter(Number.isFinite);
+    state.meterSpread = us.length ? D.median(us) : NaN; // rough ± of a reading; grows with pitch
   }
   // perVowel false: the frame counts towards overall resonance only (in a reading, a vowel the text can't confirm)
   function addVowelToSession(key, score, F, perVowel = true) {
@@ -841,6 +851,9 @@
       $('rh-pitch').textContent = $('ro-pitch').textContent;
     }
     $('res-num').textContent = Number.isFinite(v) ? Math.round(v) : '--';
+    const u = state.meterSpread, pm = $('res-pm');
+    pm.hidden = !(Number.isFinite(v) && Number.isFinite(u));
+    if (!pm.hidden) pm.textContent = `±${Math.round(Math.min(u, 99))}`;
     const nd = $('meter-needle');
     nd.hidden = !Number.isFinite(v);
     if (Number.isFinite(v)) nd.style.left = clamp(v, 0, 100) + '%';
@@ -1482,8 +1495,8 @@
       const v = D.VOWEL_BY_KEY[def.vowel], al = [], Fs = [];
       for (const fr of frames) {
         if (fr.kind !== 'voiced' || !fr.formants || !fr.stable) continue;
-        const fit = D.fitVowel(fr.formants, v);
-        if (fit.rms < 0.085 || D.classifyVowel(fr.formants).vowel.key === v.key) { al.push(fit.alpha); Fs.push(fr.formants); }
+        const fit = D.scoreVowel(fr.formants, v, fr.f0);
+        if (fit.ok && (fit.rms < 0.085 || D.classifyVowel(fr.formants).vowel.key === v.key)) { al.push(fit.alpha); Fs.push(fr.formants); }
       }
       if (al.length) { r.vowelScore = score100(D.median(al)); r.F = [0, 1, 2].map(i => D.median(Fs.map(f => f[i]))); }
     }
