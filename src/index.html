@@ -283,7 +283,7 @@
             <label class="reader-field"><span>Find lyrics</span><input type="search" id="sg-q" placeholder="Artist and song title" autocomplete="off" enterkeyhint="search" maxlength="200"></label>
             <button type="submit" class="btn" id="sg-find-go">Search</button>
           </form>
-          <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved on this device too, and listed under Your songs below, so you can pick them again without searching; × removes one. To type or paste lyrics yourself, tap New song and give it a name and an artist. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
+          <p class="vd-note">Lyrics come from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (has timed lyrics) or, when it's busy or finds nothing, <a href="https://lyrics.ovh" target="_blank" rel="noopener">lyrics.ovh</a> (plain lyrics; it looks titles up on Deezer). Both are free services run by third parties. Searching sends what you type to them, and the web search link sends it to DuckDuckGo; your voice and everything else stay on this device. Lyrics you load are saved too (in your Google Drive once it is connected in Settings, otherwise on this device), and listed under Your songs below, so you can pick them again without searching; × removes one. To type or paste lyrics yourself, tap New song and give it a name and an artist. <a id="sg-web" href="#" target="_blank" rel="noopener noreferrer" hidden>Search the web for these lyrics</a></p>
           <p class="vd-note" id="sg-find-msg" role="status"></p>
           <ul class="sg-results" id="sg-results" hidden></ul>
         </div>
@@ -293,7 +293,7 @@
           <label class="sg-sort" id="sg-sort-wrap" hidden><span>Sort by</span><select id="sg-sort"><option value="used">Last used</option><option value="name">Song name</option><option value="artist">Artist</option></select></label></div>
         <p class="vd-note" id="sg-saved-msg" role="status"></p>
         <ul class="sg-results sg-saved-list" id="sg-saved-list" aria-labelledby="sg-saved-h"></ul>
-        <div class="sg-saved-foot"><button type="button" class="btn sm danger" id="sg-saved-clear" title="Removes every song saved in this browser. You can undo it right after." hidden>Delete all saved songs</button></div>
+        <div class="sg-saved-foot"><button type="button" class="btn sm danger" id="sg-saved-clear" title="Removes every saved song (from Google Drive too, when connected). You can undo it right after." hidden>Delete all saved songs</button></div>
       </section>
       <section class="sg-song" id="sg-song" aria-labelledby="sg-song-h" hidden>
         <div class="sg-saved-head"><h3 id="sg-song-h">Lyrics</h3><button type="button" class="btn sm" id="sg-song-close">Close</button></div>

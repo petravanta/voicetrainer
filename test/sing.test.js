@@ -228,6 +228,28 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   check(D.lyricsCacheVideo(withVid, 'no|such|song', vid).every((r, i) => r.key === withVid[i].key && JSON.stringify(r.video) === JSON.stringify(withVid[i].video)), 'unknown songs change nothing');
   check([null, {}, { id: 'short' }, { id: '<script>xx>' }, 'dQw4w9WgXcQ'].every(v => D.videoClean(v) === null), 'broken video entries are dropped');
 
+  // Your songs across devices (merged through the Google Drive file)
+  const A0 = [song(1), song(2)].map((r, i) => ({ ...r, at: 10 + i }));
+  let here = D.songsStamp([], A0, {}, 100);
+  check(here.songs.length === 2 && here.songs.every(r => r.upd === 100), 'new songs are stamped with when they changed');
+  check(D.songsStamp(here.songs, here.songs, here.songsGone, 200).songs.every(r => r.upd === 100), 'unchanged songs keep their stamp');
+  const k1 = here.songs.find(r => r.title === 'Song 1').key, k2 = here.songs.find(r => r.title === 'Song 2').key;
+  const phone = D.songsStamp(here.songs, D.lyricsCacheDrop(here.songs, k1), here.songsGone, 300);
+  check(phone.songsGone[k1] === 300 && phone.songs.length === 1, 'removing a song leaves a note of when');
+  const laptop = D.songsStamp(here.songs, D.lyricsCacheVideo(here.songs, k2, vid), here.songsGone, 250);
+  let m = D.songsMerge(phone, laptop);
+  check(m.songs.length === 1 && m.songs[0].key === k2 && m.songs[0].video && m.songs[0].video.id === vid.id, 'merging: a removal on one device and a video on another both survive');
+  check(JSON.stringify(D.songsMerge(laptop, phone).songs.map(r => r.key)) === JSON.stringify(m.songs.map(r => r.key)), 'merging gives the same songs either way round');
+  const back = D.songsStamp(phone.songs, here.songs, phone.songsGone, 400);
+  m = D.songsMerge(back, laptop);
+  check(m.songs.length === 2 && !(k1 in m.songsGone) && !(k1 in back.songsGone), 'Undo (or saving it again) after a removal brings the song back everywhere');
+  m = D.songsMerge({ songs: D.songsStamp([], [song(9)], {}, 500).songs }, { songsGone: { [D.lyricsKey(song(9))]: 450 } });
+  check(m.songs.length === 1, 'a song saved after an older removal is kept');
+  check(D.songsMerge({}, {}).songs.length === 0 && D.songsMerge({ songs: 'junk', songsGone: [1] }, null).songs.length === 0, 'old files without songs merge cleanly');
+  const many = D.songsMerge({ songs: Array.from({ length: 30 }, (_, i) => ({ ...song(i), at: i, upd: 1 })) }, { songs: Array.from({ length: 30 }, (_, i) => ({ ...song(i + 30), at: i + 30, upd: 1 })) });
+  check(many.songs.length === D.LYRICS_CACHE_MAX && many.songs[0].title === 'Song 59', 'merged songs stay within the cap, newest kept');
+  check(D.songsStamp([], [{ ...song(1), upd: 77 }], {}, 900).songs[0].upd === 900 && D.lyricsCacheClean([{ ...song(1), upd: 77 }])[0].upd === 77, 'stamps survive storing and reading');
+
   // backing tracks: YouTube links and the karaoke search
   const ids = ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'youtu.be/dQw4w9WgXcQ?si=abc', 'https://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ',
     'https://www.youtube.com/shorts/dQw4w9WgXcQ', 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=5', 'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=x', 'dQw4w9WgXcQ'];
