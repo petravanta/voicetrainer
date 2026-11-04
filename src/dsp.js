@@ -1326,11 +1326,19 @@
       if (!e || typeof e !== 'object' || !str(e.text).trim() || !str(e.title).trim()) continue;
       const row = { key: '', src: str(e.src), id: e.id == null ? null : e.id, title: str(e.title), artist: str(e.artist), album: str(e.album),
         duration: Number.isFinite(+e.duration) && +e.duration > 0 ? Math.round(+e.duration) : null, timed: !!e.timed, text: str(e.text), at: +e.at || 0, video: videoClean(e.video) };
+      if (+e.upd > 0) row.upd = +e.upd;
       row.key = lyricsKey(row);
       if (seen.has(row.key)) continue;
       seen.add(row.key); out.push(row);
     }
     return out.sort((a, b) => b.at - a.at);
+  }
+  // Keep the newest songs (by last use) within the count and text-size caps; one song larger than the cap is still kept.
+  function lyricsCacheCap(list, max = LYRICS_CACHE_MAX, chars = LYRICS_CACHE_CHARS) {
+    const out = lyricsCacheClean(list);
+    let total = 0, n = 0;
+    for (; n < out.length && n < max; n++) { total += out[n].text.length; if (n > 0 && total > chars) break; }
+    return out.slice(0, Math.max(out.length ? 1 : 0, n));
   }
   // Add (or refresh) a row; it moves to the front. Oldest entries go when the list is over either cap.
   // A row without a video property keeps the video already attached to that song; video: null removes it.
@@ -1339,10 +1347,7 @@
     const rest = lyricsCacheClean(list);
     if (!e) return rest;
     if (row.video === undefined) { const had = rest.find(r => r.key === e.key); if (had) e.video = had.video; }
-    const out = [e, ...rest.filter(r => r.key !== e.key)];
-    let total = 0, n = 0;
-    for (; n < out.length && n < max; n++) { total += out[n].text.length; if (n > 0 && total > chars) break; }
-    return out.slice(0, Math.max(1, n));
+    return lyricsCacheCap([e, ...rest.filter(r => r.key !== e.key)], max, chars);
   }
   // Attach a video to a saved song (null removes it), leaving the list's order alone. Unknown keys change nothing.
   const lyricsCacheVideo = (list, key, video) => lyricsCacheClean(list).map(r => (r.key === key ? { ...r, video: videoClean(video) } : r));
@@ -1350,6 +1355,44 @@
   const lyricsCacheGet = (list, row) => lyricsCacheClean(list).find(r => r.key === lyricsKey(row)) || null;
   // Mark a saved song as used now (opened, or sung), leaving everything else alone. Unknown keys change nothing.
   const lyricsCacheTouch = (list, key, now = Date.now()) => lyricsCacheClean(lyricsCacheClean(list).map(r => (r.key === key ? { ...r, at: now } : r)));
+  // Your songs on more than one device (they travel in the app's Google Drive file as songs + songsGone).
+  // Each song carries upd, when it last changed on any device (saved, edited, video attached, used); removing one
+  // leaves songsGone[key] = when. songsStamp records a change made here; songsMerge combines two copies: per song
+  // the newer change wins, and a removal wins over changes made before it (so Undo, or saving it again, brings it back).
+  const SONGS_GONE_MAX = 400;
+  const songBody = (r) => { const { upd, ...rest } = r; return JSON.stringify(rest); };
+  function songsGoneClean(g) {
+    const out = {};
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return out;
+    const keep = Object.entries(g).filter(([k, t]) => typeof k === 'string' && +t > 0).sort((a, b) => b[1] - a[1]).slice(0, SONGS_GONE_MAX);
+    for (const [k, t] of keep) out[k] = +t;
+    return out;
+  }
+  function songsStamp(prev, next, gone, now = Date.now()) {
+    const was = new Map(lyricsCacheClean(prev).map(r => [r.key, r]));
+    const g = songsGoneClean(gone);
+    const songs = lyricsCacheClean(next).map(r => {
+      const old = was.get(r.key);
+      delete g[r.key];
+      return { ...r, upd: old && songBody(old) === songBody(r) && old.upd ? old.upd : now };
+    });
+    const keys = new Set(songs.map(r => r.key));
+    for (const k of was.keys()) if (!keys.has(k)) g[k] = now;
+    return { songs, songsGone: songsGoneClean(g) };
+  }
+  function songsMerge(a, b, max = LYRICS_CACHE_MAX, chars = LYRICS_CACHE_CHARS) {
+    a = a || {}; b = b || {};
+    const ga = songsGoneClean(a.songsGone), gb = songsGoneClean(b.songsGone), gone = { ...gb };
+    for (const k in ga) if (!(gone[k] >= ga[k])) gone[k] = ga[k];
+    const by = new Map();
+    for (const r of [...lyricsCacheClean(b.songs), ...lyricsCacheClean(a.songs)]) {
+      const old = by.get(r.key);
+      if (!old || (r.upd || 0) >= (old.upd || 0)) by.set(r.key, r);
+    }
+    const songs = lyricsCacheCap([...by.values()].filter(r => !(gone[r.key] >= (r.upd || 0))), max, chars);
+    for (const r of songs) delete gone[r.key];
+    return { songs, songsGone: songsGoneClean(gone) };
+  }
   // When a saved song was last used, in words: 'today', 'yesterday', '3 days ago', '2 weeks ago', or a date; '' when unknown.
   function usedAgo(at, now = Date.now()) {
     if (!(at > 0)) return '';
@@ -1398,7 +1441,7 @@
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
-    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCachePut, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
+    LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
