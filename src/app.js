@@ -1354,7 +1354,8 @@
     const parts = [];
     if (def.vowel) { const v = D.VOWEL_BY_KEY[def.vowel], F = fem ? v.W : v.M; parts.push(`jaw (F1) ${F[0]}, tongue (F2) ${F[1]}, lips/larynx (F3) ${F[2]} Hz`); }
     if (def.sib) parts.push(`/${def.sib === 's' ? 's' : 'ʃ'}/ centred near ${((fem ? D.SIBILANTS[def.sib].W : D.SIBILANTS[def.sib].M) / 1000).toFixed(1)} kHz`);
-    n.textContent = `Synthesized at typical ${fem ? 'feminine' : 'masculine'} values (${parts.join('; ')}; pitch ${fem ? 'about 200' : 'about 110'} Hz). Shown on the charts, not scored. Compare plays masculine, then feminine.`;
+    n.textContent = 'Plays masculine, then feminine. Not scored.';
+    n.append(infoBadge('About the demo sounds', `Synthesized at typical ${fem ? 'feminine' : 'masculine'} values (${parts.join('; ')}; pitch ${fem ? 'about 200' : 'about 110'} Hz). Shown on the charts, not scored. Compare plays masculine, then feminine.`));
   }
   function updateDrill(d) {
     const def = d.def;
@@ -1407,7 +1408,7 @@
       <div class="proof" id="proof" hidden></div>`;
     renderProof($('proof'), def);
     p.querySelector('.drill-title').textContent = def.title;
-    p.querySelector('.drill-help').textContent = def.why;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('drill-again').addEventListener('click', () => selectDrill(def));
@@ -1595,10 +1596,11 @@
     const items = proofItems(def); if (!items.length) { host.hidden = true; return; }
     host.hidden = false;
     host.innerHTML = `<p class="eyebrow"><span>Check the checker</span><span>demo sounds, graded by the app</span></p>
-      <p class="proof-lead">Each demo is scored by exactly the same check as your voice. Listen, then compare the grades.</p>
+      <p class="proof-lead">Listen, then compare the grades.</p>
       <div class="proof-rows">${items.map((it, i) => `<div class="proof-row" id="proof-${i}">
         <button type="button" class="btn proof-play" data-i="${i}" aria-label="Play: ${it.label}">▶</button>
         <span class="proof-label">${it.label}</span><b class="proof-big">…</b><span class="proof-text">grading…</span></div>`).join('')}</div>`;
+    host.querySelector('.proof-lead').append(infoBadge('About these demo sounds', 'Each demo is scored by exactly the same check as your voice. Listen, then compare the grades.'));
     host.querySelectorAll('.proof-play').forEach(b => b.addEventListener('click', () => {
       const it = items[+b.dataset.i];
       if (exSrc && b.classList.contains('playing')) { stopExample(); return; }
@@ -1649,7 +1651,7 @@
       <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
     p.querySelector('.drill-title').textContent = def.title;
     p.querySelector('.pr-say').textContent = def.say;
-    p.querySelector('.drill-help').textContent = def.why;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of (typeof def.steps === 'function' ? def.steps(fem) : def.steps)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
@@ -1756,7 +1758,7 @@
       <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
       <div class="proof" id="proof" hidden></div>`;
     p.querySelector('.drill-title').textContent = def.title;
-    p.querySelector('.drill-help').textContent = def.why;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('drill-again').addEventListener('click', () => selectDrill(def));
@@ -1876,7 +1878,7 @@
       <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
       <div class="proof" id="proof" hidden></div>`;
     p.querySelector('.drill-title').textContent = def.title;
-    p.querySelector('.drill-help').textContent = def.why;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
@@ -2057,7 +2059,7 @@
         <div><button type="button" class="btn sm" id="emo-q-next">Another question</button></div>
       </div>`;
     p.querySelector('.drill-title').textContent = def.title;
-    p.querySelector('.drill-help').textContent = def.why;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     p.querySelector('.emo-say').textContent = `"${def.say}"`;
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps(fem)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
@@ -3022,11 +3024,10 @@
         + `<span class="track"><span class="mark" style="left:${clamp(r.s, 0, 100)}%"></span></span><span class="val">${Math.round(r.s)}</span>`
         + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
     }).join('');
-    return `<div class="vm"><div class="section-head"><h4>Your vowels</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
-      <p class="small muted">${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}</p>
+    return `<div class="vm"><div class="section-head"><h4>Your vowels${infoHtml('How your vowels are scored', `${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}`)}</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
       ${vm ? `<div class="vm-chart">${vowelMapSvg(rows)}</div>` : ''}
       <ul class="vm-list">${list}</ul>
-      <p class="small muted">Tap a vowel to practise it. Short vowels in quick speech are rarely held long enough to score, so some may be missing.</p></div>`;
+      <p class="small muted">Tap a vowel to practise it.${infoHtml('Why some vowels are missing', 'Short vowels in quick speech are rarely held long enough to score, so some may be missing.')}</p></div>`;
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
   // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
@@ -3066,11 +3067,10 @@
         + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only steady vowels get a resonance score, so short words often have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
-      <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p>
-      <p class="small muted">The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only steady vowels get a resonance score, so short words often have none.</p></div>`;
+      <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
   }
   // ---- focus spots: the bits of a passage where practice pays off most ----
   // Each spot can be read on its own in the reader, again and again, with a score after every try.
@@ -3101,8 +3101,7 @@
     if (!rec.byWord || !rec.byWord.some(w => w[1] != null || w[2] != null)) return '';
     if (!spots.length) return `<div class="fs"><h4>Focus spots</h4><p class="small">Every phrase was on your goal for resonance and pitch. Nothing to single out this time.</p></div>`;
     const texts = rec.byWord.map(w => w[0]);
-    return `<div class="fs"><div class="section-head"><h4>Focus spots</h4><button type="button" class="btn sm primary" data-spot="0">Practise ${spots.length > 1 ? 'all ' + spots.length : 'it'}</button></div>
-      <p class="small muted">The bits of the passage where getting to your goal gains the most: how far each word was from it, added up over the phrase. Practise one on its own, a few times, and see the score after every try.</p>
+    return `<div class="fs"><div class="section-head"><h4>Focus spots${infoHtml('What focus spots are', 'The bits of the passage where getting to your goal gains the most: how far each word was from it, added up over the phrase. Practise one on its own, a few times, and see the score after every try.')}</h4><button type="button" class="btn sm primary" data-spot="0">Practise ${spots.length > 1 ? 'all ' + spots.length : 'it'}</button></div>
       <ul class="fs-list">${spotItems(texts, spots, priorReadings(rec), true)}</ul></div>`;
   }
   function wireFocus(box, rec, spots) {
@@ -3800,7 +3799,7 @@
     parse() {
       this.lyr = D.parseLyrics($('sg-lyrics').value);
       const n = this.lyr.lines.filter(l => l.text).length, msg = $('sg-parse');
-      if (!this.song) msg.textContent = 'Pick one of Your songs, search for lyrics, or tap New song to type your own. You can also just start singing without lyrics and get your pitch and resonance for the whole song.';
+      if (!this.song) shortWithInfo(msg, 'Pick one of Your songs, search for lyrics, or tap New song to type your own. You can also just start singing without lyrics and get your pitch and resonance for the whole song.', 'Singing without lyrics');
       else if (!n) msg.textContent = 'No lyrics yet. You can still sing without them and get your pitch and resonance for the whole song.';
       else if (this.lyr.timed) {
         const t = this.lyr.lines[0].t;
@@ -3814,9 +3813,11 @@
     syncFollow(n) {
       const ok = this.canFollow(n), note = $('sg-follow-note');
       $('sg-follow-wrap').hidden = !ok;
-      if (ok) note.textContent = this.lyr.timed
-        ? '(approximate): the lyrics start when you start singing, and the start of each phrase you sing nudges them back in step if they drift.'
-        : '(approximate): the next line comes up when you pause after singing most of a line. It counts the syllables you sing, so long runs of quick words or one word over many notes can throw it off; Next line, Back a line or a tap on a line puts it right.';
+      if (!ok) return;
+      note.textContent = '(approximate)';
+      note.append(infoBadge('How Follow my singing works', this.lyr.timed
+        ? 'Approximate: the lyrics start when you start singing, and the start of each phrase you sing nudges them back in step if they drift.'
+        : 'Approximate: the next line comes up when you pause after singing most of a line. It counts the syllables you sing, so long runs of quick words or one word over many notes can throw it off; Next line, Back a line or a tap on a line puts it right.'));
     },
     setFollowPref(on) {
       $('sg-follow').checked = on;
@@ -4191,7 +4192,7 @@
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a reading was inside your target band.</p>' : ''}
           ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
-          <p class="small muted">Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.</p>
+          <p class="small muted">Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.")}</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
       box.hidden = false;
@@ -4296,6 +4297,95 @@
   function renderSpecGoalHelp() {
     const fem = state.goal === 'fem';
     $('spec-help-goal').innerHTML = `<b>The small triangles on the left edge are your goal.</b> While you hold a vowel they mark where the jaw, tongue and lips/larynx resonances (F1, F2, F3) sit for a typical ${fem ? 'feminine' : 'masculine'} voice on that vowel. Try to bring each dash level with its triangle. ${fem ? 'Moving the tongue forward, spreading the lips and raising the larynx lifts the upper two dashes and brightens the voice.' : 'More throat space, slight lip rounding and a lower larynx bring the upper two dashes down and darken the voice.'}`;
+  }
+  // Builds an info badge (see initInfoBadges) for text made in code; returns a fragment to append.
+  let infoSeq = 0;
+  function infoBadge(label, text) {
+    const id = 'info-dyn-' + (++infoSeq), f = document.createDocumentFragment();
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'info-btn inline'; b.dataset.info = '';
+    b.setAttribute('aria-controls', id); b.setAttribute('aria-describedby', id); b.setAttribute('aria-expanded', 'false'); b.setAttribute('aria-label', label);
+    b.textContent = 'i';
+    const s = document.createElement('span');
+    s.className = 'info-pop'; s.id = id; s.setAttribute('role', 'note'); s.hidden = true; s.textContent = text;
+    f.append(b, s);
+    return f;
+  }
+  // Same badge as an HTML string, for templates; html must already be escaped.
+  function infoHtml(label, html) {
+    const id = 'info-dyn-' + (++infoSeq);
+    return `<button type="button" class="info-btn inline" data-info aria-controls="${id}" aria-describedby="${id}" aria-expanded="false" aria-label="${escapeHtml(label)}">i</button><span class="info-pop" id="${id}" role="note" hidden>${html}</span>`;
+  }
+  // Shows the first sentence of a long explanation and tucks the rest behind an info badge.
+  function shortWithInfo(el, text, label) {
+    const t = String(text || ''), m = t.match(/^[\s\S]+?[.!?](?=\s+[A-Z"“(])/);
+    el.textContent = m ? m[0] : t;
+    const rest = m ? t.slice(m[0].length).trim() : '';
+    if (rest) el.append(infoBadge(label, rest));
+  }
+  // Info badges: <button class="info-btn" data-info aria-controls="X"> next to a short line opens the
+  // longer text in <span class="info-pop" id="X">. Tap or click toggles it, a mouse hover or keyboard
+  // focus shows it, tapping elsewhere or Esc closes it. It floats (position: fixed) and is kept inside
+  // the screen. Delegated, so badges added later (drill panels, results) work too.
+  function initInfoBadges() {
+    let open = null, pinned = false, hoverT = 0, quiet = false;
+    const popOf = (b) => document.getElementById(b.getAttribute('aria-controls'));
+    const place = () => {
+      if (!open) return;
+      if (!open.isConnected || !popOf(open)) { close(); return; }
+      const p = popOf(open), r = open.getBoundingClientRect(), m = 12;
+      const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      const nav = document.querySelector('nav.modes'), nr = nav && getComputedStyle(nav).position === 'fixed' ? nav.getBoundingClientRect() : null;
+      const bottom = (nr && nr.top > vh / 2 ? nr.top : vh) - m;
+      if (r.bottom < 0 || r.top > vh) { close(); return; }
+      const w = p.offsetWidth, h = p.offsetHeight;
+      const left = Math.max(m, Math.min(r.left + r.width / 2 - w / 2, vw - w - m));
+      let top = r.bottom + 8;
+      if (top + h > bottom && r.top - 8 - h >= m) top = r.top - 8 - h;
+      p.style.left = left + 'px'; p.style.top = Math.max(m, Math.min(top, bottom - h)) + 'px';
+    };
+    const close = () => {
+      if (!open) return;
+      const p = popOf(open); if (p) p.hidden = true;
+      open.setAttribute('aria-expanded', 'false'); open = null; pinned = false;
+    };
+    const show = (b, pin) => {
+      clearTimeout(hoverT);
+      if (open && open !== b) close();
+      const p = popOf(b); if (!p) return;
+      p.hidden = false; b.setAttribute('aria-expanded', 'true'); open = b; pinned = pinned || pin;
+      place();
+    };
+    const badge = (t) => t && t.closest && t.closest('.info-btn[data-info]');
+    document.addEventListener('click', (e) => {
+      const b = badge(e.target);
+      if (b) { e.preventDefault(); e.stopPropagation(); if (open === b && pinned) close(); else show(b, true); return; }
+      if (open && !(popOf(open) && popOf(open).contains(e.target))) close();
+    }, true);
+    document.addEventListener('pointerover', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      const b = badge(e.target);
+      if (b) show(b, false);
+      else if (open && popOf(open) && popOf(open).contains(e.target)) clearTimeout(hoverT);
+    });
+    document.addEventListener('pointerout', (e) => {
+      if (e.pointerType !== 'mouse' || !open || pinned || !popOf(open)) return;
+      const to = e.relatedTarget;
+      if (to && (open.contains(to) || popOf(open).contains(to))) return;
+      if (badge(e.target) || popOf(open).contains(e.target)) { clearTimeout(hoverT); hoverT = setTimeout(close, 250); }
+    });
+    document.addEventListener('focusin', (e) => {
+      if (quiet) return;
+      const b = badge(e.target);
+      if (b && b.matches(':focus-visible')) show(b, false);
+      else if (open && e.target !== open && !(popOf(open) && popOf(open).contains(e.target))) close();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !open) return;
+      const b = open; close(); quiet = true; b.focus({ preventScroll: true }); quiet = false; e.stopPropagation();
+    }, true);
+    window.addEventListener('scroll', place, { passive: true, capture: true });
+    window.addEventListener('resize', place);
   }
   // the "?" next to the vocal tract title opens its explanation
   function initTractHelp() {
@@ -4648,7 +4738,7 @@
       r.hidden = !shown;
       // phones (and phone view) get a compact panel along the bottom; More shows the rest of the controls
       document.body.classList.toggle('sheet-ui', sheet);
-      $('reader-more').hidden = !sheet || !!this.full;
+      $('reader-more').hidden = !sheet;
       if (!sheet) this.more(false);
       r.classList.toggle('full', !!this.full);
       $('reader-tab').hidden = !(this.open && this.collapsed);
@@ -4797,7 +4887,7 @@
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
     $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
-    initSpecHelp(); initTractHelp();
+    initSpecHelp(); initTractHelp(); initInfoBadges();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem', true);
     renderDrillGrid();
