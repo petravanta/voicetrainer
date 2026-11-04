@@ -609,6 +609,7 @@ a { color: var(--accent); }
 .wr-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .wr-jump { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; text-align: left; }
 .wr-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--warn); margin-right: 5px; vertical-align: -1px; }
+.wr-key.rough { background: color-mix(in srgb, var(--good) 45%, transparent); margin-left: 10px; }
 .wr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .wr-svg { display: block; }
 .wr-band { fill: var(--fem); opacity: 0.1; }
@@ -618,7 +619,9 @@ a { color: var(--accent); }
 .wr-hl.on { opacity: 0.12; }
 .wr-pline { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; }
 .wr-dot { fill: var(--good); } .wr-dot.off { fill: var(--warn); }
-.wr-bar { fill: var(--good); } .wr-bar.off { fill: var(--warn); }
+.wr-none, .wr-key-none { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+.wr-key-none { vertical-align: -1px; margin: 0 4px 0 10px; }
+.wr-bar { fill: var(--good); } .wr-bar.off { fill: var(--warn); } .wr-bar.rough { fill-opacity: 0.45; }
 .wr-word { fill: var(--ink); font: 12px var(--font-body); }
 .wr-word.off { fill: var(--warn); font-weight: 600; }
 .wr-lane { fill: var(--muted); font: 11px var(--font-mono); }

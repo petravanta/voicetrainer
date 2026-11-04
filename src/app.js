@@ -685,7 +685,7 @@
   function onFrame(fr) {
     frameCount++;
     let frRes = NaN, frSib = NaN, frVowel = null; // this frame's scores, for the per-word reading report
-    let frU = NaN, frMiss = false; // ± of frRes in score points; a vowel heard but not measurable (for Sing's per-line reasons)
+    let frU = NaN, frMiss = false, frLoose = false; // ± of frRes in score points; a vowel heard but not measurable (for Sing's per-line reasons)
     const frWord = Reader.idx; // the word this frame's vowel was checked against (the highlight may move on below)
     let frAny = NaN; // this frame's resonance, demo voice included (for the embody view)
     drawSpecColumn(fr, an.fsd);
@@ -767,6 +767,17 @@
           $('res-context').textContent = "couldn't measure that sound";
         }
       }
+      // a reading's vowel too short to hold still: this frame alone, if it fits one of the word's vowels.
+      // Only for the word bars and a thin reading (see D.wordReport); the meter and the session stay on steady frames.
+      else if (Run.on && !gated && !d && fr.rawF) {
+        const wv = readingWordVowels();
+        if (wv && wv.why !== 'function') {
+          const cls = D.classifyVowel(fr.rawF, D.VOWELS, fr.f0);
+          const m = wv.why === 'ok' ? D.matchWordVowel(fr.rawF, wv.keys, cls, fr.f0) : null;
+          const fit = m || (cls.cost < 0.07 && cls.ok ? cls : null);
+          if (fit) { frRes = score100(fit.alpha); frU = fit.spread * D.RES_PER_ALPHA / 100; frLoose = true; }
+        }
+      }
     } else if (fr.kind === 'fricative') {
       const type = d && d.def.sib ? d.def.sib : fr.sib;
       const sib = D.SIBILANTS[type];
@@ -811,8 +822,8 @@
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
-    if (Sing.on && !gated) Sing.frame(fr, frRes, frU, frMiss);
-    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
+    if (Sing.on && !gated) Sing.frame(fr, frLoose ? NaN : frRes, frU, frMiss);
+    if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, loose: frLoose || undefined, sib: frSib, k: Reader.idx === frWord ? frVowel : null });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -2924,7 +2935,7 @@
       // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
       // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
       vmap: readingVowelMap(st.map, Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
-      byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)]),
+      byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)].concat(w.rough && w.r != null ? [1] : [])),
     };
     endRun();
     Reader.hide();
@@ -3051,6 +3062,13 @@
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
   // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
+  // why a word of a reading has no resonance, in a few words (a missing score is never drawn as a low one)
+  function noResWhy(text, pitch) {
+    const wv = D.wordVowels(text, PRON);
+    if (wv.why === 'function') return 'short linking word, not scored';
+    if (pitch == null) return 'too little voice heard';
+    return 'no vowel held long enough to read';
+  }
   function wordReportHtml(rec, spots) {
     const ws = rec.byWord;
     if (!ws || !ws.some(w => w[1] != null || w[2] != null)) return '';
@@ -3065,7 +3083,7 @@
     const ps = ws.map(w => w[1]).filter(v => v != null);
     // octave slips can throw a word far off, so the scale follows most words and the rest sit on its edge
     const pmin = Math.max(50, Math.min(plo, D.quantile(ps, 0.05)) - 15), pmax = Math.max(phi, D.quantile(ps, 0.95)) + 15;
-    const PT = 22, PH = 84, RT = PT + PH + 30, RH = 70, LT = RT + RH + 18, H = LT + 8;
+    const PT = 22, PH = 84, RT = PT + PH + 30, RH = 70, LT = RT + RH + 28, H = LT + 8;
     const py = (v) => PT + (1 - (clamp(v, pmin, pmax) - pmin) / (pmax - pmin)) * PH, ry = (v) => RT + (1 - clamp(v, 0, 100) / 100) * RH;
     const f1 = (v) => v.toFixed(1);
     let svg = `<rect class="wr-band" x="0" y="${f1(py(phi))}" width="${W}" height="${f1(py(plo) - py(phi))}"/>`
@@ -3078,16 +3096,18 @@
     const flush = () => { if (run.length > 1) svg += `<polyline class="wr-pline" points="${run.join(' ')}"/>`; run = []; };
     ws.forEach((w, i) => { if (w[1] != null) run.push(`${f1(xs[i])},${f1(py(w[1]))}`); else flush(); });
     flush();
-    ws.forEach(([t, p, r], i) => {
-      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + Math.round(r) : 'no vowel scored'}`;
+    ws.forEach(([t, p, r, , rough], i) => {
+      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
       svg += `<g class="wr-w" data-i="${i}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
         + `<rect class="wr-hit" x="${f1(xs[i] - wd[i] / 2)}" y="0" width="${f1(wd[i])}" height="${H}"/>`
         + (p != null ? `<circle class="wr-dot${pitchOff(p) ? ' off' : ''}" cx="${f1(xs[i])}" cy="${f1(py(p))}" r="3.5"/>` : '')
-        + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}" x="${f1(xs[i] - 6)}" y="${f1(ry(r))}" width="12" height="${f1(Math.max(1.5, RT + RH - ry(r)))}" rx="2"/>` : '')
+        + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(xs[i] - 6)}" y="${f1(ry(r))}" width="12" height="${f1(Math.max(3, RT + RH - ry(r)))}" rx="2"/>`
+          // no reading: a hollow, struck-through ring under the axis, never a bar (a very low score is a short filled bar)
+          : `<g class="wr-none"><circle cx="${f1(xs[i])}" cy="${RT + RH + 7}" r="4"/><line x1="${f1(xs[i] - 3)}" y1="${RT + RH + 10}" x2="${f1(xs[i] + 3)}" y2="${RT + RH + 4}"/></g>`)
         + `<text class="wr-word${resOff(r) ? ' off' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Only vowels that hold still for a moment get a resonance score, so short words often have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal</span></div>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. Some short words still have none.")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${ws.some(w => w[2] == null) ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}</span></div>
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
@@ -3249,8 +3269,8 @@
     const pick = (g) => {
       svg.querySelectorAll('.wr-w.sel').forEach(x => x.classList.remove('sel'));
       g.classList.add('sel');
-      const [t, p, r, s] = rec.byWord[+g.dataset.i];
-      read.innerHTML = `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · resonance ${r != null ? Math.round(r) : '--'}${s != null ? ` · /s/ ${Math.round(s)}` : ''}`;
+      const [t, p, r, s, rough] = rec.byWord[+g.dataset.i];
+      read.innerHTML = `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
     };
     svg.querySelectorAll('.wr-w').forEach(g => {
       g.addEventListener('click', () => pick(g));
