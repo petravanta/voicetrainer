@@ -63,7 +63,7 @@
   <div class="meter-card" id="meter-card" data-for="freestyle">
     <div class="eyebrow"><span>Resonance</span><span id="res-context">all vowels</span></div>
     <div class="meter-row">
-      <output id="res-num" class="big">--</output>
+      <span class="res-score"><output id="res-num" class="big">--</output><span class="res-pm" id="res-pm" hidden title="Rough uncertainty of one reading. It grows with pitch: formants are harder to measure in a higher voice.">±0</span></span>
       <p class="meter-desc" id="res-desc">Hold a vowel or speak a sentence. The score compares the shape of your mouth and throat (measured as formants) with typical adult values for the same vowel.</p>
     </div>
     <div class="meter" aria-hidden="true">
@@ -393,7 +393,26 @@
   </section>
 
   <footer class="foot">
-    <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; very high pitch (above about 280 Hz), background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
+    <p>Scores place your measurements on a scale where 0 is the average adult male value and 100 the average adult female value for the same sound. Vowel references: Hillenbrand et al. (1995). Sibilant references are approximate centres of published ranges. Measurements are estimates; higher pitch, background noise and phone microphones reduce accuracy. For best results use a headset or a quiet room, and turn off any voice effects on your microphone.</p>
+    <details class="method" id="method">
+      <summary>How the resonance score works</summary>
+      <ol>
+        <li><strong>Pitch.</strong> The YIN method finds how often your vocal folds vibrate (your pitch, in Hz).</li>
+        <li><strong>Formants.</strong> Linear prediction (LPC), the same family of method the research tool Praat uses, finds the three lowest resonances of your mouth and throat: F1, F2 and F3. A shorter or more forward-shaped space raises them, which is what people hear as brighter resonance.</li>
+        <li><strong>Which vowel.</strong> The formants are matched to 12 American English vowels. In Read mode the app already knows the words, so it only checks the vowels each word should have.</li>
+        <li><strong>The score.</strong> Your F1&ndash;F3 are placed on a line from the average man's values (0) to the average woman's (100) for that vowel, measured on a log scale. It is not normalised for your size, on purpose: size and shape are what it measures.</li>
+      </ol>
+      <p><strong>Limits, honestly.</strong> The whole 0&ndash;100 range is only a 10&ndash;20% change in the formants, so small measuring errors move the score a lot; the &plusmn; next to the number is a rough guide to that. In a higher voice F1 gets pulled towards your pitch's harmonics, so above about 175&ndash;190 Hz on &ldquo;ee&rdquo; and &ldquo;oo&rdquo; (higher on open vowels) the score uses F2 and F3 only. Readings far off any real voice, such as a nasal sound, show as &ldquo;couldn't measure&rdquo; instead of 0 or 100. Average is not a target: real women and men spread widely around these averages, and listeners judge gender mostly by pitch, then resonance, intonation and more. The score has been tested on synthetic voices and compared with Praat, not yet against listener ratings. Treat it as a coach for direction and trends, not a verdict.</p>
+      <p><strong>Learn more.</strong></p>
+      <ul>
+        <li><a href="https://en.wikipedia.org/wiki/Formant" target="_blank" rel="noopener">Formant</a> (Wikipedia) and the <a href="https://www.fon.hum.uva.nl/praat/manual/Sound__To_Formant__burg____.html" target="_blank" rel="noopener">Praat manual on formant analysis</a>: friendly starting points.</li>
+        <li>Hillenbrand, Getty, Clark &amp; Wheeler (1995), <a href="https://doi.org/10.1121/1.411872" target="_blank" rel="noopener">Acoustic characteristics of American English vowels</a>: where the reference averages come from.</li>
+        <li>Kent &amp; Vorperian (2018), <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6002811/" target="_blank" rel="noopener">Static measurements of vowel formant frequencies and bandwidths: a review</a> (free): how accurate formant measurement can be, and why pitch matters.</li>
+        <li>Shadle, Nam &amp; Whalen (2016), <a href="https://doi.org/10.1121/1.4940665" target="_blank" rel="noopener">Comparing measurement errors for formants in synthetic and natural vowels</a>: why testing on synthetic voices is not enough.</li>
+        <li>Leung, Oates &amp; Chan (2018), <a href="https://doi.org/10.1044/2017_JSLHR-S-17-0067" target="_blank" rel="noopener">Voice, articulation, and prosody contribute to listener perceptions of speaker gender</a>: what listeners actually use.</li>
+        <li>Gelfer &amp; Mikos (2005), <a href="https://doi.org/10.1016/j.jvoice.2004.10.006" target="_blank" rel="noopener">The relative contributions of speaking fundamental frequency and formant frequencies to gender identification</a>: pitch versus resonance, including trans speakers.</li>
+      </ul>
+    </details>
   </footer>
 </div>
   <dialog id="speech-consent" class="voice-dlg" aria-labelledby="speech-consent-h">
