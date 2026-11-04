@@ -50,6 +50,8 @@ node build.js            # writes dist/VoiceTrainer.html (standalone) and dist/a
 
 Open `dist/VoiceTrainer.html` in a browser and allow microphone access, or use the hosted version above. Every push to `main` rebuilds and redeploys the hosted version via GitHub Actions.
 
+The footer shows which build you are running (commit and UTC build time, or `dev build` for the unbuilt source); tap it to copy the id into a bug report. The hosted page checks `version.json` (never from cache) when it opens or comes back to the front, and offers a reload when a newer deploy is out.
+
 ## Tests
 
 ```sh
@@ -62,6 +64,7 @@ node test/singfollow.test.js # Follow my singing: a synthetic singer (detached a
 node test/readres.test.js   # a reading's resonance: running speech gets enough vowel readings, the pooled score keeps its accuracy, and a reading with too few says why
 node test/miccheck.test.js  # microphone and voice check: phone-band mic (Bluetooth call mode), clipping, noise, gated silence and a very breathy voice are each named; a clean setup isn't blamed
 node test/rigor.test.js     # known weak spots: raised pitch earns no resonance, nasal misreads are refused, the ± widens with pitch
+node test/build.test.js     # build stamp: commit and time reach the page, footer label, dev fallback, update check
 node test/sing.test.js      # lyrics parsing (plain and LRC), lyrics search results, the LRCLIB to lyrics.ovh fallback (with a fake network), the saved-lyrics list and the per-line sing-along summary
 ```
 

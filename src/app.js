@@ -4532,6 +4532,34 @@
   // longer text in <span class="info-pop" id="X">. Tap or click toggles it, a mouse hover or keyboard
   // focus shows it, tapping elsewhere or Esc closes it. It floats (position: fixed) and is kept inside
   // the screen. Delegated, so badges added later (drill panels, results) work too.
+  // Footer build id: tap to copy it into a report. On the hosted page, check version.json (never from cache)
+  // on open and when the app comes back to the front, and offer a reload when a newer deploy is out.
+  function initBuildLine() {
+    const btn = $('build-id'), label = D.buildLabel(D.APP_BUILD, D.APP_BUILT);
+    if (!btn) return;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      const text = D.APP_BUILD === 'dev' ? 'VoiceTrainer dev' : `VoiceTrainer ${D.APP_BUILD} (${D.APP_BUILT})`;
+      const done = (ok) => { btn.textContent = ok ? 'Copied' : text; setTimeout(() => { btn.textContent = label; }, ok ? 1200 : 4000); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+      else done(false);
+    });
+    if (D.APP_BUILD === 'dev' || !/^https?:$/.test(location.protocol) || typeof fetch !== 'function') return;
+    let last = 0;
+    const check = () => {
+      if (Date.now() - last < 10 * 60e3) return;
+      last = Date.now();
+      fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+        .then(v => { if (D.newerBuild(D.APP_BUILD, v)) $('build-new').hidden = false; }).catch(() => {});
+    };
+    check();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    // The service worker may still hold the old page: ask it to update first, then reload.
+    $('build-reload').addEventListener('click', () => {
+      const sw = navigator.serviceWorker;
+      (sw ? sw.getRegistration().then(r => r && r.update()).catch(() => {}) : Promise.resolve()).then(() => location.reload());
+    });
+  }
   function initInfoBadges() {
     let open = null, pinned = false, hoverT = 0, quiet = false;
     const popOf = (b) => document.getElementById(b.getAttribute('aria-controls'));
@@ -5093,7 +5121,7 @@
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
     $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
-    initSpecHelp(); initTractHelp(); initInfoBadges();
+    initSpecHelp(); initTractHelp(); initInfoBadges(); initBuildLine();
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem', true);
     renderDrillGrid();
