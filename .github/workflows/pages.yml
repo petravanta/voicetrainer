@@ -43,8 +43,9 @@ jobs:
       - run: node test/heldnotes.test.js
       - run: node test/readres.test.js
       - run: node test/miccheck.test.js
+      - run: node test/build.test.js
       - run: node build.js
-      - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp pwa/* site/
+      - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp dist/version.json site/ && cp pwa/* site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -324,6 +324,12 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .how-title { font-weight: 600; }
 .how ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; }
 .foot { color: var(--muted); font-size: 0.85rem; max-width: 80ch; }
+.build-line { margin: 12px 0 0; font-size: 0.75rem; }
+.build-new { margin-left: 0.4em; }
+.build-new button { margin-left: 0.4em; }
+.build-id, .build-reload { font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; cursor: pointer; font-variant-numeric: tabular-nums; }
+.build-id:hover { text-decoration: underline; }
+.build-reload { color: var(--accent); font-weight: 600; text-decoration: underline; }
 
 @media (max-width: 860px) {
   .live, .practice-body, .session-grid { grid-template-columns: minmax(0, 1fr); }
