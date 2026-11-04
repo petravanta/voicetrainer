@@ -22,6 +22,18 @@ const fs = 48000;
   check(Object.keys(D.SING_WHY).every(k => typeof D.SING_WHY[k] === 'string'), 'every reason has words to show');
 }
 
+// ---- words: steady frames first, else a few short-vowel (loose) frames, marked rough ----
+{
+  const f = (i, res, loose) => ({ i, f0: 200, res, loose });
+  const w = D.wordReport([f(0, 60), f(0, 62), f(0, 20, true), f(1, 50, true), f(1, 52, true), f(1, 54, true), f(2, 40, true), f(2, 41, true)], 3);
+  check(w[0].r === 61 && !w[0].rough, 'word: two steady frames win, loose ones ignored');
+  check(w[1].r === 52 && w[1].rough, 'word: three short-vowel frames give a rough score');
+  check(w[2].r === null && !w[2].rough, 'word: two short-vowel frames give none');
+  const steady = Array.from({ length: 25 }, () => f(0, 60)), loose = Array.from({ length: 25 }, () => f(0, 30, true));
+  check(D.pooledResonance(steady.concat(loose)).res === 60, 'reading: enough steady frames, short-vowel ones left out');
+  check(D.pooledResonance(steady.slice(0, 4).concat(loose.slice(0, 10))).n === 14, 'reading: too few steady frames, short-vowel ones fill in');
+}
+
 // ---- running speech: coarticulated vowels of speech length, each word's timing known ----
 const words = texts.find(t => t.id === 'b-rainbow').body.split(/\s+/).slice(0, 45);
 const tract = (v, t) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
