@@ -380,6 +380,24 @@
       <ul class="mc-list" id="mc-list" hidden></ul>
       <div class="btn-row"><button type="button" class="btn" id="mc-start">Run the check</button></div>
     </div>
+    <div class="panel set-card" id="rc-card">
+      <h3>Check my readings</h3>
+      <p class="vd-note">Does the app follow what you do? 45 seconds of one held vowel, eight ways.<button type="button" class="info-btn inline" data-info aria-controls="info-rc" aria-describedby="info-rc" aria-expanded="false" aria-label="About this check">i</button><span class="info-pop" id="info-rc" role="note" hidden>You hold one vowel eight times: dark, everyday and bright on one note; everyday on a lower and a higher note; everyday again; very airy; whispered. Each step is read the way an exercise reads a held vowel. Four checks come out: does the resonance score follow your change, does pitch alone move it, does the same sound score the same twice, and does breathiness follow your air. The app can't know how bright you really were, so it shows your formants next to the score: when the formants move and the score doesn't, the app fell short. Nothing is saved or sent anywhere unless you save the recording.</span></p>
+      <label class="field rc-vowel">Vowel <select id="rc-vowel"><option value="a">"ah" as in father</option><option value="i">"ee" as in see</option><option value="u">"oo" as in boot</option></select></label>
+      <div class="mc-run" id="rc-run" hidden><p class="rc-phase" id="rc-phase"></p><p class="mc-step" id="rc-step" aria-live="polite"></p><p class="rc-pitch" id="rc-pitch"></p><div class="mc-bar"><i id="rc-prog"></i></div><div class="btn-row"><button type="button" class="btn" id="rc-stop">Stop</button></div></div>
+      <ul class="mc-list" id="rc-list" hidden></ul>
+      <details class="rc-more">
+        <summary>Check it another way</summary>
+        <ul>
+          <li><b>Praat</b> (free, praat.org): save the recording from this check, open it in Praat, pick a held step and use Formant › Formant listing. Use a maximum formant of 5000 Hz for a lower voice, 5500 Hz for a higher one. F2 and F3 should rise from the dark step to the bright one by about the same share the app shows. Pitch › Pitch listing checks the notes.</li>
+          <li><b>Another voice:</b> run this check with a friend, or play a recording of a cis woman and a cis man reading. Most adult women land 52 to 75 and most men 28 to 45; a single voice can sit outside.</li>
+          <li><b>The built-in demo voices</b> (in each exercise) are synthetic with known answers: they should land on target. They test the measuring, not the microphone.</li>
+          <li><b>Repeat on another day</b> and with another microphone. A change bigger than your repeat gap is a real change; one smaller is noise.</li>
+          <li><b>Ears beat numbers.</b> Record yourself and listen back, or ask a listener. The score measures throat and mouth shape (formants) only; how feminine or masculine a voice sounds also depends on pitch, intonation, tone and articulation.</li>
+        </ul>
+      </details>
+      <div class="btn-row"><button type="button" class="btn" id="rc-start">Start the check</button></div>
+    </div>
     <div class="panel set-card">
       <h3>Theme</h3>
       <div class="vd-type theme-pick" role="radiogroup" aria-label="Theme">
@@ -411,6 +429,7 @@
         <li><strong>The target bands.</strong> Most people are not average, so the target is a band, not a point: where 90% of real adults of each group sit. In the recordings the averages come from (Hillenbrand et al. 1995: 45 men, 48 women), taking each speaker's middle value across their vowels, 90% of the men fall between 28 and 45 and 90% of the women between 52 and 75. Brighter than the feminine band (or darker than the masculine one) still counts as on target. Between 45 and 52 is the overlap where voices read as neither.</li>
       </ol>
       <p><strong>Limits, honestly.</strong> The 25 points between the two averages are only a 10&ndash;20% change in the formants, so small measuring errors move the score a lot; the &plusmn; next to the number is a rough guide to that. In a higher voice F1 gets pulled towards your pitch's harmonics, so above about 175&ndash;190 Hz on &ldquo;ee&rdquo; and &ldquo;oo&rdquo; (higher on open vowels) the score uses F2 and F3 only. The same happens at any pitch when F2 and F3 agree closely but F1 doesn't fit (a soft, wide F1, or an F1 lower than either reference voice, which some voices have on &ldquo;ee&rdquo;), or when the &ldquo;F1&rdquo; found sits right on your pitch, which in quick speech is usually your voice's own fundamental rather than a resonance. Readings far off any real voice, such as a nasal sound, show as &ldquo;couldn't measure&rdquo;. Only moments where the formants hold still for a few frames are scored; a reading with fewer than 20 of them gets a rough score marked &asymp;, and one with fewer than 6 says why it has none. Scores saved before November 2026 used an older scale that stopped at the averages; they have been converted, and show as hollow dots in a passage's history. The bands come from one study of American English speakers recorded in the 1990s (an older study, Peterson &amp; Barney 1952, sits 6 to 10 points darker for both groups), so treat their edges as soft. Listeners judge gender mostly by pitch, then resonance, intonation and more. The score has been tested on synthetic voices and compared with Praat, not yet against listener ratings. Treat it as a coach for direction and trends, not a verdict.</p>
+      <p><strong>Check it on your own voice.</strong> Settings › Check my readings takes 45 seconds: it asks you to hold one vowel dark, everyday, bright, on other notes, airy and whispered, then says whether the score followed and shows the formants it read, so you can tell the app's misses from your own. In Freestyle a vowel you hold keeps its name while you slide its resonance, so the score follows the slide instead of jumping when the sound starts to resemble a neighbouring vowel.</p>
       <p><strong>Learn more.</strong></p>
       <ul>
         <li><a href="https://en.wikipedia.org/wiki/Formant" target="_blank" rel="noopener">Formant</a> (Wikipedia) and the <a href="https://www.fon.hum.uva.nl/praat/manual/Sound__To_Formant__burg____.html" target="_blank" rel="noopener">Praat manual on formant analysis</a>: friendly starting points.</li>
