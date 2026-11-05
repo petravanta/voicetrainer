@@ -141,6 +141,7 @@
   }
 
   // ---------- pitch: YIN (de Cheveigné & Kawahara 2002) ----------
+  const OCTAVE_DIP = 0.35; // the dip at twice the lag must be this much deeper (see the octave check in yin)
   function yin(x, fs, fmin = 60, fmax = 500, threshold = 0.15) {
     const maxLag = Math.floor(fs / fmin), minLag = Math.max(2, Math.floor(fs / fmax));
     const W = x.length - maxLag - 1;
@@ -167,6 +168,12 @@
       for (let t = minLag; t <= maxLag; t++) if (c[t] < c[best]) best = t;
       tau = best;
     }
+    // Octave check: when the second harmonic sits on a formant (an "ee" or "oo" whose F1 is about twice the pitch),
+    // the wave nearly repeats every half period and the first dip under the threshold is half the real period, so
+    // the pitch reads an octave high. The real period then shows a much deeper dip at twice the lag: take that.
+    const dipNear = (t0) => { let m = Math.max(minLag, t0 - 2); for (let t = m; t <= Math.min(maxLag, t0 + 2); t++) if (c[t] < c[m]) m = t; return m; };
+    // Only above 110 Hz: no vowel's F1 is under ~220 Hz, and below that the doubled period is more likely creak.
+    if (2 * tau + 2 <= maxLag && fs / (2 * tau) >= 110 && c[tau] > 0.03) { const t2 = dipNear(2 * tau); if (c[t2] < OCTAVE_DIP * c[tau]) tau = t2; }
     const a = c[tau - 1], b = c[tau], cc = c[tau + 1];
     const den = a - 2 * b + cc;
     const shift = den !== 0 ? 0.5 * (a - cc) / den : 0;
@@ -384,6 +391,20 @@
     const scored = scoreVowel(F, best.v, f0);
     return { vowel: best.v, alpha: scored.alpha, per: scored.per, cost: best.cost, margin: res.length > 1 ? res[1].cost - best.cost : Infinity,
       ok: scored.ok, pitchLimited: scored.pitchLimited, spread: scored.spread };
+  }
+
+  // ---------- a held vowel keeps its name ----------
+  // Guessed afresh from each frame, a vowel's name follows its formants. Sliding the resonance of one held vowel moves
+  // all of them, so a bright "eh" starts to look like a dark "a" (as in cat) and a bright "aw" like a dark "oh": the
+  // name flips, the score is read against the other vowel's averages, and the meter stalls or jumps instead of
+  // following the slide (measured on synthetic slides: "aw" 42 -> 72 for a 6% step, "oo" shown lower when brighter).
+  // While a sound is held, it is still the same vowel, so it keeps being scored as that one as long as it fits it
+  // about as well as an exercise asks (rms under HOLD_RMS) and stays in the plausible range.
+  const HOLD_RMS = 0.085;
+  function heldVowelFit(F, held, f0 = 0) {
+    if (!held) return null;
+    const fit = scoreVowel(F, held, f0);
+    return fit.ok && fit.rms < HOLD_RMS ? Object.assign(fit, { vowel: held, held: true }) : null;
   }
 
   // ---------- the vowels a word should have ----------
@@ -625,6 +646,18 @@
   // Breathiness 0..100 from CPP: 0 is a very clear, firm voice, about 50 a light airy one,
   // 80+ mostly air. CPP is the most reliable single acoustic cue for breathiness, but room noise
   // and mic quality lower it too, so read the number as a trend within one setup.
+  // The cepstral peak is read over ~85 ms. When that window is not all voice (the vowel has only just started, or
+  // a consonant or a gap sits in it), the silence or noise in it lowers CPP as if the voice were airy. On a real
+  // voice that put a spoken sentence at 39 against 0-10 for the same voice's held vowels; reading only frames whose
+  // window is evenly voiced brought the sentence to 19. So a frame whose quietest third of the window is more than
+  // 6 dB under its loudest gets no breathiness reading (out.breathUneven).
+  const BREATH_EVEN = 0.25; // energy ratio, quietest third to loudest
+  function breathWindowUneven(y, fs) {
+    const n = 1 << Math.floor(Math.log2(Math.min(y.length, Math.round(fs * 0.09)))), h = Math.floor(n / 3), s = y.length - n;
+    const e = [];
+    for (let k = 0; k < 3; k++) { let a = 0; for (let i = s + k * h; i < s + (k + 1) * h; i++) a += y[i] * y[i]; e.push(a); }
+    return Math.min(...e) < BREATH_EVEN * Math.max(...e);
+  }
   const BREATH_CPP = [13, 25]; // dB: mostly air .. very clear (synthetic calibration)
   const BREATH_BAND = { fem: [20, 50], masc: [10, 40] };
   function breathiness(q) {
@@ -786,8 +819,10 @@
         this.pitchHist.push(p.f0);
         if (this.pitchHist.length > 3) this.pitchHist.shift();
         out.f0 = median(this.pitchHist);
-        const vq = voiceQuality(y, this.fsd, out.f0);
-        out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
+        if (!breathWindowUneven(y, this.fsd)) {
+          const vq = voiceQuality(y, this.fsd, out.f0);
+          out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
+        } else out.breathUneven = true;
         const ln = Math.round(this.fsd * this.winMs / 1000);
         const lag = typeof this.lagHz === 'function' ? this.lagHz(out.f0) : this.lagHz;
         const all = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8);
@@ -815,8 +850,10 @@
       } else if (hfRatio < 0.6 && p.f0 > 0 && p.aperiodicity < 0.5) {
         // too airy to count as clean voicing, but still a voice: measure how breathy it is
         out.kind = 'other';
-        const vq = voiceQuality(y, this.fsd, p.f0);
-        out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
+        if (!breathWindowUneven(y, this.fsd)) {
+          const vq = voiceQuality(y, this.fsd, p.f0);
+          out.cpp = vq.cpp; out.h1h2 = vq.h1h2; out.breath = breathiness(vq);
+        } else out.breathUneven = true;
         this.softReset();
       } else if (hfRatio > 0.6 && p.aperiodicity > 0.3) {
         out.kind = 'fricative';
@@ -1281,6 +1318,118 @@
     }
     const bad = (lv) => MIC_PRIORITY.find(id => checks.some(c => c.id === id && c.level === lv));
     return { checks, main: bad('bad') || bad('warn') || null, data };
+  }
+
+  // ---------- "Check my readings": does the app follow what you do? (Settings) ----------
+  // The person holds one vowel in eight ways: dark, everyday and bright resonance on one note; everyday on a low and
+  // a high note; everyday again; very airy; whispered. Each step is analysed the same way the app reads a held vowel,
+  // against the vowel they were asked for (as in an exercise, so the name can't drift), and five plain checks come
+  // out: does the score follow a resonance change, does pitch alone move it, does it repeat, does breathiness follow
+  // air, could each step be read at all. The check can't tell how dark or bright the person really was; it shows the
+  // formants next to the score so a score that stalls while the formants move points at the app, and one that stalls
+  // while the formants stay put points at the change (often pitch or tone quality more than resonance).
+  const RC_STEPS = ['dark', 'mid', 'bright', 'low', 'high', 'again', 'airy', 'whisper'];
+  const RC_SKIP = 0.6; // s at the start of each step: settling into the sound
+  function readingsCheck(seg, sr, vowelKey = 'a') {
+    const v = VOWEL_BY_KEY[vowelKey] || VOWEL_BY_KEY.a;
+    const st = {};
+    for (const k of RC_STEPS) {
+      const x = seg[k];
+      if (!x || x.length < sr * (RC_SKIP + 0.5)) { st[k] = null; continue; }
+      const an = new Analyzer(sr), hop = Math.round(sr / 60), skip = Math.round(sr * RC_SKIP);
+      const f0 = [], res = [], Fs = [], br = []; let n = 0, voiced = 0, air = 0, held = 0;
+      for (let end = an.needed; end <= x.length; end += hop) {
+        const fr = an.analyze(x.subarray(0, end));
+        if (end < skip) continue;
+        n++;
+        if (fr.breath != null) br.push(fr.breath);
+        else if (!fr.breathUneven && (fr.kind === 'other' || fr.whisperF || fr.kind === 'fricative')) air++;
+        if (fr.kind !== 'voiced') continue;
+        voiced++; f0.push(fr.f0);
+        if (!fr.formants || !fr.stable) continue;
+        held++;
+        const fit = scoreVowel(fr.formants, v, fr.f0);
+        if (fit.ok && fit.rms < HOLD_RMS) { res.push(resScore(fit.alpha)); Fs.push(fr.formants); }
+      }
+      st[k] = { n, voiced, held, air, f0: f0.length ? median(f0) : 0, resN: res.length,
+        res: res.length ? median(res) : NaN, resIqr: res.length >= 4 ? quantile(res, 0.75) - quantile(res, 0.25) : NaN,
+        F: Fs.length ? [0, 1, 2].map(i => median(Fs.map(f => f[i]))) : null,
+        breath: br.length >= 5 ? median(br) : NaN, breathN: br.length,
+        airy: air >= 20 && air >= 2 * br.length }; // too little tone to read, the way the live display says "mostly air"
+    }
+    const checks = [], add = (id, level, title, say) => checks.push({ id, level, title, say });
+    const R = (x) => Math.round(x), semis = (a, b) => 12 * Math.log2(a / b);
+    const readable = (s) => s && s.resN >= 10;
+    const pct = (a, b) => R(100 * (a / b - 1));
+    const f23 = (a, b) => (pct(a.F[1], b.F[1]) + pct(a.F[2], b.F[2])) / 2; // F2 and F3 moved by this many % on average
+    const sign = (x) => (x > 0 ? '+' : '') + x;
+    const tol = (...ss) => Math.max(3, median(ss.map(s => s.resIqr).filter(Number.isFinite)) / 2 || 3); // the score's own wobble
+
+    // 1. resonance follows a deliberate change
+    const [dk, md, bt] = [st.dark, st.mid, st.bright];
+    if (![dk, md, bt].every(readable)) {
+      const miss = [['dark', dk], ['everyday', md], ['bright', bt]].filter(([, s]) => !readable(s)).map(([nm]) => nm);
+      add('follow', 'bad', "Couldn't read every resonance step", `Too few steady readings on the ${miss.join(' and ')} step${miss.length > 1 ? 's' : ''}, so this part can't be judged. Hold the vowel steadily for the whole step, with a clear (not airy) tone.`);
+    } else {
+      const span = bt.res - dk.res, t = tol(dk, md, bt), moved = f23(bt, dk);
+      const pitchMoved = Math.abs(semis(Math.max(dk.f0, md.f0, bt.f0), Math.min(dk.f0, md.f0, bt.f0))) > 3;
+      const nums = `Scores: dark ${R(dk.res)}, everyday ${R(md.res)}, bright ${R(bt.res)}. F2 and F3 moved ${sign(R(moved))}% from dark to bright.`;
+      const inOrder = md.res > dk.res - t && md.res < bt.res + t;
+      const pitchNote = pitchMoved ? ` Your pitch also changed (${R(dk.f0)}, ${R(md.f0)}, ${R(bt.f0)} Hz), so try the three on one note.` : '';
+      if (span >= 8 && inOrder) add('follow', 'good', 'Resonance follows your changes', `${nums} The score moved the way you did.${pitchNote}`);
+      else if (span <= -4) add('follow', 'bad', 'Resonance went the wrong way', `${nums} Bright scored lower than dark. ${moved < 0 ? 'Your F2 and F3 went down too, so the sound you made got darker by this measure: what feels brighter may be pitch or tone.' : 'Your F2 and F3 went up, so the score should have too: that is the app misreading. Save the recording and send it over.'}${pitchNote}`);
+      else if (span < 4 && moved >= 5) add('follow', 'bad', "Your formants moved but the score didn't", `${nums} That's the app falling short, not you. Save the recording and send it over.${pitchNote}`);
+      else if (span < 4) add('follow', 'warn', 'Hardly any change measured', `${nums} Neither the score nor your formants moved much. The change you made may have been mostly pitch, loudness or tone (all of which change how bright a voice sounds) rather than the shape of your throat and mouth. Try a bigger change: think small dog to big dog.${pitchNote}`);
+      else add('follow', 'warn', 'Resonance partly follows', `${nums} ${inOrder ? 'The score moved the right way, but only a little.' : 'Dark and bright were in order, but everyday sat outside them.'} Changes under about ${R(t)} points are within the score's own wobble.${pitchNote}`);
+    }
+
+    // 2. pitch alone shouldn't move the score
+    const [lo, hi] = [st.low, st.high];
+    if (![lo, md, hi].every(readable)) {
+      const miss = [['low note', lo], ['everyday', md], ['high note', hi]].filter(([, s]) => !readable(s)).map(([nm]) => nm);
+      add('pitch', 'bad', "Couldn't read every pitch step", `Too few steady readings on the ${miss.join(' and ')} step${miss.length > 1 ? 's' : ''}.${hi && !readable(hi) && readable(md) ? ' Very high notes are the hardest to read: try a smaller step up.' : ''}`);
+    } else {
+      const rs = [lo.res, md.res, hi.res], range = Math.max(...rs) - Math.min(...rs);
+      const up = semis(hi.f0, md.f0), down = semis(md.f0, lo.f0);
+      const nums = `Scores: low ${R(lo.res)} (${R(lo.f0)} Hz), everyday ${R(md.res)} (${R(md.f0)} Hz), high ${R(hi.res)} (${R(hi.f0)} Hz).`;
+      const f = f23(hi, lo), rose = hi.res - lo.res;
+      const why = Math.abs(rose) >= 8 ? (Math.sign(f) === Math.sign(rose) && Math.abs(f) >= 3
+        ? ` Your F2 and F3 moved ${sign(R(f))}% from low to high too, so your resonance really changed with pitch: that's common (the larynx tends to rise with pitch).`
+        : ` Your F2 and F3 moved only ${sign(R(f))}% from low to high, so most of that change is the app reading pitch as resonance.`) : '';
+      if (up < 3 || down < 3) add('pitch', 'warn', 'Pitch steps too small to judge', `${nums} The notes were only ${R(down)} and ${R(up)} semitones apart. Go at least 4 semitones down and up (about a third).`);
+      else if (range <= 8) add('pitch', 'good', "Pitch alone doesn't move the score", `${nums} Within ${R(range)} points across ${R(up + down)} semitones.`);
+      else if (range <= 15) add('pitch', 'warn', 'Pitch moves the score a little', `${nums} A ${R(range)} point spread across ${R(up + down)} semitones.${why}`);
+      else add('pitch', 'bad', 'Pitch moves the score a lot', `${nums} A ${R(range)} point spread across ${R(up + down)} semitones.${why} Compare scores at similar pitches.`);
+    }
+
+    // 3. the same sound twice gives the same score
+    const ag = st.again;
+    if (readable(md) && readable(ag)) {
+      const dlt = Math.abs(ag.res - md.res);
+      const nums = `First ${R(md.res)}, again ${R(ag.res)}.`;
+      if (dlt <= 5) add('repeat', 'good', 'Repeats closely', `${nums} The same sound scores within ${R(dlt)} points.`);
+      else if (dlt <= 10) add('repeat', 'warn', 'Repeats roughly', `${nums} ${R(dlt)} points apart: treat differences of that size as noise.${Math.abs(semis(ag.f0, md.f0)) > 2 ? ` Your pitch differed too (${R(md.f0)} and ${R(ag.f0)} Hz).` : ''}`);
+      else add('repeat', 'bad', "Doesn't repeat", `${nums} ${R(dlt)} points apart for what should be the same sound.${Math.abs(semis(ag.f0, md.f0)) > 2 ? ` Your pitch differed (${R(md.f0)} and ${R(ag.f0)} Hz), which can explain some of it.` : ' Single readings are rough; look at trends over a few tries.'}`);
+    } else add('repeat', 'bad', "Couldn't compare the repeat", 'Too few steady readings on the everyday step or its repeat.');
+
+    // 4. breathiness follows air
+    const ay = st.airy, wh = st.whisper;
+    const brOf = (s) => (!s ? NaN : s.airy ? 100 : s.breath);
+    const clear = brOf(md), airy = brOf(ay), whisper = brOf(wh);
+    if (!Number.isFinite(clear) || !Number.isFinite(airy)) add('breath', 'bad', "Couldn't read breathiness", 'Too few readings on the everyday or the airy step.');
+    else {
+      const say = (b, s) => (s && s.airy ? 'no clear tone (mostly air)' : R(b));
+      const nums = `Everyday ${say(clear, md)}, airy ${say(airy, ay)}, whisper ${Number.isFinite(whisper) ? say(whisper, wh) : 'not heard'}.`;
+      const whOk = Number.isFinite(whisper) && whisper >= 70;
+      const gap = airy - clear;
+      if (gap >= 15 && whOk) add('breath', 'good', 'Breathiness follows your air', `${nums} Airy read clearly above everyday, and the whisper as air.`);
+      else if (gap >= 15) add('breath', 'warn', 'Breathiness follows, whisper unclear', `${nums} Airy read above everyday, but the whisper ${Number.isFinite(whisper) ? 'still read as having some tone' : "wasn't picked up (too quiet?)"}.`);
+      else if (gap >= 5) add('breath', 'warn', 'Breathiness follows a little', `${nums} Only ${R(gap)} points between everyday and airy. Try a much airier sound, like a sigh, with the tone still in it.`);
+      else add('breath', 'bad', "Breathiness didn't follow", `${nums} The airy step didn't read airier than everyday. If you could hear the difference, the app missed it; room noise or a noise-cancelling microphone can hide air.`);
+    }
+    const data = Object.fromEntries(RC_STEPS.map(k => [k, st[k] && { f0: R(st[k].f0), res: Number.isFinite(st[k].res) ? R(st[k].res) : null, resN: st[k].resN,
+      F: st[k].F && st[k].F.map(R), breath: Number.isFinite(st[k].breath) ? R(st[k].breath) : null, airy: st[k].airy, voiced: st[k].voiced, n: st[k].n }]));
+    return { checks, vowel: v.key, data, passed: checks.filter(c => c.level === 'good').length };
   }
 
   // a lyric line that isn't words to sing: "♪", "(Instrumental)", "[Guitar solo]", "--"
@@ -1766,7 +1915,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
