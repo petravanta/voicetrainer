@@ -743,12 +743,15 @@
         } else if (wv && wv.why === 'function') {
           if (Run.gates) Run.gates.fnword = (Run.gates.fnword || 0) + 1;
           // "the", "of", "with": reduced in running speech, so not scored at all
+        } else if (!wv && !d && fr.stable && state.held && frameCount - state.held.n <= HOLD_GAP && (fit = D.heldVowelFit(F, state.held.v, fr.f0))) {
+          vowel = fit.vowel; score = score100(fit.alpha); ok = true; // still the vowel you were holding (see D.heldVowelFit)
         } else if (cls.cost < 0.07 && !cls.ok) {
           unmeasured = true;
         } else if (cls.cost < 0.07) {
           vowel = cls.vowel; score = score100(cls.alpha); ok = true; fit = cls;
           mapIt = !wv; // a glide ("sign") or a word we can't look up still counts towards overall resonance, but not per vowel
         }
+        if (!d && !wv) state.held = ok && fr.stable ? { v: vowel, n: frameCount } : state.held;
         if (ok) {
           frAny = score;
           if (!gated) { addVowelToSession(vowel.key, score, F, mapIt); frRes = score; frVowel = mapIt ? vowel.key : null; frU = fit ? fit.spread * D.RES_PER_ALPHA / 100 : NaN; }
@@ -796,18 +799,26 @@
     }
     if (frameCount - sibShown > 120) $('ro-sib').textContent = '--';
 
+    // Breathiness shown = readings from the last ~1.5 s only (not the last N readings: a very airy voice gives few
+    // readings, and those used to sit under a pile of older clear ones, so the display said "clear" while you breathed).
+    // Frames with too little tone to read at all count as air; when they outnumber the readings, say so.
+    if (fr.breath != null || isAiryFrame(fr)) {
+      breathBuf.push({ n: frameCount, b: fr.breath != null ? fr.breath : null });
+      while (breathBuf.length && breathBuf[0].n <= frameCount - BREATH_WIN) breathBuf.shift();
+      const r = recentBreath(breathBuf);
+      if (r.air) { breathShown = frameCount; $('ro-breath').textContent = 'mostly air · no clear tone'; }
+      else if (Number.isFinite(r.b)) { breathShown = frameCount; $('ro-breath').textContent = `${Math.round(r.b)} · ${breathWord(r.b)}`; }
+    }
     if (fr.breath != null) {
-      breathBuf.push(fr.breath); if (breathBuf.length > 60) breathBuf.shift();
-      breathShown = frameCount;
-      const b = D.median(breathBuf);
-      $('ro-breath').textContent = `${Math.round(b)} · ${breathWord(b)}`;
       if (!gated) {
         session.breath.push(Math.round(fr.breath));
         if (session.breath.length > 30000) session.breath.splice(0, 10000);
       }
-      if (d && d.def.type === 'breath') d.breathFr.push(fr.breath);
+      if (d && d.def.type === 'breath') { d.breathFr.push(fr.breath); d.breathLog.push({ n: frameCount, b: fr.breath }); }
       if (dd && dd.def.type === 'breath') dd.demoBr.push(fr.breath);
     }
+    if (d && d.def.type === 'breath' && fr.breath == null && isAiryFrame(fr)) d.breathLog.push({ n: frameCount, b: null });
+    if (d && d.def.type === 'breath') while (d.breathLog.length && d.breathLog[0].n <= frameCount - BREATH_WIN) d.breathLog.shift();
     if (d && d.def.type === 'prosody') d.pts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
     if (d && d.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) d.isoFr.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (dd && dd.def.type === 'prosody') dd.demoPts.push({ t: performance.now(), f0: fr.kind === 'voiced' ? fr.f0 : 0 });
@@ -818,7 +829,7 @@
       const e = d ? d.emb : dd.demoEmb;
       if (e) { e.push({ n: frameCount, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frAny }); if (e.length > 900) e.shift(); }
     }
-    if (frameCount - breathShown > 120) { $('ro-breath').textContent = '--'; breathBuf.length = 0; }
+    if (frameCount - breathShown > 120) $('ro-breath').textContent = '--'; // old entries leave breathBuf by age
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
     if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
@@ -921,7 +932,7 @@
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
       state.plan.status = 'paused'; renderPlan();
     }
-    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], isoFr: [], pts: [], inZone: 0, offTarget: null, result: null };
+    state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], breathLog: [], isoFr: [], pts: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
     renderDrillGrid();
     renderDrillPanel();
@@ -1411,6 +1422,15 @@
   }
 
   // ---------------- breath exercises ----------------
+  const HOLD_GAP = 10; // frames (~170 ms) a held vowel's name survives an unsteady moment
+  const BREATH_WIN = 90; // frames, ~1.5 s
+  // a sound with too little tone for a breathiness reading: a whisper or a breath (not a hiss: /s/ and /sh/ are fricatives)
+  const isAiryFrame = (fr) => fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF);
+  // { b: median reading, n: readings, air: true when tone-less frames clearly outnumber the readings }
+  function recentBreath(log) {
+    const b = log.filter(e => e.b != null).map(e => e.b), air = log.length - b.length;
+    return { b: b.length >= 5 ? D.median(b) : NaN, n: b.length, air: air >= 20 && air >= 2 * b.length };
+  }
   function breathWord(b) { return b < 15 ? 'firm' : b < 35 ? 'clear' : b < 55 ? 'light, airy' : b < 75 ? 'breathy' : 'mostly air'; }
   const breathBand = () => D.BREATH_BAND[state.goal];
   function renderBreathPanel(d) {
@@ -1454,9 +1474,9 @@
     if (!force && frameCount % 6) return;
     const def = d.def, [lo, hi] = breathBand(), now = performance.now();
     const demo = !!d.demoOn;
-    const recent = (demo ? d.demoBr : d.breathFr).slice(-90);
-    const fresh = recent.length >= 5 && frameCount - breathShown < 90;
-    const b = fresh ? D.median(recent) : NaN;
+    const r = demo ? { b: d.demoBr.length >= 5 ? D.median(d.demoBr.slice(-90)) : NaN, air: false } : recentBreath(d.breathLog.filter(e => e.n > frameCount - BREATH_WIN));
+    const fresh = r.air || (Number.isFinite(r.b) && frameCount - breathShown < 90);
+    const b = r.air ? 100 : fresh ? r.b : NaN; // too little tone to read: as airy as the gauge goes
     const key = !fresh ? 'idle' : b > hi ? 'high' : b < lo ? 'low' : 'ok';
     // the same steadiness rules as the live coach: no flicker between tips
     const c = d.cue || (d.cue = { key: null, at: 0, pending: null, pendingAt: 0, eased: {} });
@@ -1476,7 +1496,7 @@
       const x = ease(c, 'b', b);
       mark.hidden = false; mark.style.left = clamp(x, 0, 100) + '%';
       mark.classList.toggle('ok', key === 'ok');
-      $('br-num').textContent = `${demo ? 'demo voice · ' : ''}${Math.round(b)} · ${breathWord(b)}`;
+      $('br-num').textContent = r.air ? 'mostly air · no clear tone to read' : `${demo ? 'demo voice · ' : ''}${Math.round(b)} · ${breathWord(b)}`;
       $('br-need').textContent = key === 'ok' ? '✓' : key === 'high' ? '← clearer' : 'airier →';
       $('br-need').className = 'g-need ' + (key === 'ok' ? 'ok' : 'off');
     } else if (c.eased.b == null) { mark.hidden = true; $('br-need').textContent = ''; $('br-num').textContent = ''; }
@@ -4395,14 +4415,7 @@
       const L = this.last; if (!L) return;
       const gap = new Float32Array(Math.round(L.sr * 0.3)), parts = [];
       for (const st of this.STEPS) parts.push(L.seg[st.k] || new Float32Array(0), gap);
-      const n = parts.reduce((a, x) => a + x.length, 0), b = new DataView(new ArrayBuffer(44 + n * 2));
-      const w = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
-      w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
-      b.setUint32(24, L.sr, true); b.setUint32(28, L.sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
-      let o = 44; for (const x of parts) for (let i = 0; i < x.length; i++, o += 2) b.setInt16(o, Math.max(-32768, Math.min(32767, Math.round(x[i] * 32767))), true);
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
-      a.download = `voicetrainer-mic-check-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.wav`;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      saveWav(parts, L.sr, 'voicetrainer-mic-check');
     },
     show(res, label) {
       const list = $('mc-list');
@@ -4424,6 +4437,136 @@
       list.appendChild(foot);
       $('mc-save').onclick = () => this.save();
       list.hidden = false;
+    },
+  };
+  // ---- "Check my readings" (Settings): one vowel held eight ways, then D.readingsCheck ----
+  function saveWav(parts, sr, name) {
+    const n = parts.reduce((a, x) => a + x.length, 0), b = new DataView(new ArrayBuffer(44 + n * 2));
+    const w = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
+    w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+    b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+    let o = 44; for (const x of parts) for (let i = 0; i < x.length; i++, o += 2) b.setInt16(o, Math.max(-32768, Math.min(32767, Math.round(x[i] * 32767))), true);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+    a.download = `${name}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.wav`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  const ReadCheck = {
+    READY: 2, SECS: 3.5,
+    steps(nm) {
+      return [
+        { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Pick a comfortable note and remember it.` },
+        { k: 'mid', say: `Hold ${nm} in your everyday voice, on the same note.`, note: 'dark' },
+        { k: 'bright', say: `Hold ${nm} as bright and small as you can: larynx high, think small dog. Same note.`, note: 'dark' },
+        { k: 'low', say: `Everyday ${nm} again, on a lower note (a few notes down).` },
+        { k: 'high', say: `Everyday ${nm}, on a higher note (a few notes up from your first).` },
+        { k: 'again', say: `Everyday ${nm} on your first note, once more.`, note: 'dark' },
+        { k: 'airy', say: `Everyday ${nm} on your first note, but very airy, like a sigh. Keep some tone in it.`, note: 'dark' },
+        { k: 'whisper', say: `Whisper ${nm}: no tone at all.` },
+      ];
+    },
+    on: false, stopAsked: false,
+    async start() {
+      if (this.on) return;
+      stop(); if (Run.on) cancelRun(); if (MicCheck.on) return;
+      const list = $('rc-list'), run = $('rc-run'), step = $('rc-step'), phase = $('rc-phase'), pitch = $('rc-pitch'), prog = $('rc-prog'), btn = $('rc-start');
+      const vKey = $('rc-vowel').value, v = D.VOWEL_BY_KEY[vKey], nm = `"${v.cue.split(' ')[0]}"`;
+      const STEPS = this.steps(nm);
+      list.hidden = true; list.innerHTML = '';
+      let s;
+      try {
+        ensureCtx();
+        s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      } catch (e) {
+        run.hidden = false; step.textContent = 'The microphone could not be opened. Allow it for this page and try again.'; return;
+      }
+      this.on = true; this.stopAsked = false; btn.disabled = true; run.hidden = false;
+      const sr = ctx.sampleRate, an = new D.Analyzer(sr), ring = new Float32Array(an.needed);
+      const src = ctx.createMediaStreamSource(s), proc = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
+      mute.gain.value = 0; src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+      const chunks = {}, f0s = {}; let cur = null, live = 0;
+      proc.onaudioprocess = (e) => {
+        const x = e.inputBuffer.getChannelData(0);
+        if (cur) (chunks[cur] = chunks[cur] || []).push(new Float32Array(x));
+        // a pitch readout, so the "same note" steps can be matched
+        if (x.length >= ring.length) ring.set(x.subarray(x.length - ring.length)); else { ring.copyWithin(0, x.length); ring.set(x, ring.length - x.length); }
+        const fr = an.analyze(ring);
+        live = fr.kind === 'voiced' ? fr.f0 : 0;
+        if (cur && live) (f0s[cur] = f0s[cur] || []).push(live);
+      };
+      const total = STEPS.length * (this.READY + this.SECS); let done = 0;
+      const wait = (secs, each) => new Promise(r => {
+        const t0 = performance.now();
+        const tick = () => {
+          const el = (performance.now() - t0) / 1000;
+          if (each) each(el);
+          if (el >= secs || this.stopAsked) r(); else setTimeout(tick, 100);
+        };
+        tick();
+      });
+      const noteOf = (k) => { const a = f0s[k]; return a && a.length > 5 ? D.median(a) : 0; };
+      const showPitch = (st) => {
+        const aim = st.note ? noteOf(st.note) : 0;
+        pitch.textContent = (live ? `You: ${D.hzToNote(live)} (${Math.round(live)} Hz)` : 'You: --') + (aim ? ` · first note: ${D.hzToNote(aim)} (${Math.round(aim)} Hz)` : '');
+      };
+      await wait(0.4);
+      for (const [i, st] of STEPS.entries()) {
+        if (this.stopAsked) break;
+        step.textContent = st.say;
+        phase.textContent = `Step ${i + 1} of ${STEPS.length} · get ready`; phase.classList.remove('now');
+        await wait(this.READY, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
+        done += this.READY;
+        if (this.stopAsked) break;
+        cur = st.k; phase.textContent = `Step ${i + 1} of ${STEPS.length} · now`; phase.classList.add('now');
+        await wait(this.SECS, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
+        cur = null; done += this.SECS;
+      }
+      proc.onaudioprocess = null;
+      try { src.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
+      s.getTracks().forEach(t => t.stop());
+      this.on = false; btn.disabled = false; run.hidden = true; pitch.textContent = '';
+      if (this.stopAsked) { btn.textContent = 'Start the check'; return; }
+      step.textContent = 'Reading the results…';
+      await new Promise(r => setTimeout(r, 30));
+      const join = (a) => { const out = new Float32Array((a || []).reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of a || []) { out.set(x, o); o += x.length; } return out; };
+      const seg = Object.fromEntries(STEPS.map(st => [st.k, join(chunks[st.k])]));
+      this.last = { seg, sr, steps: STEPS, vowel: vKey };
+      let res = null;
+      try { res = D.readingsCheck(seg, sr, vKey); } catch (e) { console.error(e); }
+      btn.textContent = 'Run it again';
+      this.show(res, nm);
+    },
+    save() {
+      const L = this.last; if (!L) return;
+      const gap = new Float32Array(Math.round(L.sr * 0.3)), parts = [];
+      for (const st of L.steps) parts.push(L.seg[st.k] || new Float32Array(0), gap);
+      saveWav(parts, L.sr, `voicetrainer-readings-check-${L.vowel}`);
+    },
+    show(res, nm) {
+      const list = $('rc-list');
+      list.hidden = false;
+      if (!res) { list.innerHTML = '<li><span></span><span>Something went wrong reading the check. Try again.</span></li>'; return; }
+      const ic = { good: '✓', warn: '!', bad: '✕' };
+      list.innerHTML = '';
+      const head = document.createElement('li');
+      head.innerHTML = `<span></span><p class="mc-main">${res.passed} of ${res.checks.length} checks passed${res.passed === res.checks.length ? ': the readings follow what you do.' : '.'}</p>`;
+      list.appendChild(head);
+      for (const c of res.checks) {
+        const li = document.createElement('li'); li.className = c.level;
+        li.innerHTML = `<span class="mc-ic" aria-label="${c.level === 'good' ? 'passed' : c.level === 'warn' ? 'partly' : 'failed'}">${ic[c.level]}</span><div><b>${escapeHtml(c.title)}</b><span class="mc-say"></span></div>`;
+        shortWithInfo(li.querySelector('.mc-say'), c.say, c.title);
+        list.appendChild(li);
+      }
+      const names = { dark: 'Dark', mid: 'Everyday', bright: 'Bright', low: 'Low note', high: 'High note', again: 'Everyday again', airy: 'Airy', whisper: 'Whisper' };
+      const rows = D.RC_STEPS.map(k => {
+        const d = res.data[k];
+        if (!d) return `<tr><td>${names[k]}</td><td colspan="4">not heard</td></tr>`;
+        return `<tr><td>${names[k]}</td><td>${d.f0 && d.voiced >= 20 ? d.f0 : '--'}</td><td>${d.res != null ? d.res : '--'}</td><td class="rc-f">${d.F ? d.F.join('/') : '--'}</td><td>${d.airy ? 'air' : d.breath != null ? d.breath : '--'}</td></tr>`;
+      }).join('');
+      const foot = document.createElement('li');
+      foot.innerHTML = `<span></span><div><table class="rc-steps"><thead><tr><th>Step</th><th>Hz</th><th>Score</th><th>F1/F2/F3 Hz</th><th>Breath</th></tr></thead><tbody>${rows}</tbody></table>`
+        + `<p class="mc-say">Vowel ${escapeHtml(nm)} · ${Math.round(this.last.sr / 100) / 10} kHz · <button type="button" class="linkish" id="rc-save">Save the recording</button>${infoHtml('What the table shows', 'Score is the resonance score (men avg ' + Math.round(D.RES_AVG.masc) + ', women avg ' + Math.round(D.RES_AVG.fem) + ') from steady moments only. F1 to F3 are the formants in Hz the score was read from: compare them with Praat to check the app. Breath is breathiness 0 to 100; "air" means too little tone to read.')}</p></div>`;
+      list.appendChild(foot);
+      $('rc-save').onclick = () => this.save();
     },
   };
   function setMode(m) {
@@ -5117,6 +5260,8 @@
     document.addEventListener('petravanta:themechange', (e) => { applyTheme(e.detail.mode); Data.setting('theme', e.detail.mode); });
     $('settings-voice').addEventListener('click', () => $('btn-demo-set').click());
     $('mc-start').addEventListener('click', () => MicCheck.start());
+    $('rc-start').addEventListener('click', () => ReadCheck.start());
+    $('rc-stop').addEventListener('click', () => { ReadCheck.stopAsked = true; });
     $('home-goal').addEventListener('click', () => setMode('settings'));
     for (const id of ['pr-lo', 'pr-hi']) $(id).addEventListener('change', savePitchRange);
     $('pr-reset').addEventListener('click', resetPitchRange);
