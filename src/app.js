@@ -4522,24 +4522,28 @@
           if (!cur.heard && fr.kind === 'silence') continue;
           cur.heard = true;
           cur.chunks.push(new Float32Array(part)); cur.secs += part.length / sr;
-          const f = { t: cur.secs, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, b: fr.breath, air: fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF), res: NaN };
+          if (fr.kind !== 'silence') cur.lastSound = cur.secs; // pressing Next after a pause must not leave the step silent
+          const f = { t: cur.secs, s: fr.kind !== 'silence', v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, b: fr.breath, air: fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF), res: NaN };
           if (fr.kind === 'voiced' && fr.formants && fr.stable) { const fit = D.scoreVowel(fr.formants, v, fr.f0); if (fit.ok && fit.rms < D.HOLD_RMS) f.res = D.resScore(fit.alpha); }
           cur.frames.push(f);
         }
       };
       // what the last 2 s of the step sound like
       const metrics = (frames, win = 2) => {
-        const t1 = frames.length ? frames[frames.length - 1].t : 0, w = frames.filter(f => f.t > t1 - win);
+        // up to your last sound: stopping before pressing Next keeps the reading (and the ✓) you had
+        let t1 = 0; for (let j = frames.length - 1; j >= 0; j--) if (frames[j].s) { t1 = frames[j].t; break; }
+        const w = frames.filter(f => f.t > t1 - win && f.t <= t1 + 0.05);
         const f0 = w.filter(f => f.f0).map(f => f.f0), res = w.map(f => f.res).filter(Number.isFinite), br = w.map(f => f.b).filter(b => b != null);
         const air = w.filter(f => f.air).length;
         return { f0: f0.length >= 5 ? D.median(f0) : 0, res: res.length ? D.median(res) : NaN, resN: res.length, breath: br.length >= 5 ? D.median(br) : NaN,
           air: air >= 20 && air >= 2 * br.length, voiced: w.length ? f0.length / w.length : 0 };
       };
       const segs = {};
-      const tail = (c) => { // the last KEEP seconds of a step's audio
+      const tail = (c) => { // the last KEEP seconds of a step's sound (up to its last sound, plus a moment)
         const all = new Float32Array(c.chunks.reduce((n, a) => n + a.length, 0)); let o = 0;
         for (const a of c.chunks) { all.set(a, o); o += a.length; }
-        return all.subarray(Math.max(0, all.length - Math.round(this.KEEP * sr)));
+        const end = Math.min(all.length, Math.round(((c.lastSound || c.secs) + 0.1) * sr));
+        return all.subarray(Math.max(0, end - Math.round(this.KEEP * sr)), end);
       };
       for (let i = 0; i < STEPS.length && !this.stopAsked; i++) {
         const st = STEPS[i];
