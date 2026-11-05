@@ -4450,25 +4450,51 @@
     a.download = `${name}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.wav`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
+  // Self-paced: each step records from your first sound, coaches you live (same note? brighter than dark? airy enough?)
+  // and waits for Next, so nothing moves on before you do. Redo throws the step away. The last KEEP seconds of a step
+  // are what's analysed, so a slow start or a correction partway through doesn't count against you.
   const ReadCheck = {
-    READY: 3, SECS: 3.5, WAIT: 8, // s: read the step, then up to WAIT for you to start; the SECS are counted from your first sound
+    KEEP: 4, MIN: 2.5, // s: analysed tail of a step; sound needed before Next is offered as done
     steps(nm) {
       return [
         { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Pick a comfortable note and remember it.` },
-        { k: 'mid', say: `Hold ${nm} in your everyday voice, on the same note.`, note: 'dark' },
-        { k: 'bright', say: `Hold ${nm} as bright and small as you can: larynx high, think small dog. Same note.`, note: 'dark' },
-        { k: 'low', say: `Everyday ${nm} again, on a lower note (a few notes down).` },
-        { k: 'high', say: `Everyday ${nm}, on a higher note (a few notes up from your first).` },
-        { k: 'again', say: `Everyday ${nm} on your first note, once more.`, note: 'dark' },
-        { k: 'airy', say: `Everyday ${nm} on your first note, but very airy, like a sigh. Keep some tone in it.`, note: 'dark' },
+        { k: 'mid', say: `Hold ${nm} in your everyday voice, on the same note.`, note: true },
+        { k: 'bright', say: `Hold ${nm} as bright and small as you can: larynx high, think small dog. Same note.`, note: true },
+        { k: 'low', say: `Everyday ${nm}, on a lower note: at least 4 notes down from your first.` },
+        { k: 'high', say: `Everyday ${nm}, on a higher note: at least 4 notes up from your first.` },
+        { k: 'again', say: `Everyday ${nm} on your first note, once more.`, note: true },
+        { k: 'airy', say: `Everyday ${nm} on your first note, but very airy, like a sigh. Keep some tone in it.`, note: true },
         { k: 'whisper', say: `Whisper ${nm}: no tone at all.` },
       ];
     },
     on: false, stopAsked: false,
+    // live coaching for one step from what has been heard so far: { ok, say }
+    coach(st, m, ref) {
+      const semi = (a, b) => 12 * Math.log2(a / b), R = Math.round;
+      if (st.k === 'whisper') return m.voiced > 0.3 ? { ok: false, say: 'There is still tone in it: let the voice go, just air.' } : { ok: true, say: 'Reads as air. ✓' };
+      const first = ref.dark && ref.dark.f0;
+      if (!m.f0 && !(st.k === 'airy' && (m.air || Number.isFinite(m.breath)))) return { ok: false, say: 'Listening…' };
+      if (st.note && first && m.f0 && Math.abs(semi(m.f0, first)) > 2) return { ok: false, say: `You're ${R(Math.abs(semi(m.f0, first)))} notes ${m.f0 > first ? 'above' : 'below'} your first note (${D.hzToNote(first)}): ${m.f0 > first ? 'come down' : 'go up'} a little.` };
+      if (st.k === 'low' && first && semi(first, m.f0) < 4) return { ok: false, say: `${R(Math.max(0, semi(first, m.f0)))} notes below your first: go lower, 4 or more.` };
+      if (st.k === 'high' && first && semi(m.f0, first) < 4) return { ok: false, say: `${R(Math.max(0, semi(m.f0, first)))} notes above your first: go higher, 4 or more.` };
+      if (st.k === 'airy') {
+        const clear = ref.mid && ref.mid.breath;
+        if (m.air) return { ok: true, say: 'Very airy, too little tone to read. That counts. ✓' };
+        if (!Number.isFinite(m.breath)) return { ok: false, say: 'Listening…' };
+        if (Number.isFinite(clear) && m.breath < clear + 15) return { ok: false, say: `Breathiness ${R(m.breath)}, everyday was ${R(clear)}: more air, like a long sigh.` };
+        return { ok: true, say: `Breathiness ${R(m.breath)}. Airy enough. ✓` };
+      }
+      if (m.resN < 8) return { ok: false, say: `${D.hzToNote(m.f0)} · no steady resonance reading yet: hold it still, with a clear tone.` };
+      const at = `${D.hzToNote(m.f0)} · resonance ${R(m.res)}`;
+      if (st.k === 'bright' && ref.dark && Number.isFinite(ref.dark.res) && m.res < ref.dark.res + 6) return { ok: false, say: `${at}, dark was ${R(ref.dark.res)}: brighter if you can (smile, larynx up, small dog).` };
+      if (st.k === 'mid' && ref.dark && Number.isFinite(ref.dark.res) && m.res < ref.dark.res - 3) return { ok: false, say: `${at}: darker than your dark step (${R(ref.dark.res)}). Relax into your everyday voice.` };
+      return { ok: true, say: `${at}. ✓` };
+    },
     async start() {
       if (this.on) return;
       stop(); if (Run.on) cancelRun(); if (MicCheck.on) return;
-      const list = $('rc-list'), run = $('rc-run'), step = $('rc-step'), phase = $('rc-phase'), pitch = $('rc-pitch'), prog = $('rc-prog'), btn = $('rc-start');
+      const list = $('rc-list'), run = $('rc-run'), step = $('rc-step'), phase = $('rc-phase'), live = $('rc-pitch'), prog = $('rc-prog'), btn = $('rc-start');
+      const next = $('rc-next'), redo = $('rc-redo');
       const vKey = $('rc-vowel').value, v = D.VOWEL_BY_KEY[vKey], nm = `"${v.cue.split(' ')[0]}"`;
       const STEPS = this.steps(nm);
       list.hidden = true; list.innerHTML = '';
@@ -4480,62 +4506,78 @@
         run.hidden = false; step.textContent = 'The microphone could not be opened. Allow it for this page and try again.'; return;
       }
       this.on = true; this.stopAsked = false; btn.disabled = true; run.hidden = false;
-      const sr = ctx.sampleRate, an = new D.Analyzer(sr), ring = new Float32Array(an.needed);
+      const sr = ctx.sampleRate, an = new D.Analyzer(sr), ring = new Float32Array(an.needed), HOP = 1024;
       const src = ctx.createMediaStreamSource(s), proc = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
       mute.gain.value = 0; src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
-      const chunks = {}, f0s = {}; let cur = null, live = 0, heard = false;
+      // the step being recorded: audio from the first sound, and per-frame readings for the coach
+      let cur = null;
+      const ref = {}; // finished steps' summaries: { f0, res, breath }
       proc.onaudioprocess = (e) => {
         const x = e.inputBuffer.getChannelData(0);
-        if (cur && heard) (chunks[cur] = chunks[cur] || []).push(new Float32Array(x));
-        // a pitch readout, so the "same note" steps can be matched
-        if (x.length >= ring.length) ring.set(x.subarray(x.length - ring.length)); else { ring.copyWithin(0, x.length); ring.set(x, ring.length - x.length); }
-        const fr = an.analyze(ring);
-        live = fr.kind === 'voiced' ? fr.f0 : 0;
-        // a step records from your first sound (a whisper counts), so a late start doesn't leave it half silent
-        if (cur && !heard && fr.kind !== 'silence') { heard = true; (chunks[cur] = chunks[cur] || []).push(new Float32Array(x)); }
-        if (cur && live) (f0s[cur] = f0s[cur] || []).push(live);
+        for (let o = 0; o < x.length; o += HOP) {
+          const part = x.subarray(o, Math.min(x.length, o + HOP));
+          ring.copyWithin(0, part.length); ring.set(part, ring.length - part.length);
+          const fr = an.analyze(ring);
+          if (!cur) continue;
+          if (!cur.heard && fr.kind === 'silence') continue;
+          cur.heard = true;
+          cur.chunks.push(new Float32Array(part)); cur.secs += part.length / sr;
+          const f = { t: cur.secs, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, b: fr.breath, air: fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF), res: NaN };
+          if (fr.kind === 'voiced' && fr.formants && fr.stable) { const fit = D.scoreVowel(fr.formants, v, fr.f0); if (fit.ok && fit.rms < D.HOLD_RMS) f.res = D.resScore(fit.alpha); }
+          cur.frames.push(f);
+        }
       };
-      const total = STEPS.length * (this.READY + this.SECS); let done = 0;
-      const wait = (secs, each, until) => new Promise(r => {
-        const t0 = performance.now();
-        const tick = () => {
-          const el = (performance.now() - t0) / 1000;
-          if (each) each(el);
-          if (el >= secs || this.stopAsked || (until && until())) r(); else setTimeout(tick, 100);
-        };
-        tick();
-      });
-      const noteOf = (k) => { const a = f0s[k]; return a && a.length > 5 ? D.median(a) : 0; };
-      const showPitch = (st) => {
-        const aim = st.note ? noteOf(st.note) : 0;
-        pitch.textContent = (live ? `You: ${D.hzToNote(live)} (${Math.round(live)} Hz)` : 'You: --') + (aim ? ` · first note: ${D.hzToNote(aim)} (${Math.round(aim)} Hz)` : '');
+      // what the last 2 s of the step sound like
+      const metrics = (frames, win = 2) => {
+        const t1 = frames.length ? frames[frames.length - 1].t : 0, w = frames.filter(f => f.t > t1 - win);
+        const f0 = w.filter(f => f.f0).map(f => f.f0), res = w.map(f => f.res).filter(Number.isFinite), br = w.map(f => f.b).filter(b => b != null);
+        const air = w.filter(f => f.air).length;
+        return { f0: f0.length >= 5 ? D.median(f0) : 0, res: res.length ? D.median(res) : NaN, resN: res.length, breath: br.length >= 5 ? D.median(br) : NaN,
+          air: air >= 20 && air >= 2 * br.length, voiced: w.length ? f0.length / w.length : 0 };
       };
-      await wait(0.4);
-      for (const [i, st] of STEPS.entries()) {
+      const segs = {};
+      const tail = (c) => { // the last KEEP seconds of a step's audio
+        const all = new Float32Array(c.chunks.reduce((n, a) => n + a.length, 0)); let o = 0;
+        for (const a of c.chunks) { all.set(a, o); o += a.length; }
+        return all.subarray(Math.max(0, all.length - Math.round(this.KEEP * sr)));
+      };
+      for (let i = 0; i < STEPS.length && !this.stopAsked; i++) {
+        const st = STEPS[i];
+        step.textContent = st.say; prog.style.width = (100 * i / STEPS.length) + '%';
+        cur = { heard: false, chunks: [], frames: [], secs: 0 };
+        let action = null;
+        next.onclick = () => { action = 'next'; }; redo.onclick = () => { action = 'redo'; };
+        await new Promise(r => {
+          const tick = () => {
+            if (this.stopAsked) return r();
+            if (action === 'redo') { action = null; cur = { heard: false, chunks: [], frames: [], secs: 0 }; }
+            if (action === 'next' && cur.secs >= 1) return r();
+            action = null;
+            const m = metrics(cur.frames), c = cur.heard ? this.coach(st, m, ref) : { ok: false, say: 'Start when you are ready.' };
+            const enough = cur.secs >= this.MIN;
+            phase.textContent = `Step ${i + 1} of ${STEPS.length}` + (!cur.heard ? ' · your turn' : enough && c.ok ? ' · got it' : ' · listening');
+            phase.classList.toggle('now', cur.heard);
+            live.textContent = c.say;
+            live.classList.toggle('ok', enough && c.ok);
+            next.disabled = cur.secs < 1;
+            next.textContent = enough && c.ok ? (i < STEPS.length - 1 ? 'Next step' : 'See results') : 'Next anyway';
+            next.classList.toggle('primary', enough && c.ok);
+            redo.hidden = !cur.heard;
+            setTimeout(tick, 150);
+          };
+          tick();
+        });
         if (this.stopAsked) break;
-        step.textContent = st.say;
-        phase.textContent = `Step ${i + 1} of ${STEPS.length} · get ready`; phase.classList.remove('now');
-        await wait(this.READY, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
-        done += this.READY;
-        if (this.stopAsked) break;
-        heard = false; cur = st.k; phase.textContent = `Step ${i + 1} of ${STEPS.length} · your turn: start when ready`; phase.classList.add('now');
-        await wait(this.WAIT, () => showPitch(st), () => heard);
-        if (this.stopAsked) break;
-        phase.textContent = `Step ${i + 1} of ${STEPS.length} · recording, keep going`;
-        await wait(this.SECS, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
-        cur = null; heard = false; done += this.SECS;
-        phase.textContent = `Step ${i + 1} of ${STEPS.length} · done, you can stop`; phase.classList.remove('now');
-        if (i < STEPS.length - 1) await wait(0.8);
+        segs[st.k] = tail(cur);
+        const m = metrics(cur.frames, this.KEEP); ref[st.k] = { f0: m.f0, res: m.res, breath: m.breath };
+        cur = null;
       }
-      proc.onaudioprocess = null;
+      cur = null; proc.onaudioprocess = null; next.onclick = redo.onclick = null;
       try { src.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
       s.getTracks().forEach(t => t.stop());
-      this.on = false; btn.disabled = false; run.hidden = true; pitch.textContent = '';
+      this.on = false; btn.disabled = false; run.hidden = true; live.textContent = '';
       if (this.stopAsked) { btn.textContent = 'Start the check'; return; }
-      step.textContent = 'Reading the results…';
-      await new Promise(r => setTimeout(r, 30));
-      const join = (a) => { const out = new Float32Array((a || []).reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of a || []) { out.set(x, o); o += x.length; } return out; };
-      const seg = Object.fromEntries(STEPS.map(st => [st.k, join(chunks[st.k])]));
+      const seg = Object.fromEntries(STEPS.map(st => [st.k, segs[st.k] || new Float32Array(0)]));
       this.last = { seg, sr, steps: STEPS, vowel: vKey };
       let res = null;
       try { res = D.readingsCheck(seg, sr, vKey); } catch (e) { console.error(e); }
