@@ -1366,14 +1366,16 @@
     const tol = (...ss) => Math.max(3, median(ss.map(s => s.resIqr).filter(Number.isFinite)) / 2 || 3); // the score's own wobble
 
     // 1. resonance follows a deliberate change
-    const [dk, md, bt] = [st.dark, st.mid, st.bright];
+    // a missed everyday step can borrow its repeat (the same sound), so one late start doesn't sink three checks
+    const md = readable(st.mid) ? st.mid : readable(st.again) ? st.again : st.mid;
+    const [dk, bt] = [st.dark, st.bright];
     if (![dk, md, bt].every(readable)) {
       const miss = [['dark', dk], ['everyday', md], ['bright', bt]].filter(([, s]) => !readable(s)).map(([nm]) => nm);
       add('follow', 'bad', "Couldn't read every resonance step", `Too few steady readings on the ${miss.join(' and ')} step${miss.length > 1 ? 's' : ''}, so this part can't be judged. Hold the vowel steadily for the whole step, with a clear (not airy) tone.`);
     } else {
       const span = bt.res - dk.res, t = tol(dk, md, bt), moved = f23(bt, dk);
       const pitchMoved = Math.abs(semis(Math.max(dk.f0, md.f0, bt.f0), Math.min(dk.f0, md.f0, bt.f0))) > 3;
-      const nums = `Scores: dark ${R(dk.res)}, everyday ${R(md.res)}, bright ${R(bt.res)}. F2 and F3 moved ${sign(R(moved))}% from dark to bright.`;
+      const nums = `Scores: dark ${R(dk.res)}, everyday ${R(md.res)}${md === st.mid ? '' : ' (from the repeat)'}, bright ${R(bt.res)}. F2 and F3 moved ${sign(R(moved))}% from dark to bright.`;
       const inOrder = md.res > dk.res - t && md.res < bt.res + t;
       const pitchNote = pitchMoved ? ` Your pitch also changed (${R(dk.f0)}, ${R(md.f0)}, ${R(bt.f0)} Hz), so try the three on one note.` : '';
       if (span >= 8 && inOrder) add('follow', 'good', 'Resonance follows your changes', `${nums} The score moved the way you did.${pitchNote}`);
@@ -1391,7 +1393,7 @@
     } else {
       const rs = [lo.res, md.res, hi.res], range = Math.max(...rs) - Math.min(...rs);
       const up = semis(hi.f0, md.f0), down = semis(md.f0, lo.f0);
-      const nums = `Scores: low ${R(lo.res)} (${R(lo.f0)} Hz), everyday ${R(md.res)} (${R(md.f0)} Hz), high ${R(hi.res)} (${R(hi.f0)} Hz).`;
+      const nums = `Scores: low ${R(lo.res)} (${R(lo.f0)} Hz), everyday ${R(md.res)} (${R(md.f0)} Hz${md === st.mid ? '' : ', the repeat'}), high ${R(hi.res)} (${R(hi.f0)} Hz).`;
       const f = f23(hi, lo), rose = hi.res - lo.res;
       const why = Math.abs(rose) >= 8 ? (Math.sign(f) === Math.sign(rose) && Math.abs(f) >= 3
         ? ` Your F2 and F3 moved ${sign(R(f))}% from low to high too, so your resonance really changed with pitch: that's common (the larynx tends to rise with pitch).`
@@ -1404,7 +1406,8 @@
 
     // 3. the same sound twice gives the same score
     const ag = st.again;
-    if (readable(md) && readable(ag)) {
+    if (readable(st.mid) && readable(ag)) {
+      const md = st.mid;
       const dlt = Math.abs(ag.res - md.res);
       const nums = `First ${R(md.res)}, again ${R(ag.res)}.`;
       if (dlt <= 5) add('repeat', 'good', 'Repeats closely', `${nums} The same sound scores within ${R(dlt)} points.`);
