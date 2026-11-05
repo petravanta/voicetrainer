@@ -4451,7 +4451,7 @@
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
   const ReadCheck = {
-    READY: 2, SECS: 3.5,
+    READY: 3, SECS: 3.5, WAIT: 8, // s: read the step, then up to WAIT for you to start; the SECS are counted from your first sound
     steps(nm) {
       return [
         { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Pick a comfortable note and remember it.` },
@@ -4483,23 +4483,25 @@
       const sr = ctx.sampleRate, an = new D.Analyzer(sr), ring = new Float32Array(an.needed);
       const src = ctx.createMediaStreamSource(s), proc = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
       mute.gain.value = 0; src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
-      const chunks = {}, f0s = {}; let cur = null, live = 0;
+      const chunks = {}, f0s = {}; let cur = null, live = 0, heard = false;
       proc.onaudioprocess = (e) => {
         const x = e.inputBuffer.getChannelData(0);
-        if (cur) (chunks[cur] = chunks[cur] || []).push(new Float32Array(x));
+        if (cur && heard) (chunks[cur] = chunks[cur] || []).push(new Float32Array(x));
         // a pitch readout, so the "same note" steps can be matched
         if (x.length >= ring.length) ring.set(x.subarray(x.length - ring.length)); else { ring.copyWithin(0, x.length); ring.set(x, ring.length - x.length); }
         const fr = an.analyze(ring);
         live = fr.kind === 'voiced' ? fr.f0 : 0;
+        // a step records from your first sound (a whisper counts), so a late start doesn't leave it half silent
+        if (cur && !heard && fr.kind !== 'silence') { heard = true; (chunks[cur] = chunks[cur] || []).push(new Float32Array(x)); }
         if (cur && live) (f0s[cur] = f0s[cur] || []).push(live);
       };
       const total = STEPS.length * (this.READY + this.SECS); let done = 0;
-      const wait = (secs, each) => new Promise(r => {
+      const wait = (secs, each, until) => new Promise(r => {
         const t0 = performance.now();
         const tick = () => {
           const el = (performance.now() - t0) / 1000;
           if (each) each(el);
-          if (el >= secs || this.stopAsked) r(); else setTimeout(tick, 100);
+          if (el >= secs || this.stopAsked || (until && until())) r(); else setTimeout(tick, 100);
         };
         tick();
       });
@@ -4516,9 +4518,14 @@
         await wait(this.READY, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
         done += this.READY;
         if (this.stopAsked) break;
-        cur = st.k; phase.textContent = `Step ${i + 1} of ${STEPS.length} · now`; phase.classList.add('now');
+        heard = false; cur = st.k; phase.textContent = `Step ${i + 1} of ${STEPS.length} · your turn: start when ready`; phase.classList.add('now');
+        await wait(this.WAIT, () => showPitch(st), () => heard);
+        if (this.stopAsked) break;
+        phase.textContent = `Step ${i + 1} of ${STEPS.length} · recording, keep going`;
         await wait(this.SECS, (el) => { showPitch(st); prog.style.width = Math.min(100, 100 * (done + el) / total) + '%'; });
-        cur = null; done += this.SECS;
+        cur = null; heard = false; done += this.SECS;
+        phase.textContent = `Step ${i + 1} of ${STEPS.length} · done, you can stop`; phase.classList.remove('now');
+        if (i < STEPS.length - 1) await wait(0.8);
       }
       proc.onaudioprocess = null;
       try { src.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
