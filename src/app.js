@@ -4457,7 +4457,7 @@
     KEEP: 4, MIN: 2.5, // s: analysed tail of a step; sound needed before Next is offered as done
     steps(nm) {
       return [
-        { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Pick a comfortable note and remember it.` },
+        { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Use a note in the middle of your range: this is your first note, and later you'll go 4 notes below and 4 above it.` },
         { k: 'mid', say: `Hold ${nm} in your everyday voice, on the same note.`, note: true },
         { k: 'bright', say: `Hold ${nm} as bright and small as you can: larynx high, think small dog. Same note.`, note: true },
         { k: 'low', say: `Everyday ${nm}, on a lower note: at least 4 notes down from your first.` },
@@ -4488,6 +4488,10 @@
       const at = `${D.hzToNote(m.f0)} · resonance ${R(m.res)}`;
       if (st.k === 'bright' && ref.dark && Number.isFinite(ref.dark.res) && m.res < ref.dark.res + 6) return { ok: false, say: `${at}, dark was ${R(ref.dark.res)}: brighter if you can (smile, larynx up, small dog).` };
       if (st.k === 'mid' && ref.dark && Number.isFinite(ref.dark.res) && m.res < ref.dark.res - 3) return { ok: false, say: `${at}: darker than your dark step (${R(ref.dark.res)}). Relax into your everyday voice.` };
+      if (st.k === 'dark') { // the first note sets the low and high steps: say where they'll land, so a too-low start can be redone now
+        const n = (k) => D.hzToNote(m.f0 * Math.pow(2, k / 12));
+        return { ok: true, say: `${at}. ✓ Your first note is ${D.hzToNote(m.f0)}: later you'll go down to about ${n(-4)} and up to ${n(4)}. Too low or high to reach those? Redo on a different note.` };
+      }
       return { ok: true, say: `${at}. ✓` };
     },
     async start() {
@@ -4506,6 +4510,7 @@
         run.hidden = false; step.textContent = 'The microphone could not be opened. Allow it for this page and try again.'; return;
       }
       this.on = true; this.stopAsked = false; btn.disabled = true; run.hidden = false;
+      $('rc-card').classList.add('running');
       const sr = ctx.sampleRate, an = new D.Analyzer(sr), ring = new Float32Array(an.needed), HOP = 1024;
       const src = ctx.createMediaStreamSource(s), proc = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain();
       mute.gain.value = 0; src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
@@ -4548,6 +4553,7 @@
       for (let i = 0; i < STEPS.length && !this.stopAsked; i++) {
         const st = STEPS[i];
         step.textContent = st.say; prog.style.width = (100 * i / STEPS.length) + '%';
+        $('rc-plan').querySelectorAll('li').forEach((li, j) => { li.className = j < i ? 'done' : j === i ? 'cur' : ''; });
         cur = { heard: false, chunks: [], frames: [], secs: 0 };
         let action = null;
         next.onclick = () => { action = 'next'; }; redo.onclick = () => { action = 'redo'; };
@@ -4580,6 +4586,7 @@
       try { src.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
       s.getTracks().forEach(t => t.stop());
       this.on = false; btn.disabled = false; run.hidden = true; live.textContent = '';
+      $('rc-card').classList.remove('running'); $('rc-plan').querySelectorAll('li').forEach(li => { li.className = ''; });
       if (this.stopAsked) { btn.textContent = 'Start the check'; return; }
       const seg = Object.fromEntries(STEPS.map(st => [st.k, segs[st.k] || new Float32Array(0)]));
       this.last = { seg, sr, steps: STEPS, vowel: vKey };

@@ -548,6 +548,14 @@ label.field.rc-vowel { flex-direction: row; align-items: center; gap: 8px; margi
 .rc-pitch { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); min-height: 2.6em; }
 .rc-pitch.ok { color: var(--good); }
 .rc-more { margin: 0 0 12px; font-size: 0.9rem; }
+.rc-how .vd-note { margin: 0 0 6px; }
+.rc-plan { margin: 0 0 12px; padding-left: 22px; font-size: 0.9rem; color: var(--muted); display: grid; gap: 2px; }
+.rc-plan b { color: var(--ink); font-weight: 600; }
+.rc-plan li.done { opacity: 0.55; }
+.rc-plan li.done::marker { content: '✓  '; }
+.rc-plan li.cur { color: var(--accent); }
+.rc-plan li.cur b { color: var(--accent); }
+#rc-card.running .rc-how .vd-note { display: none; }
 .rc-more summary { cursor: pointer; color: var(--accent); }
 .rc-more ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); }
 .rc-more b { color: var(--ink); }
