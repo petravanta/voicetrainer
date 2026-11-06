@@ -81,13 +81,18 @@ const oldReading = { id: 'r1', at: '2026-10-20T10:00:00Z', resonance: 80, sibS: 
 const m = D.migrateRecord(oldReading, 'readings');
 check(m.rs === D.RES_SCALE && m.rsFrom === 1 && m.resonance === 57.5 && m.sibS === 62.5 && m.sibSh === null, 'a reading: overall and sibilant scores converted');
 check(m.vowels.i === 60 && m.vmap.i[3] === 60 && m.vmap.i[0] === 400 && m.byWord[0][2] === 60 && m.byWord[0][1] === 200 && m.byWord[1][2] === null, '  per-vowel, vowel-map and per-word scores converted, formants and pitch untouched');
-check(m.pitchMedian === 200 && m.breath === 30 && oldReading.resonance === 80, '  pitch and breath untouched, the original not modified');
+check(m.pitchMedian === 200 && oldReading.resonance === 80 && oldReading.breath === 30, '  pitch untouched, the original not modified');
+check(m.bs === D.BREATH_SCALE && m.breath === 47.5, `  breathiness moved to scale 2: 30 -> 47.5 (${m.breath})`);
 check(D.migrateRecord(m, 'readings') === m, '  converting twice changes nothing');
 const p = (kind, score) => D.migrateRecord({ id: 'p', kind, score }, 'practice').score;
 check(p('sound', 75) === 56.3 && p(undefined, 0) === 37.5 && p('spot', 100) === 62.5, 'practice: vowel/word drills and focus spots converted');
-check(p('breath', 40) === 40 && p('prosody', 3.5) === 3.5 && p('control', 12) === 12 && p('whisper', 30) === 30 && p('spotpitch', 190) === 190, '  breath, semitones, percentages and Hz untouched');
-const fresh = { id: 'r2', rs: D.RES_SCALE, resonance: 70 };
-check(D.migrateRecord(fresh, 'readings') === fresh, 'a record saved on the current scale is left alone');
+check(p('breath', 40) === 55 && p('breath', 0) === 12 && p('prosody', 3.5) === 3.5 && p('control', 12) === 12 && p('whisper', 30) === 30 && p('spotpitch', 190) === 190, '  breath exercises moved to breathiness scale 2 (old 0, read as "clear somewhere", to 12); semitones, percentages and Hz untouched');
+const fresh = { id: 'r2', rs: D.RES_SCALE, bs: D.BREATH_SCALE, resonance: 70, breath: 20 };
+check(D.migrateRecord(fresh, 'readings') === fresh, 'a record saved on the current scales is left alone');
+// saved between the two scale changes: resonance already on scale 2, breathiness still on scale 1
+const mid = D.migrateRecord({ id: 'r3', rs: D.RES_SCALE, resonance: 70, breath: 0 }, 'readings');
+check(mid.resonance === 70 && mid.breath === 12 && mid.bs === D.BREATH_SCALE && !mid.rsFrom, `a reading on resonance scale 2 but breathiness scale 1: only breathiness moves (${mid.resonance}, ${mid.breath})`);
+check(D.migrateRecord(mid, 'readings') === mid, '  and converting it again changes nothing');
 
 console.log(fails ? `\n${fails} failed` : '\nall passed');
 process.exit(fails ? 1 : 0);
