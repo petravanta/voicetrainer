@@ -349,8 +349,14 @@
   // Move one saved reading or practice record to this scale (a copy; records already on it are returned as they are).
   // Practice kinds 'sound' (vowel, consonant, word and whispered-vowel drills) and 'spot' hold resonance scores;
   // the others are breathiness, semitones, percentages or Hz.
+  // Breathiness (readings' breath, breath exercises' score) moves to BREATH_SCALE the same way, marked bs.
   function migrateRecord(r, list) {
-    if (!r || r.rs >= RES_SCALE) return r;
+    if (!r) return r;
+    if (!(r.bs >= BREATH_SCALE)) {
+      r = Object.assign({}, r, { bs: BREATH_SCALE });
+      if (list === 'practice') { if (r.kind === 'breath') r.score = breathFromScale1(r.score); } else r.breath = breathFromScale1(r.breath);
+    }
+    if (r.rs >= RES_SCALE) return r;
     const o = Object.assign({}, r, { rs: RES_SCALE, rsFrom: r.rs || 1 }); // rsFrom: converted, so the History can say so
     if (list === 'practice') { if ((r.kind || 'sound') === 'sound' || r.kind === 'spot') o.score = fromScale1(r.score); return o; }
     o.resonance = fromScale1(r.resonance); o.sibS = fromScale1(r.sibS); o.sibSh = fromScale1(r.sibSh);
@@ -364,7 +370,9 @@
   // When the three formants don't line up but F2 and F3 agree closely, only F1 is off. F1 is the least reliable
   // formant (a soft, wide F1, or a voice whose F1 sits outside both references, like a very closed "ee"), so the
   // score is then read from F2 and F3 as at high pitch, and marked f1Off.
-  const F1_OFF_RMS = 0.06, F1_OFF_FULL = 0.1;
+  // F1_OFF_FULL was 0.1 before 2026-11; 0.08 sits under HOLD_RMS, so a fit pulled off by F1 alone (a closed "ee" whose F1
+  // LPC drags towards the 2nd harmonic at 150-170 Hz) is read from F2 and F3 rather than scored ~12 points dark or dropped.
+  const F1_OFF_RMS = 0.06, F1_OFF_FULL = 0.08;
   function scoreVowel(F, v, f0 = 0) {
     const lim = pitchLimited(v, f0) || f1OnPitch(F, f0), w = lim ? PITCH_WEIGHTS : FIT_WEIGHTS;
     const fit = fitVowel(F, v, w);
@@ -658,11 +666,20 @@
     for (let k = 0; k < 3; k++) { let a = 0; for (let i = s + k * h; i < s + (k + 1) * h; i++) a += y[i] * y[i]; e.push(a); }
     return Math.min(...e) < BREATH_EVEN * Math.max(...e);
   }
-  const BREATH_CPP = [13, 25]; // dB: mostly air .. very clear (synthetic calibration)
-  const BREATH_BAND = { fem: [20, 50], masc: [10, 40] };
+  // dB: mostly air .. very clear. The clear end was 25 dB before 2026-11 (scale 1), but clear voices read 25-29 dB
+  // (the synthetic voice 27-29, one real voice's clear "ee" 25-28 on a phone), so every clear voice read 0 and a
+  // mildly airy one too: that voice's sigh-like "ee" dropped CPP by 2.5 dB and still read 4. With the clear end at
+  // 29 dB the same step reads 13 -> 29. Below 25 dB nothing changes but the numbers: scale 2 = 25 + 0.75 x scale 1,
+  // and the bands and words below are the old ones moved the same way, so they mean the same voice as before.
+  const BREATH_CPP = [13, 29];
+  const BREATH_SCALE = 2;
+  const BREATH_BAND = { fem: [40, 63], masc: [32, 55] }; // scale 1: fem 20-50, masc 10-40
   function breathiness(q) {
     return Math.max(0, Math.min(100, 100 * (BREATH_CPP[1] - q.cpp) / (BREATH_CPP[1] - BREATH_CPP[0])));
   }
+  // A breathiness saved on scale 1, moved to scale 2. Scale 1 read every CPP over 25 dB as 0, so a saved 0 was
+  // somewhere in 0..25 now: it becomes the middle of that, 12.
+  const breathFromScale1 = (b) => (typeof b === 'number' && Number.isFinite(b) ? (b <= 0 ? 12 : Math.round((25 + 0.75 * b) * 10) / 10) : b);
 
   function sibilantAlpha(cog, sib) {
     return Math.log(cog / sib.M) / Math.log(sib.W / sib.M);
@@ -1297,7 +1314,7 @@
     else {
       const b = median(held.map(s => s.breath).filter(Number.isFinite));
       data.breath = Number.isFinite(b) ? Math.round(b) : null;
-      if (b > 65) add('breath', 'warn', 'Very breathy voice', `Your held vowels read ${Math.round(b)} on breathiness. Air noise blurs the formants, so a slightly firmer, clearer tone gives more readings.`);
+      if (b > 74) add('breath', 'warn', 'Very breathy voice', `Your held vowels read ${Math.round(b)} on breathiness. Air noise blurs the formants, so a slightly firmer, clearer tone gives more readings.`);
       else if (Number.isFinite(b)) add('breath', 'good', 'Clear voicing', `Breathiness ${Math.round(b)}, clear enough to read.`);
       const okFrac = median(held.map(s => s.ok));
       data.read = Math.round(100 * okFrac);
@@ -1337,12 +1354,12 @@
       const x = seg[k];
       if (!x || x.length < sr * (RC_SKIP + 0.5)) { st[k] = null; continue; }
       const an = new Analyzer(sr), hop = Math.round(sr / 60), skip = Math.round(sr * RC_SKIP);
-      const f0 = [], res = [], Fs = [], br = []; let n = 0, voiced = 0, air = 0, held = 0;
+      const f0 = [], res = [], Fs = [], br = [], h12 = []; let n = 0, voiced = 0, air = 0, held = 0;
       for (let end = an.needed; end <= x.length; end += hop) {
         const fr = an.analyze(x.subarray(0, end));
         if (end < skip) continue;
         n++;
-        if (fr.breath != null) br.push(fr.breath);
+        if (fr.breath != null) { br.push(fr.breath); if (Number.isFinite(fr.h1h2)) h12.push(fr.h1h2); }
         else if (!fr.breathUneven && (fr.kind === 'other' || fr.whisperF || fr.kind === 'fricative')) air++;
         if (fr.kind !== 'voiced') continue;
         voiced++; f0.push(fr.f0);
@@ -1354,7 +1371,7 @@
       st[k] = { n, voiced, held, air, f0: f0.length ? median(f0) : 0, resN: res.length,
         res: res.length ? median(res) : NaN, resIqr: res.length >= 4 ? quantile(res, 0.75) - quantile(res, 0.25) : NaN,
         F: Fs.length ? [0, 1, 2].map(i => median(Fs.map(f => f[i]))) : null,
-        breath: br.length >= 5 ? median(br) : NaN, breathN: br.length,
+        breath: br.length >= 5 ? median(br) : NaN, breathN: br.length, h1h2: h12.length >= 5 ? median(h12) : NaN,
         airy: air >= 20 && air >= 2 * br.length }; // too little tone to read, the way the live display says "mostly air"
     }
     const checks = [], add = (id, level, title, say) => checks.push({ id, level, title, say });
@@ -1395,11 +1412,17 @@
       const up = semis(hi.f0, md.f0), down = semis(md.f0, lo.f0);
       const nums = `Scores: low ${R(lo.res)} (${R(lo.f0)} Hz), everyday ${R(md.res)} (${R(md.f0)} Hz${md === st.mid ? '' : ', the repeat'}), high ${R(hi.res)} (${R(hi.f0)} Hz).`;
       const f = f23(hi, lo), rose = hi.res - lo.res;
-      const why = Math.abs(rose) >= 8 ? (Math.sign(f) === Math.sign(rose) && Math.abs(f) >= 3
+      // The score is read from the formants, and on a voice whose formants are held still it moves at most a few
+      // points from 85 to 240 Hz (synthetic sweep, 2026-11). So when F2 and F3 moved with the score, the voice's
+      // resonance changed with the note, which the score should show: one real voice's "ee" had F2 2430 Hz at 111 Hz
+      // and 2800-2900 at 175-193 Hz, and Praat measured the same. That passes, with a word on the voice.
+      const real = Math.abs(rose) >= 8 && Math.sign(f) === Math.sign(rose) && Math.abs(f) >= 3;
+      const why = Math.abs(rose) >= 8 ? (real
         ? ` Your F2 and F3 moved ${sign(R(f))}% from low to high too, so your resonance really changed with pitch: that's common (the larynx tends to rise with pitch).`
         : ` Your F2 and F3 moved only ${sign(R(f))}% from low to high, so most of that change is the app reading pitch as resonance.`) : '';
-      if (up < 3 || down < 3) add('pitch', 'warn', 'Pitch steps too small to judge', `${nums} The notes were only ${R(down)} and ${R(up)} semitones apart. Go at least 4 semitones down and up (about a third).`);
+      if (up < 3 || down < 3) add('pitch', 'warn', 'Pitch steps too small to judge', `${nums} The notes were only ${R(down)} and ${R(up)} semitones apart. Go at least 4 semitones down and 5 up.`);
       else if (range <= 8) add('pitch', 'good', "Pitch alone doesn't move the score", `${nums} Within ${R(range)} points across ${R(up + down)} semitones.`);
+      else if (real) add('pitch', 'good', 'The score follows your resonance across notes', `${nums}${why} The app reads that right: it's your voice${rose > 0 ? ' getting darker on low notes and brighter on high ones' : ' getting brighter on low notes'}. If you want your low notes as bright as your everyday ones, practise keeping the larynx up and the mouth small as you slide down (Practice: "Change pitch, keep resonance").`);
       else if (range <= 15) add('pitch', 'warn', 'Pitch moves the score a little', `${nums} A ${R(range)} point spread across ${R(up + down)} semitones.${why}`);
       else add('pitch', 'bad', 'Pitch moves the score a lot', `${nums} A ${R(range)} point spread across ${R(up + down)} semitones.${why} Compare scores at similar pitches.`);
     }
@@ -1423,15 +1446,22 @@
     else {
       const say = (b, s) => (s && s.airy ? 'no clear tone (mostly air)' : R(b));
       const nums = `Everyday ${say(clear, md)}, airy ${say(airy, ay)}, whisper ${Number.isFinite(whisper) ? say(whisper, wh) : 'not heard'}.`;
-      const whOk = Number.isFinite(whisper) && whisper >= 70;
+      const whOk = Number.isFinite(whisper) && whisper >= 78;
       const gap = airy - clear;
-      if (gap >= 15 && whOk) add('breath', 'good', 'Breathiness follows your air', `${nums} Airy read clearly above everyday, and the whisper as air.`);
-      else if (gap >= 15) add('breath', 'warn', 'Breathiness follows, whisper unclear', `${nums} Airy read above everyday, but the whisper ${Number.isFinite(whisper) ? 'still read as having some tone' : "wasn't picked up (too quiet?)"}.`);
+      // A little air shows in two places: the cepstral peak drops (the breathiness number) and the first harmonic
+      // grows against the second (H1-H2: the folds don't close fully). H1-H2 also moves with the vowel and the note,
+      // so it is only compared on the same vowel within 2 semitones. On one real voice a gentle sigh moved breathiness
+      // by 16 and H1-H2 by 8 dB.
+      const dh = !ay.airy && md.f0 && ay.f0 && Math.abs(semis(ay.f0, md.f0)) <= 2 ? ay.h1h2 - md.h1h2 : NaN;
+      const softer = gap >= 8 && dh >= 4;
+      const how = gap >= 15 ? 'Airy read clearly above everyday' : `Airy read ${R(gap)} above everyday and its tone was softer (H1-H2 ${sign(R(dh))} dB, the first harmonic louder against the second, which is what air does)`;
+      if ((gap >= 15 || softer) && whOk) add('breath', 'good', 'Breathiness follows your air', `${nums} ${how}, and the whisper as air.`);
+      else if (gap >= 15 || softer) add('breath', 'warn', 'Breathiness follows, whisper unclear', `${nums} ${how}, but the whisper ${Number.isFinite(whisper) ? 'still read as having some tone' : "wasn't picked up (too quiet?)"}.`);
       else if (gap >= 5) add('breath', 'warn', 'Breathiness follows a little', `${nums} Only ${R(gap)} points between everyday and airy. Try a much airier sound, like a sigh, with the tone still in it.`);
       else add('breath', 'bad', "Breathiness didn't follow", `${nums} The airy step didn't read airier than everyday. If you could hear the difference, the app missed it; room noise or a noise-cancelling microphone can hide air.`);
     }
     const data = Object.fromEntries(RC_STEPS.map(k => [k, st[k] && { f0: R(st[k].f0), res: Number.isFinite(st[k].res) ? R(st[k].res) : null, resN: st[k].resN,
-      F: st[k].F && st[k].F.map(R), breath: Number.isFinite(st[k].breath) ? R(st[k].breath) : null, airy: st[k].airy, voiced: st[k].voiced, n: st[k].n }]));
+      F: st[k].F && st[k].F.map(R), breath: Number.isFinite(st[k].breath) ? R(st[k].breath) : null, h1h2: Number.isFinite(st[k].h1h2) ? R(st[k].h1h2) : null, airy: st[k].airy, voiced: st[k].voiced, n: st[k].n }]));
     return { checks, vowel: v.key, data, passed: checks.filter(c => c.level === 'good').length };
   }
 
@@ -1918,7 +1948,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
