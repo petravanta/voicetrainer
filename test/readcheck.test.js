@@ -37,7 +37,20 @@ for (const k of ['a', 'i', 'u']) {
 }
 {
   const res = D.readingsCheck(steps('a', { lowRes: 0.1, highRes: 1.0 }), sr, 'a');
-  check(lv(res, 'pitch') !== 'good' && /really changed with pitch/.test(res.checks.find(c => c.id === 'pitch').say), `resonance that really rises with pitch: flagged, and put down to the voice (${lv(res, 'pitch')})`);
+  const c = res.checks.find(c => c.id === 'pitch');
+  check(lv(res, 'pitch') === 'good' && /really changed with pitch/.test(c.say) && /darker on low notes/.test(c.say), `resonance that really rises with pitch: the app read it right (passes), put down to the voice (${lv(res, 'pitch')}: ${c.title})`);
+}
+{
+  // a voice that holds its resonance still: the score holds across a low and a high note (no pitch bias)
+  const res = D.readingsCheck(steps('i', { f0: 150 }), sr, 'i');
+  const d = res.data;
+  check(lv(res, 'pitch') === 'good' && Math.abs(d.low.res - d.mid.res) <= 6 && Math.abs(d.high.res - d.mid.res) <= 6,
+    `"ee" held still at ${d.low.f0}, ${d.mid.f0} and ${d.high.f0} Hz scores ${d.low.res}, ${d.mid.res}, ${d.high.res}: low notes don't read darker`);
+}
+{
+  // a mildly airy step (a gentle sigh, not a whisper) is seen: breathiness scale 2 no longer reads every clear voice as 0
+  const res = D.readingsCheck(steps('a', { airy: 0.12 }), sr, 'a');
+  check(lv(res, 'breath') === 'good', `a mildly airy step: breathiness follows (${res.data.mid.breath} -> ${res.data.airy.breath}, ${lv(res, 'breath')})`);
 }
 {
   const res = D.readingsCheck(steps('a', { airy: 0 }), sr, 'a');
