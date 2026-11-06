@@ -1147,18 +1147,68 @@
       const ts = [];
       let m, last = 0; stamp.lastIndex = 0;
       while ((m = stamp.exec(raw)) && m.index === last) { ts.push(parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(':', '.'))); last = stamp.lastIndex; }
-      const text = raw.slice(last).replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').replace(/\s+/g, ' ').trim();
-      if (ts.length) for (const t of ts) timed.push({ t, text });
-      else if (text) plain.push({ t: null, text });
+      let text = raw.slice(last).replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '');
+      // a target melody for the line, written after it in braces: "Sweet dreams are made of this {C4 C4 D#4 C4 G3}"
+      const notes = [];
+      text = text.replace(/\{([^{}]*)\}/g, (_, n) => { notes.push(...parseNotes(n, notes.length ? notes[notes.length - 1] : null)); return ' '; });
+      text = text.replace(/\s+/g, ' ').trim();
+      const add = (o) => (notes.length ? Object.assign(o, { notes }) : o);
+      if (ts.length) for (const t of ts) timed.push(add({ t, text }));
+      else if (text) plain.push(add({ t: null, text }));
+      else if (notes.length && plain.length) { const p = plain[plain.length - 1]; p.notes = (p.notes || []).concat(notes); } // notes on their own row go with the line above
     }
     if (timed.length) {
       // LRC files use an empty stamped line for an instrumental break: keep it so the highlight can rest there
-      timed = timed.map(l => ({ t: Math.max(0, l.t - offset), text: l.text })).sort((a, b) => a.t - b.t);
+      timed = timed.map(l => Object.assign({}, l, { t: Math.max(0, l.t - offset) })).sort((a, b) => a.t - b.t);
       while (timed.length && !timed[0].text) timed.shift();
       return { timed: true, lines: timed };
     }
     return { timed: false, lines: plain };
   }
+  // Note names to MIDI numbers: "C4 D#4 Eb4 g3", sharps (#, ♯) and flats (b, ♭), separated by spaces, commas, dashes
+  // or bars. A note without an octave takes the previous note's (the first one's defaults to 4); "-" alone (a rest)
+  // and anything that isn't a note are skipped. prev: the MIDI number of the note before these, if any.
+  const NOTE_STEP = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+  function parseNotes(str, prev = null) {
+    const out = [];
+    let oct = prev != null ? Math.floor(prev / 12) - 1 : 4;
+    for (const tok of String(str || '').split(/[\s,|;/]+|(?<=\d)-(?=[a-g])/i)) {
+      const m = tok.match(/^([a-g])([#♯b♭]?)(\d)?$/i);
+      if (!m) continue;
+      if (m[3] != null) oct = +m[3];
+      const n = 12 * (oct + 1) + NOTE_STEP[m[1].toLowerCase()] + (/[#♯]/.test(m[2]) ? 1 : /[b♭]/.test(m[2]) ? -1 : 0);
+      if (n >= 24 && n <= 96) out.push(n);
+    }
+    return out;
+  }
+  // How a sung line kept to its target notes, from the notes held on it (heldNotes): seconds held on one of the
+  // line's notes (on), on one of them an octave or two away (oct: a voice singing the tune in its own octave), and
+  // on other notes (off); share = on / held; missed = the line's notes never held. Order and timing aren't checked:
+  // without the song's timing the app can't know when each note should come.
+  function melodyMatch(frames, notes) {
+    const want = new Set(notes || []), h = heldNotes(frames);
+    let on = 0, oct = 0;
+    for (const b of h.bins) {
+      if (want.has(b.midi)) on += b.secs;
+      else if ([12, 24].some(k => want.has(b.midi + k) || want.has(b.midi - k))) oct += b.secs;
+    }
+    const held = h.total, hit = new Set(h.bins.map(b => b.midi));
+    return { held, on, oct, off: held - on - oct, share: held > 0 ? on / held : null, octShare: held > 0 ? oct / held : null,
+      missed: [...want].filter(n => !hit.has(n)) };
+  }
+  // the target note nearest a pitch (Hz) among notes (MIDI), allowing whole octaves away:
+  // { midi, cents (signed, from that note in the octave sung), octaves (how many octaves the voice is from it) }
+  function nearestNote(f0, notes) {
+    if (!(f0 > 0) || !notes || !notes.length) return null;
+    const m = 12 * Math.log2(f0 / 440) + 69;
+    let best = null;
+    for (const n of new Set(notes)) {
+      const k = Math.round((m - n) / 12), c = Math.round(100 * (m - n - 12 * k));
+      if (!best || Math.abs(k) < Math.abs(best.octaves) || (Math.abs(k) === Math.abs(best.octaves) && Math.abs(c) < Math.abs(best.cents))) best = { midi: n, cents: c, octaves: k };
+    }
+    return best;
+  }
+
   // index of the line sung at time t (seconds) in timed lyrics; -1 before the first line
   function lyricLineAt(lines, t) {
     let lo = 0, hi = lines.length - 1, ans = -1;
@@ -1972,7 +2022,7 @@
     yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
-    parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
+    parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, APP_BUILT, buildLabel, newerBuild, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,

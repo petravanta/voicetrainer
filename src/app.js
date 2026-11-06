@@ -4142,7 +4142,7 @@
       this.empty = !this.lyr.lines.length;
       if (this.empty) this.lyr = { timed: false, lines: [{ t: null, text: 'Your singing' }] };
       Object.assign(this, { on: true, paused: false, frames: [], trace: [], cur: -1, started: false, offset: this.rec && this.audio ? +this.rec.offset || 0 : 0, t0: performance.now(), lastResAt: -1e9 });
-      $('sg-lines').innerHTML = this.lyr.lines.map((l, i) => `<li data-i="${i}"${l.text ? '' : ' class="gap"'}><span class="sg-t">${escapeHtml(l.text)}</span><span class="sg-badge"></span></li>`).join('');
+      $('sg-lines').innerHTML = this.lyr.lines.map((l, i) => `<li data-i="${i}"${l.text ? '' : ' class="gap"'}><span class="sg-t">${escapeHtml(l.text)}</span><span class="sg-badge"></span>${l.notes ? `<span class="sg-mel" aria-label="Target notes: ${l.notes.map(D.midiName).join(', ')}">${l.notes.map(D.midiName).join(' ')}</span>` : ''}</li>`).join('');
       $('sg-setup').hidden = true; $('sg-result').hidden = true; $('sg-stage').hidden = false;
       $('sg-nudge').hidden = !this.lyr.timed; $('sg-step').hidden = this.empty;
       $('sg-follow-btn').hidden = this.empty || !this.canFollow(this.lyr.lines.length);
@@ -4218,6 +4218,8 @@
       }
       if (r.onset) this.progress();
     },
+    // the target notes (MIDI) of the line being sung, when the lyrics give some ({C4 D4 ...} after the line)
+    lineNotes() { const l = !this.empty && this.cur >= 0 && this.lyr.lines[this.cur]; return l && l.notes ? l.notes : null; },
     // the vowels of the line being sung (D.lineVowels), for scoring; null without lyrics or on a blank line
     lineVowels() {
       const l = !this.empty && this.cur >= 0 && this.lyr.lines[this.cur];
@@ -4225,6 +4227,7 @@
       if (l.vk == null) l.vk = D.lineVowels(l.text, PRON);
       return l.vk.length ? l.vk : null;
     },
+    melodyOf(k) { return D.melodyMatch(this.frames.filter(f => f.line === k), this.lyr.lines[k].notes); },
     lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => Object.assign({}, f, { line: 0 })), 1)[0]; },
     badge(k) {
       const li = $('sg-lines').children[k]; if (!li) return;
@@ -4249,8 +4252,11 @@
       if (recent.length >= 3) {
         const f = D.median(recent), cents = Math.round(100 * (12 * Math.log2(f / 440) - Math.round(12 * Math.log2(f / 440))));
         $('sg-note').textContent = D.hzToNote(f);
-        $('sg-hz').textContent = `${Math.round(f)} Hz · ${cents > 0 ? '+' : ''}${cents}¢`;
-      } else if (!this.trace.some(p => p.f0 > 0 && now - p.t < 800)) { $('sg-note').textContent = '--'; $('sg-hz').innerHTML = '&nbsp;'; }
+        const nn = D.nearestNote(f, this.lineNotes()), tune = !nn ? '' : nn.octaves ? ` · ${D.midiName(nn.midi)} an octave ${nn.octaves > 0 ? 'up' : 'down'}`
+          : Math.abs(nn.cents) <= 50 ? ` · on ${D.midiName(nn.midi)}` : ` · ${D.midiName(nn.midi)} ${nn.cents > 0 ? '+' : ''}${nn.cents}¢`;
+        $('sg-hz').textContent = nn ? `${Math.round(f)} Hz${tune}` : `${Math.round(f)} Hz · ${cents > 0 ? '+' : ''}${cents}¢`;
+        $('sg-note').classList.toggle('on-tune', !!nn && !nn.octaves && Math.abs(nn.cents) <= 50);
+      } else if (!this.trace.some(p => p.f0 > 0 && now - p.t < 800)) { $('sg-note').textContent = '--'; $('sg-hz').innerHTML = '&nbsp;'; $('sg-note').classList.remove('on-tune'); }
       const fresh = now - this.lastResAt < 2000, v = state.meter, nd = $('sg-needle');
       $('sg-res').textContent = fresh && Number.isFinite(v) ? Math.round(v) : '--';
       nd.hidden = !(fresh && Number.isFinite(v)); if (!nd.hidden) nd.style.left = clamp(v, 0, 100) + '%';
@@ -4265,7 +4271,8 @@
       fitCanvas(cv);
       if (!this.cols) this.cols = { m: parseColor(C.masc), f: parseColor(C.fem) };
       const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = 34 * dpr;
-      const now = performance.now(), top = this.trace.some(p => p.f0 > SING_HZ[1] * 0.95) ? SING_HZ_HIGH : SING_HZ[1];
+      const now = performance.now(), want = this.lineNotes(), wantHz = want ? [...new Set(want)].map(n => 440 * Math.pow(2, (n - 69) / 12)) : [];
+      const top = this.trace.some(p => p.f0 > SING_HZ[1] * 0.95) || wantHz.some(f => f > SING_HZ[1] * 0.95) ? SING_HZ_HIGH : SING_HZ[1];
       const L = Math.log(top / SING_HZ[0]), y = (f) => h - Math.log(f / SING_HZ[0]) / L * (h - 10 * dpr) - 5 * dpr;
       g.clearRect(0, 0, w, h);
       g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = 1;
@@ -4274,6 +4281,16 @@
         g.strokeStyle = C.line; g.globalAlpha = semi ? 0.45 : 1;
         g.beginPath(); g.moveTo(axisW, y(f)); g.lineTo(w, y(f)); g.stroke(); g.globalAlpha = 1;
         if (!semi) { g.fillStyle = C.muted; g.fillText(lab + oct, axisW - 5 * dpr, y(f) + 4 * dpr); }
+      }
+      // the line's target notes: a soft band half a semitone either side, so landing inside it is on the note
+      g.textAlign = 'left';
+      let labY = -1e9; // labels go highest note first; one that would overlap the label above is left out
+      for (const f of wantHz.slice().sort((p, q) => q - p)) {
+        if (f < SING_HZ[0] || f > top) continue;
+        const y0 = y(f * Math.pow(2, 0.5 / 12)), y1 = y(f / Math.pow(2, 0.5 / 12));
+        g.fillStyle = C.accent; g.globalAlpha = 0.14; g.fillRect(axisW, y0, w - axisW, y1 - y0); g.globalAlpha = 0.8;
+        if (y0 - labY >= 11 * dpr) { g.fillText(D.hzToNote(f), axisW + 4 * dpr, y0 - 2 * dpr); labY = y0; }
+        g.globalAlpha = 1;
       }
       const sx = (w - axisW) / SING_VIEW_MS, { m, f: fm } = this.cols;
       for (const p of this.trace) {
@@ -4336,6 +4353,8 @@
         const pLo = D.quantile(f0, 0.05), pHi = D.quantile(f0, 0.95), mRes = res.length >= 8 ? D.median(res) : null;
         const scored = sum.filter(s => s.res != null && !s.shaky && lines[s.line].text && !D.instrumentalLine(lines[s.line].text));
         const worst = scored.slice().sort((a, b) => (state.goal === 'fem' ? a.res - b.res : b.res - a.res)).filter(s => !inT(s.res)).slice(0, 2);
+        // the tune, over the lines that give target notes (D.melodyMatch per line, summed)
+        const mel = this.empty || !lines.some(l => l.notes) ? null : lines.reduce((a, l, i) => { if (!l.notes) return a; const r = this.melodyOf(i); a.held += r.held; a.on += r.on; a.oct += r.oct; return a; }, { held: 0, on: 0, oct: 0 });
         const stat = (k, v, sub) => `<div class="stat"><b>${v}</b><span>${k}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
         const rows = this.empty ? '' : sum.map((s, i) => {
           const l = lines[i]; if (!l.text) return '';
@@ -4344,12 +4363,15 @@
           const bar = v != null && !inst ? `<span class="sg-bar${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}"><s style="left:${lo}%;width:${hi - lo}%"></s><i class="${inT(s.res) ? 'in' : ''}" style="width:${clamp(s.res, 2, 100)}%"></i><u style="left:${clamp(s.res - s.pm, 0, 100)}%;width:${clamp(s.res + s.pm, 0, 100) - clamp(s.res - s.pm, 0, 100)}%"></u></span><span class="n${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}">${s.shaky ? '≈' : ''}${v}</span>`
             : `<span class="why">${inst ? 'instrumental' : D.SING_WHY[s.why]}</span>`;
           const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '<span class="r">--</span>';
-          return `<li><span class="t">${escapeHtml(l.text)}</span>${bar}${rng}</li>`;
+          const mm = l.notes && this.melodyOf(i), mel = !mm ? '' : `<small class="m">${mm.held < 0.25 ? 'No notes held long enough to check the tune'
+            : `${Math.round(100 * mm.share)}% on the tune${mm.octShare >= 0.1 ? `, ${Math.round(100 * mm.octShare)}% an octave away` : ''}${mm.missed.length && mm.missed.length < new Set(l.notes).size ? ` · not held: ${mm.missed.map(D.midiName).join(' ')}` : ''}`}</small>`;
+          return `<li><span class="t">${escapeHtml(l.text)}${mel}</span>${bar}${rng}</li>`;
         }).join('');
         box.innerHTML = `<div class="section-head"><h3>${this.song && this.song.title.trim() ? escapeHtml(this.song.title.trim()) : this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
           <div class="stats">${stat('Resonance', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
           ${stat('In your target', res.length >= 8 ? Math.round(100 * res.filter(inT).length / res.length) + '%' : '--', `band ${lo} to ${hi}`)}
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
+          ${mel ? stat('On the tune', mel.held >= 1 ? Math.round(100 * mel.on / mel.held) + '%' : '--', mel.held >= 1 ? `of ${Math.round(mel.held)} s of held notes${mel.oct / mel.held >= 0.1 ? `; ${Math.round(100 * mel.oct / mel.held)}% an octave away` : ''}` : 'too few held notes') : ''}
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a solid reading was inside your target band.</p>' : ''}
           ${this.heldHtml()}
