@@ -285,6 +285,22 @@ const ovhOk = { data: [{ id: 7, title_short: 'Made Up Song', artist: { name: 'No
   check(D.youtubeUrl({ id: 'dQw4w9WgXcQ', start: 90 }) === 'https://youtu.be/dQw4w9WgXcQ?t=90' && D.youtubeUrl({ id: 'dQw4w9WgXcQ' }) === 'https://youtu.be/dQw4w9WgXcQ' && D.youtubeUrl(null) === '' && ['https://youtu.be/dQw4w9WgXcQ?t=90'].every(u => D.youtubeId(u) === 'dQw4w9WgXcQ' && D.youtubeStart(u) === 90), 'attached video link shown in the box reads back to the same video and start');
   check(D.karaokeSearchUrl('Dancing Queen', 'ABBA') === 'https://www.youtube.com/results?search_query=ABBA%20Dancing%20Queen%20karaoke' && D.karaokeSearchUrl('  ', '') === null, 'karaoke search names the artist and song');
 
+  // a target tune written in braces after a line, or on the row under it
+  check(D.parseNotes('C4 D#4 Eb g3, a - B♭3|c5').join() === '60,63,63,55,57,58,72', 'note names: sharps, flats, octave carried over, rests and separators');
+  const tl = D.parseLyrics('Sweet dreams {C4 C4 D#4}\nAre made of this\n{C4 G3}\nNo tune');
+  check(tl.lines.length === 3 && tl.lines[0].text === 'Sweet dreams' && tl.lines[0].notes.join() === '60,60,63' && tl.lines[1].notes.join() === '60,55' && !tl.lines[2].notes,
+    'lyrics: notes in braces come off the text, a row of notes goes with the line above');
+  check(D.parseLyrics('[00:01.00]Hi {A4 G4}').lines[0].notes.join() === '69,67', 'timed lyrics keep their notes');
+  const nn = D.nearestNote(131, [60, 64]);
+  check(nn.midi === 60 && nn.octaves === -1 && Math.abs(nn.cents) < 10 && D.nearestNote(262, [60, 64]).octaves === 0, 'nearest target note, an octave down named as such');
+  { // 1 s on C4, 1 s on C3 (the tune an octave down), 0.5 s on D4 (not in the tune)
+    const fr = [], put = (hz, secs) => { for (let k = 0; k < secs * 60; k++) fr.push({ f0: hz, t: fr.length * 1000 / 60 }); };
+    put(261.6, 1); put(130.8, 1); put(293.7, 0.5);
+    const m = D.melodyMatch(fr, [60, 64]);
+    check(Math.abs(m.on - 1) < 0.1 && Math.abs(m.oct - 1) < 0.1 && Math.abs(m.off - 0.5) < 0.1 && m.missed.join() === '64',
+      `tune: ${m.on.toFixed(1)} s on, ${m.oct.toFixed(1)} s an octave away, ${m.off.toFixed(1)} s off, E4 not held`);
+  }
+
   console.log(fails ? `${fails} check(s) failed` : 'all sing-along checks passed');
   process.exit(fails ? 1 : 0);
 })();
