@@ -676,6 +676,7 @@
     if (t - lastT < 14) return; // cap at ~70 analyses per second
     lastT = t;
     analyser.getFloatTimeDomainData(buf);
+    an.pitchMax = Sing.on ? D.SING_PITCH_MAX : D.PITCH_MAX; // singing reads notes up to about C6
     const fr = an.analyze(buf);
     onFrame(fr);
   }
@@ -723,6 +724,7 @@
         let score = NaN, vowel = null, ok = false, mapIt = true, fit = null;
         const cls = D.classifyVowel(F, D.VOWELS, fr.f0);
         const wv = Run.on && !gated && !d ? readingWordVowels() : null;
+        const lv = !wv && Sing.on && !gated && !d ? Sing.lineVowels() : null; // a sung line's vowels (empty without lyrics)
         if (d && d.def.vowel) {
           const v = D.VOWEL_BY_KEY[d.def.vowel];
           fit = D.scoreVowel(F, v, fr.f0);
@@ -745,6 +747,10 @@
           // "the", "of", "with": reduced in running speech, so not scored at all
         } else if (!wv && !d && fr.stable && state.held && frameCount - state.held.n <= HOLD_GAP && (fit = D.heldVowelFit(F, state.held.v, fr.f0))) {
           vowel = fit.vowel; score = score100(fit.alpha); ok = true; // still the vowel you were holding (see D.heldVowelFit)
+        } else if (lv && lv.length && (fit = D.matchWordVowel(F, lv, cls, fr.f0))) {
+          // singing: checked against the vowels of the line's words, like a reading word, so a vowel whose F1 alone
+          // is off (a soft, wide "ah", a very closed "ee") is read from F2 and F3 instead of not at all
+          vowel = fit.vowel; score = score100(fit.alpha); ok = true;
         } else if (cls.cost < 0.07 && !cls.ok) {
           unmeasured = true;
         } else if (cls.cost < 0.07) {
@@ -3546,7 +3552,7 @@
   // analysed exactly as everywhere else and each frame is filed under the lyric line being sung.
   // Nothing is saved; the summary at the end is for this song only.
   const SING_SAVED_KEY = 'vt.sing.saved'; // lyrics loaded from a search, kept for reuse (see D.lyricsCachePut)
-  const SING_KEY = 'vt.sing.lyrics', SING_SONG_KEY = 'vt.sing.song', SING_FOLLOW_KEY = 'vt.sing.follow', SING_SORT_KEY = 'vt.sing.sort', SING_VIEW_MS = 8000, SING_HZ = [70, 560]; // the pitch tracker reads up to about 500 Hz (B4)
+  const SING_KEY = 'vt.sing.lyrics', SING_SONG_KEY = 'vt.sing.song', SING_FOLLOW_KEY = 'vt.sing.follow', SING_SORT_KEY = 'vt.sing.sort', SING_VIEW_MS = 8000, SING_HZ = [70, 560], SING_HZ_HIGH = 1200; // the trace widens to SING_HZ_HIGH while high notes are on it
   const Sing = {
     on: false, paused: false, lyr: { timed: false, lines: [] }, cur: -1, frames: [], trace: [],
     audio: null, url: null, trackName: '', rec: null, recKey: null, backKeys: new Set(), started: false, base: 0, at: 0, offset: 0, t0: 0,
@@ -4212,6 +4218,13 @@
       }
       if (r.onset) this.progress();
     },
+    // the vowels of the line being sung (D.lineVowels), for scoring; null without lyrics or on a blank line
+    lineVowels() {
+      const l = !this.empty && this.cur >= 0 && this.lyr.lines[this.cur];
+      if (!l || !l.text) return null;
+      if (l.vk == null) l.vk = D.lineVowels(l.text, PRON);
+      return l.vk.length ? l.vk : null;
+    },
     lineSum(k) { return D.singSummary(this.frames.filter(f => f.line === k).map(f => Object.assign({}, f, { line: 0 })), 1)[0]; },
     badge(k) {
       const li = $('sg-lines').children[k]; if (!li) return;
@@ -4252,22 +4265,23 @@
       fitCanvas(cv);
       if (!this.cols) this.cols = { m: parseColor(C.masc), f: parseColor(C.fem) };
       const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = 34 * dpr;
-      const L = Math.log(SING_HZ[1] / SING_HZ[0]), y = (f) => h - Math.log(f / SING_HZ[0]) / L * (h - 10 * dpr) - 5 * dpr;
+      const now = performance.now(), top = this.trace.some(p => p.f0 > SING_HZ[1] * 0.95) ? SING_HZ_HIGH : SING_HZ[1];
+      const L = Math.log(top / SING_HZ[0]), y = (f) => h - Math.log(f / SING_HZ[0]) / L * (h - 10 * dpr) - 5 * dpr;
       g.clearRect(0, 0, w, h);
       g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right'; g.lineWidth = 1;
-      for (let oct = 2; oct <= 5; oct++) for (const [semi, lab] of [[0, 'C'], [7, 'G']]) {
-        const f = 440 * Math.pow(2, (12 * (oct + 1) + semi - 69) / 12); if (f < SING_HZ[0] || f > SING_HZ[1]) continue;
+      for (let oct = 2; oct <= 6; oct++) for (const [semi, lab] of [[0, 'C'], [7, 'G']]) {
+        const f = 440 * Math.pow(2, (12 * (oct + 1) + semi - 69) / 12); if (f < SING_HZ[0] || f > top) continue;
         g.strokeStyle = C.line; g.globalAlpha = semi ? 0.45 : 1;
         g.beginPath(); g.moveTo(axisW, y(f)); g.lineTo(w, y(f)); g.stroke(); g.globalAlpha = 1;
         if (!semi) { g.fillStyle = C.muted; g.fillText(lab + oct, axisW - 5 * dpr, y(f) + 4 * dpr); }
       }
-      const now = performance.now(), sx = (w - axisW) / SING_VIEW_MS, { m, f: fm } = this.cols;
+      const sx = (w - axisW) / SING_VIEW_MS, { m, f: fm } = this.cols;
       for (const p of this.trace) {
         if (!p.f0) continue;
         const x = w - (now - p.t) * sx; if (x < axisW) continue;
         if (Number.isFinite(p.res)) { const u = clamp((p.res - D.RES_AVG.masc) / (D.RES_AVG.fem - D.RES_AVG.masc), 0, 1); g.fillStyle = `rgb(${m.map((c, k) => Math.round(c + (fm[k] - c) * u)).join(',')})`; }
         else g.fillStyle = C.ink;
-        g.beginPath(); g.arc(x, y(clamp(p.f0, SING_HZ[0], SING_HZ[1])), (Number.isFinite(p.res) ? 2.6 : 1.7) * dpr, 0, 7); g.fill();
+        g.beginPath(); g.arc(x, y(clamp(p.f0, SING_HZ[0], top)), (Number.isFinite(p.res) ? 2.6 : 1.7) * dpr, 0, 7); g.fill();
       }
     },
     finish(fromStop) {
@@ -4286,9 +4300,9 @@
     heldHtml() {
       const h = D.heldNotes(this.frames);
       const secs = (v) => v >= 60 ? `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}` : `${v < 10 ? v.toFixed(1) : Math.round(v)} s`;
-      const head = `<h4 class="eyebrow"><span>Notes you held${infoHtml('About notes you held', 'Time spent on each note when you held it steady for a quarter second or more. Slides, scoops and quick passing notes are left out. The shaded band is the typical speaking range for your goal. Pitch is read up to about 500 Hz (B4), so higher notes are missing.')}</span><span>seconds per note</span></h4>`;
+      const head = `<h4 class="eyebrow"><span>Notes you held${infoHtml('About notes you held', 'Time spent on each note when you held it steady for a quarter second or more. Slides, scoops and quick passing notes are left out. The shaded band is the typical speaking range for your goal. Pitch is read up to about 1100 Hz (C6), so higher notes are missing.')}</span><span>seconds per note</span></h4>`;
       if (!h.bins.length) return `${head}<p class="small muted">No steady notes long enough to count.</p>`;
-      const [bLo, bHi] = pitchBand(), toM = (f) => 12 * Math.log2(f / 440) + 69, CEIL = 71;
+      const [bLo, bHi] = pitchBand(), toM = (f) => 12 * Math.log2(f / 440) + 69, CEIL = Math.floor(toM(D.SING_PITCH_MAX));
       let a = Math.min(h.lo, Math.floor(toM(bLo))) - 1, b = Math.max(h.hi, Math.ceil(toM(bHi))) + 1;
       while (b - a < 14) { a--; if (b - a < 14) b++; }
       const n = b - a + 1, W = 340, H = 150, L = 28, R = 4, T = 16, B = 20, cw = (W - L - R) / n, x = (m) => L + (m - a) * cw;
@@ -4340,7 +4354,7 @@
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a solid reading was inside your target band.</p>' : ''}
           ${this.heldHtml()}
           ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
-          <p class="small muted">≈ means only a few vowels were read. Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Every line gets a score once 3 vowel readings land on it; under 8 it's marked ≈ and is a rough guide. The pale band on each bar is how far the score could be off. A line with no score says why: too little voice, too high, vowels that couldn't be measured (often a nasal or buzzy sound), or no held vowel (quick words and slides). Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 500 Hz (B4); notes above that aren't tracked yet. Music from speakers in the room also mixes into the readings.")}</p>
+          <p class="small muted">≈ means only a few vowels were read. Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Every line gets a score once 3 vowel readings land on it; under 8 it's marked ≈ and is a rough guide. The pale band on each bar is how far the score could be off. A line with no score says why: too little voice, too high, vowels that couldn't be measured (often a nasal or buzzy sound), or no held vowel (quick words and slides). Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 1100 Hz (C6). Music from speakers in the room also mixes into the readings.")}</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
       box.hidden = false;

@@ -455,7 +455,15 @@
     const v = cands.includes(guess.vowel) ? guess.vowel : classifyVowel(F, cands).vowel;
     const fit = scoreVowel(F, v, f0);
     if (!(cands.includes(guess.vowel) || fit.rms < 0.085) || !fit.ok) return null;
-    return { vowel: v, alpha: fit.alpha, per: fit.per, pitchLimited: fit.pitchLimited, spread: fit.spread };
+    return { vowel: v, alpha: fit.alpha, per: fit.per, pitchLimited: fit.pitchLimited, f1Off: !!fit.f1Off, spread: fit.spread };
+  }
+  // The vowels a sung line should have: every stressed vowel of its words (linking words left out), for
+  // matchWordVowel. Sing doesn't know which word you're on, only the line, so a frame is checked against them all.
+  // -> [vowel keys], empty when the line has no word we can look up
+  function lineVowels(text, idx) {
+    const keys = new Set();
+    for (const w of String(text || '').split(/\s+/)) { const r = wordVowels(w, idx); if (r.why === 'ok') r.keys.forEach(k => keys.add(k)); }
+    return [...keys];
   }
 
   // Live coaching for a held vowel. Positions use the same 0 (male avg) .. 100 (female avg) scale
@@ -768,6 +776,11 @@
   // a higher voice's formants come out wider. Up to 700 Hz bandwidth (800 starts letting nasal misreads through)
   // and 0.10 steadiness for speech roughly double the scored frames with the same median. Drills keep 0.06.
   const VOICED_MAX_BW = 700, SPEECH_SPREAD = 0.10, WIDE_F1_BW = 1200, WIDE_F1_RANGE = [250, 1100];
+  // Pitch is read from 60 Hz up to PITCH_MAX for speech; singing goes higher (SING_PITCH_MAX, about C6).
+  const PITCH_MIN = 60, PITCH_MAX = 500, SING_PITCH_MAX = 1100;
+  // the full-rate pass (Sing only) reads from HIGH_PASS_MIN up (low enough for its octave check to see twice the
+  // period), and is asked when the first reading is unvoiced or could be an octave under a note from HIGH_PASS_FROM
+  const HIGH_PASS_MIN = 100, HIGH_PASS_FROM = 230;
 
   class Analyzer {
     constructor(sampleRate) {
@@ -786,6 +799,7 @@
       this.pitchHist = [];
       this.gap = 0;
       this.whist = []; // recent whispered-vowel formant frames
+      this.pitchMax = PITCH_MAX; // highest pitch read (Hz); Sing raises it to SING_PITCH_MAX
       this.wgap = 0;
     }
 
@@ -811,7 +825,14 @@
 
       // pitch on ~65 ms of the decimated signal
       const pn = Math.round(this.fsd * 0.065);
-      const p = yin(y.subarray(y.length - pn), this.fsd, 60, 500, 0.15);
+      let p = yin(y.subarray(y.length - pn), this.fsd, PITCH_MIN, Math.min(this.pitchMax, PITCH_MAX), 0.15);
+      // Singing: notes above the speech range. At the decimated rate a high note's period is only 10-30 samples, so
+      // its dips are shallow and YIN slips an octave down (a G4 read as G3); a second pass at the full rate (with the
+      // same octave check) reads it. Only a note of HIGH_PASS_FROM or more replaces the first reading.
+      if (this.pitchMax > PITCH_MAX && (p.aperiodicity >= 0.25 || p.f0 >= HIGH_PASS_FROM / 2)) {
+        const q = yin(x.subarray(x.length - Math.round(sr * 0.035)), sr, HIGH_PASS_MIN, this.pitchMax, 0.15);
+        if (q.aperiodicity < 0.25 && q.f0 >= HIGH_PASS_FROM) p = q;
+      }
       const voiced = p.aperiodicity < 0.25;
 
       // high-frequency balance and spectral centre of gravity at the full rate
@@ -1948,7 +1969,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
