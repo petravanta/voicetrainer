@@ -61,7 +61,8 @@ for (const fs of [44100, 48000]) for (const [f0, vk] of [[110, 'u'], [210, 'i'],
     for (let end = an.needed; end <= x.length; end += hop) { const fr = an.analyze(x.subarray(0, end)); if (fr.breath != null) b.push(fr.breath); }
     got.push(b.length > 30 ? D.median(b) : NaN);
   }
-  const ok = got[0] < 12 && got[1] > 20 && got[1] < 50 && got[2] > got[1] + 10;
+  // breathiness scale 2 (clear end 29 dB CPP): scale 1's clear < 12, light 20-50, +10 moved by 25 + 0.75 x, clear tightened
+  const ok = got[0] < 20 && got[1] > 38 && got[1] < 63 && got[2] > got[1] + 8;
   if (!ok) fails++;
   console.log((ok ? 'ok   ' : 'FAIL ') + `breathiness ${fs} Hz, ${f0} Hz "${vk}": clear ${Math.round(got[0])}, light air ${Math.round(got[1])}, breathy ${Math.round(got[2])}`);
 }

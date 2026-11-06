@@ -1431,7 +1431,7 @@
     const b = log.filter(e => e.b != null).map(e => e.b), air = log.length - b.length;
     return { b: b.length >= 5 ? D.median(b) : NaN, n: b.length, air: air >= 20 && air >= 2 * b.length };
   }
-  function breathWord(b) { return b < 15 ? 'firm' : b < 35 ? 'clear' : b < 55 ? 'light, airy' : b < 75 ? 'breathy' : 'mostly air'; }
+  function breathWord(b) { return b < 36 ? 'firm' : b < 51 ? 'clear' : b < 66 ? 'light, airy' : b < 81 ? 'breathy' : 'mostly air'; } // breathiness scale 2 (D.BREATH_SCALE)
   const breathBand = () => D.BREATH_BAND[state.goal];
   function renderBreathPanel(d) {
     const p = $('drill-panel'), def = d.def, [lo, hi] = breathBand();
@@ -2875,7 +2875,7 @@
   const unitOf = (kind) => (kind === 'prosody' ? ' st' : kind === 'whisper' ? '%' : kind === 'spotpitch' ? ' Hz' : '');
   function recordPractice(entry) {
     if (!entry) return;
-    Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score, rs: D.RES_SCALE });
+    Data.add('practice', { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: new Date(entry.at || Date.now()).toISOString(), goal: state.goal, drill: entry.id, label: entry.label, kind: entry.kind || 'sound', score: entry.score, rs: D.RES_SCALE, bs: D.BREATH_SCALE });
     renderPracticeHistory(); renderHome();
   }
   const practiceFor = (id) => Data.d.practice.filter(p => p.drill === id && p.goal === state.goal);
@@ -2987,7 +2987,7 @@
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
     const rec = {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-      at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, // resonance scale version
+      at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, bs: D.BREATH_SCALE, // resonance and breathiness scale versions
       cover: Math.round(cover * 100), partial: cover < 0.7, seconds: Math.round((Date.now() - Run.start) / 1000),
       // the whole reading's resonance; under 20 vowel readings it's rough (resShaky), with none it says why (resWhy)
       resonance: round(pool.res), resPm: pool.pm, resN: pool.n, resShaky: pool.shaky || undefined, resWhy: pool.why || undefined,
@@ -4457,13 +4457,13 @@
     KEEP: 4, MIN: 2.5, // s: analysed tail of a step; sound needed before Next is offered as done
     steps(nm) {
       return [
-        { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Use a note in the middle of your range: this is your first note, and later you'll go 4 notes below and 4 above it.` },
+        { k: 'dark', say: `Hold ${nm} as dark and big as you can: larynx low, think big dog. Use a note in the middle of your range: this is your first note, and later you'll go 4 notes below and about 7 above it.` },
         { k: 'mid', say: `Hold ${nm} in your everyday voice, on the same note.`, note: true },
         { k: 'bright', say: `Hold ${nm} as bright and small as you can: larynx high, think small dog. Same note.`, note: true },
         { k: 'low', say: `Everyday ${nm}, on a lower note: at least 4 notes down from your first.` },
-        { k: 'high', say: `Everyday ${nm}, on a higher note: at least 4 notes up from your first.` },
+        { k: 'high', say: `Everyday ${nm}, on a clearly higher note: about 7 notes up from your first (5 at least), the jump at the start of "Twinkle, twinkle".` },
         { k: 'again', say: `Everyday ${nm} on your first note, once more.`, note: true },
-        { k: 'airy', say: `Everyday ${nm} on your first note, but very airy, like a sigh. Keep some tone in it.`, note: true },
+        { k: 'airy', say: `Everyday ${nm} on your first note, with lots of air leaking through: a tired sigh with the voice still on. You should hear a hiss of breath over the note, and run out of air sooner.`, note: true },
         { k: 'whisper', say: `Whisper ${nm}: no tone at all.` },
       ];
     },
@@ -4476,13 +4476,15 @@
       if (!m.f0 && !(st.k === 'airy' && (m.air || Number.isFinite(m.breath)))) return { ok: false, say: 'Listening…' };
       if (st.note && first && m.f0 && Math.abs(semi(m.f0, first)) > 2) return { ok: false, say: `You're ${R(Math.abs(semi(m.f0, first)))} notes ${m.f0 > first ? 'above' : 'below'} your first note (${D.hzToNote(first)}): ${m.f0 > first ? 'come down' : 'go up'} a little.` };
       if (st.k === 'low' && first && semi(first, m.f0) < 4) return { ok: false, say: `${R(Math.max(0, semi(first, m.f0)))} notes below your first: go lower, 4 or more.` };
-      if (st.k === 'high' && first && semi(m.f0, first) < 4) return { ok: false, say: `${R(Math.max(0, semi(m.f0, first)))} notes above your first: go higher, 4 or more.` };
+      if (st.k === 'high' && first && semi(m.f0, first) < 5) return { ok: false, say: `${R(Math.max(0, semi(m.f0, first)))} notes above your first: go higher, about 7 (${D.hzToNote(first * Math.pow(2, 7 / 12))}).` };
       if (st.k === 'airy') {
         const clear = ref.mid && ref.mid.breath;
         if (m.air) return { ok: true, say: 'Very airy, too little tone to read. That counts. ✓' };
         if (!Number.isFinite(m.breath)) return { ok: false, say: 'Listening…' };
-        if (Number.isFinite(clear) && m.breath < clear + 15) return { ok: false, say: `Breathiness ${R(m.breath)}, everyday was ${R(clear)}: more air, like a long sigh.` };
-        return { ok: true, say: `Breathiness ${R(m.breath)}. Airy enough. ✓` };
+        // the same rule as the result (D.readingsCheck): 15 more, or 8 more with a softer tone (H1-H2 up 4 dB on the same note)
+        const softer = ref.mid && Number.isFinite(ref.mid.h1h2) && Number.isFinite(m.h1h2) && m.f0 && ref.mid.f0 && Math.abs(semi(m.f0, ref.mid.f0)) <= 2 && m.h1h2 >= ref.mid.h1h2 + 4;
+        if (Number.isFinite(clear) && m.breath < clear + 15 && !(softer && m.breath >= clear + 8)) return { ok: false, say: `Breathiness ${R(m.breath)}, everyday was ${R(clear)}: more air. Let the breath hiss through the note, like a tired sigh.` };
+        return { ok: true, say: `Breathiness ${R(m.breath)}${Number.isFinite(clear) ? `, everyday was ${R(clear)}` : ''}. Airy enough. ✓` };
       }
       if (m.resN < 8) return { ok: false, say: `${D.hzToNote(m.f0)} · no steady resonance reading yet: hold it still, with a clear tone.` };
       const at = `${D.hzToNote(m.f0)} · resonance ${R(m.res)}`;
@@ -4490,7 +4492,7 @@
       if (st.k === 'mid' && ref.dark && Number.isFinite(ref.dark.res) && m.res < ref.dark.res - 3) return { ok: false, say: `${at}: darker than your dark step (${R(ref.dark.res)}). Relax into your everyday voice.` };
       if (st.k === 'dark') { // the first note sets the low and high steps: say where they'll land, so a too-low start can be redone now
         const n = (k) => D.hzToNote(m.f0 * Math.pow(2, k / 12));
-        return { ok: true, say: `${at}. ✓ Your first note is ${D.hzToNote(m.f0)}: later you'll go down to about ${n(-4)} and up to ${n(4)}. Too low or high to reach those? Redo on a different note.` };
+        return { ok: true, say: `${at}. ✓ Your first note is ${D.hzToNote(m.f0)}: later you'll go down to about ${n(-4)} and up to ${n(7)}. Too low or high to reach those? Redo on a different note.` };
       }
       return { ok: true, say: `${at}. ✓` };
     },
@@ -4528,7 +4530,7 @@
           cur.heard = true;
           cur.chunks.push(new Float32Array(part)); cur.secs += part.length / sr;
           if (fr.kind !== 'silence') cur.lastSound = cur.secs; // pressing Next after a pause must not leave the step silent
-          const f = { t: cur.secs, s: fr.kind !== 'silence', v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, b: fr.breath, air: fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF), res: NaN };
+          const f = { t: cur.secs, s: fr.kind !== 'silence', v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, b: fr.breath, h: fr.breath != null ? fr.h1h2 : null, air: fr.breath == null && !fr.breathUneven && (fr.kind === 'other' || !!fr.whisperF), res: NaN };
           if (fr.kind === 'voiced' && fr.formants && fr.stable) { const fit = D.scoreVowel(fr.formants, v, fr.f0); if (fit.ok && fit.rms < D.HOLD_RMS) f.res = D.resScore(fit.alpha); }
           cur.frames.push(f);
         }
@@ -4539,8 +4541,9 @@
         let t1 = 0; for (let j = frames.length - 1; j >= 0; j--) if (frames[j].s) { t1 = frames[j].t; break; }
         const w = frames.filter(f => f.t > t1 - win && f.t <= t1 + 0.05);
         const f0 = w.filter(f => f.f0).map(f => f.f0), res = w.map(f => f.res).filter(Number.isFinite), br = w.map(f => f.b).filter(b => b != null);
+        const h12 = w.map(f => f.h).filter(Number.isFinite);
         const air = w.filter(f => f.air).length;
-        return { f0: f0.length >= 5 ? D.median(f0) : 0, res: res.length ? D.median(res) : NaN, resN: res.length, breath: br.length >= 5 ? D.median(br) : NaN,
+        return { f0: f0.length >= 5 ? D.median(f0) : 0, res: res.length ? D.median(res) : NaN, resN: res.length, breath: br.length >= 5 ? D.median(br) : NaN, h1h2: h12.length >= 5 ? D.median(h12) : NaN,
           air: air >= 20 && air >= 2 * br.length, voiced: w.length ? f0.length / w.length : 0 };
       };
       const segs = {};
@@ -4579,7 +4582,7 @@
         });
         if (this.stopAsked) break;
         segs[st.k] = tail(cur);
-        const m = metrics(cur.frames, this.KEEP); ref[st.k] = { f0: m.f0, res: m.res, breath: m.breath };
+        const m = metrics(cur.frames, this.KEEP); ref[st.k] = { f0: m.f0, res: m.res, breath: m.breath, h1h2: m.h1h2 };
         cur = null;
       }
       cur = null; proc.onaudioprocess = null; next.onclick = redo.onclick = null;

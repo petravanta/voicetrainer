@@ -107,5 +107,23 @@ console.log('\n# the ± widens with pitch');
   check(!D.pitchLimited(D.VOWEL_BY_KEY.i, 160) && D.pitchLimited(D.VOWEL_BY_KEY.i, 190) && !D.pitchLimited(D.VOWEL_BY_KEY.a, 300), 'F1 is set aside for "ee" above ~175 Hz, not for "ah" at 300 Hz');
 }
 
+// A closed "ee" (F1 260 Hz, under both references) at 150-170 Hz: LPC pulls F1 towards the 2nd harmonic, the
+// three-formant fit is off but not far off, and before 2026-11 it scored ~12 points darker than at 110 or 200 Hz
+// (or, in held-vowel checks, not at all). Only-F1-disagrees now kicks in from that fit (F1_OFF_FULL 0.08).
+{
+  const v = D.VOWEL_BY_KEY.i, F = [260, 2600, 3300], want = D.resScore(D.fitVowel(F, v, [0, 1, 0.8]).alpha), got = [];
+  for (const f0 of [111, 155, 160, 170, 200]) {
+    const x = S.vowel(fs, 1.5, f0, F), an = new D.Analyzer(fs), hop = Math.round(fs / 60), sc = [];
+    for (let end = an.needed; end <= x.length; end += hop) {
+      const fr = an.analyze(x.subarray(0, end));
+      if (end < fs * 0.5 || fr.kind !== 'voiced' || !fr.formants || !fr.stable) continue;
+      const fit = D.scoreVowel(fr.formants, v, fr.f0);
+      if (fit.ok && fit.rms < D.HOLD_RMS) sc.push(D.resScore(fit.alpha));
+    }
+    got.push(sc.length > 30 ? Math.round(D.median(sc)) : NaN);
+  }
+  check(got.every(g => Math.abs(g - want) <= 4), `closed "ee" (F1 260) at 111/155/160/170/200 Hz scores ${got.join(' ')} (formants say ${Math.round(want)}): no dip where F1 meets the 2nd harmonic`);
+}
+
 console.log(fails ? `\n${fails} failed` : '\nall passed');
 process.exit(fails ? 1 : 0);
