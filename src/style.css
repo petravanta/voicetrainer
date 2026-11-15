@@ -364,7 +364,13 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .breath-gauge .g-track { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 22%, transparent), color-mix(in srgb, var(--muted) 22%, transparent)); }
 
 /* vocal tract sketch */
-.pitch-fig { grid-column: 1 / -1; }
+/* Freestyle timeline: pitch, resonance and the spectrogram stacked on one clock */
+.ftl-lead { margin: -4px 0 0; }
+.ftl-live { display: grid; gap: 2px; }
+.ftl-live canvas + .ftl-lab { margin-top: 6px; }
+.ftl-lab { display: flex; align-items: center; gap: 8px; font: 11px var(--font-mono); color: var(--muted); padding-left: 40px; min-height: 18px; }
+.ftl-live .legend { margin-top: 6px; }
+.ftl-review { border-top: 0; padding-top: 0; }
 .tract-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.78rem; color: var(--muted); }
 .tract-key .ln { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--ink); vertical-align: middle; margin-right: 6px; }
 .tract-key .ln.goal { border: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--fem) 0 5px, transparent 5px 9px); }
@@ -890,3 +896,4 @@ a { color: var(--accent); }
 .hn-lab { fill: var(--muted); font: 10px var(--font-body); }
 .hn-val { fill: var(--ink); font: 600 11px var(--font-mono); }
 .hn-say { color: var(--muted); }
+.dot.nr { background: var(--muted); opacity: 0.7; }
