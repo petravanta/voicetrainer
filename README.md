@@ -41,6 +41,7 @@ Readings, practice history, settings, your own texts and Your songs (lyrics plus
 - **Vocal tract sketch**: a side view of one plausible tract shape for your formants (jaw from F1, tongue from F2, lips from F3, larynx height from the shared shift), with the goal shape and the recommended change drawn on top.
 - **Reading practice**: the reader behind Readings, with the highlight following your voice, a single-line focus track, steady-pace and tap modes, and your own texts.
 - **Demo voice settings**: voice type, pitch, resonance and brightness for the synthetic demo voice; type, pitch and speed for the reading voice.
+- **Natural or Classic practice voice** (in Demo voice settings, Natural by default): the natural voice uses a Liljencrants-Fant glottal pulse (one Rd number for pressed to breathy; Fant 1995) with cycle-to-cycle jitter (~0.6%) and shimmer (~4%), airflow noise strongest while the folds are open, pitch that settles in and wanders, formants that drift under 1% and glide through consonants, voiced sounds in a word said as one run instead of joined pieces, and a soft room on the speakers (the charts see it dry). The F1–F3 targets are the same as the classic voice, and `test/natural.test.js` reruns the analyzer tests with it: across the 12 vowels at both goals the measured formants are within 3.6% / 1.3% / 1.3% of target (classic 2.7% / 1.0% / 1.2%).
 
 Everything runs in the browser; no audio leaves your machine (except the optional Show words recognition noted above). The Sing along lyrics search sends only the typed artist and title to LRCLIB and, as a backup, lyrics.ovh (and to DuckDuckGo if you use the web search link); lyrics you load stay in your browser's local storage and are never uploaded; no lyrics are bundled with the app. An attached YouTube video is played by YouTube's embedded player, so YouTube receives that request; song files stay in your browser.
 
@@ -60,6 +61,7 @@ The footer shows which build you are running (commit and UTC build time, or `dev
 
 ```sh
 node test/dsp.test.js       # pitch/formant/scoring checks on synthetic voices
+node test/natural.test.js   # the same analyzer tests with the natural practice voice
 node test/examples.test.js  # every reference example scores on target
 node test/coach.test.js     # live coaching cues point the right way
 node test/reading.test.js   # syllable counting and tracking for reading along

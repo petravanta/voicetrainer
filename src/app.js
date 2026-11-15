@@ -499,7 +499,8 @@
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) {}
         const type = saved && (saved.type === 'masc' || saved.type === 'fem') ? saved.type : state.goal;
-        this.v = Object.assign({ type, rate: 0.95, reader: 'speech' }, DEMO_PRESETS[type], saved || {});
+        this.v = Object.assign({ type, rate: 0.95, reader: 'speech', style: 'natural' }, DEMO_PRESETS[type], saved || {});
+        Synth.setStyle(this.v.style);
       }
       return this.v;
     },
@@ -508,6 +509,7 @@
     paint() {
       const v = this.get();
       for (const t of ['fem', 'masc']) $('vd-' + t).setAttribute('aria-checked', String(v.type === t));
+      for (const t of ['natural', 'classic']) $('vd-' + t).setAttribute('aria-checked', String(v.style === t));
       $('vd-pitch').value = v.pitch; $('vd-pitch-out').textContent = v.pitch + ' Hz';
       $('vd-res').value = v.res; $('vd-res-out').textContent = Math.round(D.resScore(v.res / 100)); // stored as alpha x 100, shown on the meter's scale
       $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
@@ -517,6 +519,8 @@
     open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
     init() {
       for (const t of ['fem', 'masc']) $('vd-' + t).addEventListener('click', () => this.setType(t));
+      for (const t of ['natural', 'classic']) $('vd-' + t).addEventListener('click', () => { this.get().style = t; Synth.setStyle(t); this.save(); this.paint(); });
+      this.get(); // sets the synth style before anything is played or graded
       for (const k of ['pitch', 'res', 'bright', 'rate']) {
         $('vd-' + k).addEventListener('input', (e) => { this.get()[k] = +e.target.value; this.save(); this.paint(); });
       }
@@ -545,6 +549,8 @@
     const src = ctx.createBufferSource();
     src.buffer = ab;
     src.connect(ctx.destination);
+    // the natural voice gets a touch of room sound on the speakers only; the charts see it dry
+    if (Synth.getStyle() === 'natural') { const r = roomFor(fs); src.connect(r.input); r.output.connect(ctx.destination); exRoom = r; }
     if (state.running !== 'file' && state.running !== 'demo') src.connect(analyser); // show it on the charts
     src.onended = () => { if (exSrc === src) finishExample(); };
     exSrc = src;
@@ -553,6 +559,28 @@
     src.start();
     ensureLoop();
     setExampleUi(mode);
+  }
+  // A small, soft room: a quiet decaying noise tail (about 0.3 s) mixed in under the dry voice.
+  let exRoom = null, roomIR = null;
+  function roomFor(fs) {
+    if (!roomIR || roomIR.sampleRate !== fs) {
+      const n = Math.round(fs * 0.45), ir = ctx.createBuffer(2, n, fs);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch); let s = 12345 + ch * 777, lp = 0;
+        for (let i = 0; i < n; i++) {
+          s = (s * 48271) % 2147483647;
+          lp += 0.35 * ((s / 2147483647) * 2 - 1 - lp); // darker tail, like soft furnishings
+          d[i] = lp * Math.exp(-i / (fs * 0.07)) * Math.min(1, i / (fs * 0.004));
+        }
+        let e = 0; for (let i = 0; i < n; i++) e += d[i] * d[i];
+        const g = 1 / Math.sqrt(e || 1); for (let i = 0; i < n; i++) d[i] *= g; // unit energy
+      }
+      roomIR = ir;
+    }
+    const conv = ctx.createConvolver(), wet = ctx.createGain();
+    conv.buffer = roomIR; wet.gain.value = 0.28; // about 11 dB under the dry voice
+    conv.connect(wet);
+    return { input: conv, output: wet };
   }
   function stopExample() {
     if (!exSrc) return;
@@ -563,6 +591,7 @@
   }
   function finishExample() {
     exSrc = null; exampleEnd = performance.now();
+    if (exRoom) { const r = exRoom; exRoom = null; setTimeout(() => { try { r.output.disconnect(); } catch (e) {} }, 600); }
     if (an) an.reset();
     meterFrames = [];
     setExampleUi(null);
