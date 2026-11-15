@@ -85,5 +85,22 @@ for (const [pitch, t] of [[120, 0], [200, 1]]) {
   check(n >= 1.1 * held, `${pitch} Hz speech: ${n} vowel readings with the speech gate, ${held} with the held-vowel gate`);
   check(p.res != null && !p.shaky && Math.abs(p.res - truth) <= 4, `${pitch} Hz speech: pooled ${p.res != null ? Math.round(p.res) : '--'} ± ${p.pm}, true ${truth}`);
 }
+// ---- timeline for replay: bins from the recording's start, word starts, smoothed resonance ----
+{
+  const fr = [];
+  // 2 s at 100 frames/s from t=1000: word 0 for the first second, word 2 after (word 1 skipped by the highlight);
+  // voiced throughout, resonance 40 for 0.5 s, nothing for 0.5 s, then 70 (loose only from 1.5 s)
+  for (let k = 0; k < 200; k++) {
+    const ms = k * 10;
+    fr.push({ t: 1000 + ms, i: ms < 1000 ? 0 : 2, f0: 200, res: ms < 500 ? 40 : ms < 1000 ? NaN : 70, loose: ms >= 1500 });
+  }
+  fr.push({ t: 900, i: 0, f0: 999, res: 99 }); // before the recording started: left out
+  const tl = D.readingTimeline(fr, 1000, 4, 50);
+  check(tl.f0.length === 40 && tl.f0.every(v => v === 200), `40 bins of 50 ms, pitch 200 in each (${tl.f0.length})`);
+  check(tl.ws[0] === 0 && tl.ws[1] === 1000 && tl.ws[2] === 1000 && tl.ws[3] == null, `word starts ${JSON.stringify(tl.ws)}: a skipped word starts with the next, an unreached one has none`);
+  check(tl.res[0] === 40 && tl.res[15] == null && tl.res[25] === 70 && !tl.rough[25] && tl.rough[35] === 1, 'bin resonance: steady frames, gap, short-vowel bins marked rough');
+  check(tl.rs[13] == null && tl.rs[9] != null && tl.rs[9] > 40 === false, 'smoothed line keeps a long gap open and does not bleed across it');
+  check(Math.abs(tl.dur - 1990) <= 1, `duration ${tl.dur} ms`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall reading resonance checks passed');
 process.exit(fails ? 1 : 0);

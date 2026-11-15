@@ -669,6 +669,25 @@ a { color: var(--accent); }
 .wr-hit { fill: transparent; }
 .wr-w { cursor: pointer; outline: none; }
 .wr-w.sel .wr-hit, .wr-w:focus-visible .wr-hit { fill: var(--accent); fill-opacity: 0.1; }
+/* reading timeline: pitch dots coloured by resonance, the resonance line, playhead */
+.tl { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.tl h4 { margin: 0; }
+.tl .legend { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.tl-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tl-clock { font-family: var(--font-mono); }
+.tl-svg { cursor: pointer; }
+.tl-p.nr { fill: var(--muted); opacity: 0.6; }
+.tl-p.rz0 { fill: var(--masc); }
+.tl-p.rz1 { fill: color-mix(in srgb, var(--masc) 75%, var(--fem)); }
+.tl-p.rz2 { fill: color-mix(in srgb, var(--masc) 50%, var(--fem)); }
+.tl-p.rz3 { fill: color-mix(in srgb, var(--masc) 25%, var(--fem)); }
+.tl-p.rz4 { fill: var(--fem); }
+.tl-rline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.tl-rdot { fill: var(--accent); }
+.tl-tick { stroke: var(--line); stroke-dasharray: 2 4; }
+.tl-wtick { stroke: var(--line); }
+.tl-head { stroke: var(--ink); stroke-width: 2; pointer-events: none; }
+.wr-play { margin-left: 6px; padding-block: 2px; }
 #hist-table .hist-report { margin-right: 10px; }
 
 /* vowel map: each vowel of a passage on the F1/F2 plane, with its own score */

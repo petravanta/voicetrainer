@@ -434,6 +434,7 @@
     }
   }
   async function startMic(opts = {}) {
+    Player.pause(); // the microphone would hear a replay
     stop();
     try {
       ensureCtx();
@@ -2932,19 +2933,21 @@
   // ---------------- readings ----------------
   const Run = { on: false, text: null, maxIdx: 0, start: 0, frames: [], gates: null };
   // The reading's own audio, kept in this browser only so it can be saved (to share for troubleshooting). Never uploaded.
-  const RunAudio = { mr: null, chunks: [], blob: null, recId: null };
+  const RunAudio = { mr: null, chunks: [], blob: null, recId: null, t0: null };
   function startRunAudio(s) {
-    RunAudio.blob = null; RunAudio.recId = null; RunAudio.chunks = [];
+    RunAudio.blob = null; RunAudio.recId = null; RunAudio.chunks = []; RunAudio.t0 = null;
     if (!s || typeof MediaRecorder === 'undefined') return;
     try {
       const mr = new MediaRecorder(s, { audioBitsPerSecond: 128000 });
       mr.ondataavailable = (e) => { if (e.data && e.data.size) RunAudio.chunks.push(e.data); };
       mr.onstop = () => {
         RunAudio.blob = RunAudio.chunks.length ? new Blob(RunAudio.chunks, { type: mr.mimeType || 'audio/webm' }) : null;
-        const b = $('rd-audio'), box = $('rd-result');
-        if (b && RunAudio.blob && box.rec && box.rec.id === RunAudio.recId) b.hidden = false;
+        const id = RunAudio.recId, box = $('rd-result');
+        if (!RunAudio.blob || !id || !Replay.has(id)) return; // only a reading that was kept gets its recording kept
+        Replay.put(id, { blob: RunAudio.blob });
+        if (box.rec && box.rec.id === id && !box.hidden) wireTimeline(box, box.rec);
       };
-      mr.start(1000); RunAudio.mr = mr;
+      mr.start(1000); RunAudio.mr = mr; RunAudio.t0 = performance.now(); // the timeline counts from here
     } catch (e) { RunAudio.mr = null; }
   }
   function stopRunAudio(keepFor) {
@@ -2952,14 +2955,193 @@
     if (!keepFor) { RunAudio.blob = null; RunAudio.chunks = []; }
     if (mr && mr.state !== 'inactive') { if (!keepFor) mr.onstop = null; try { mr.stop(); } catch (e) {} }
   }
-  function saveRunAudio(rec) {
-    const b = RunAudio.blob; if (!b) return;
+  function saveRunAudio(rec, b) {
+    if (!b) return;
     const ext = /ogg/.test(b.type) ? 'ogg' : /mp4|aac/.test(b.type) ? 'm4a' : 'webm';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b);
     a.download = `voicetrainer-${(rec.title || 'reading').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${rec.at.slice(0, 16).replace(/[:T]/g, '-')}.${ext}`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  // The analysis looks at the newest buffer, so a frame's sound sits half a buffer before the moment it's read.
+  const FRAME_LAG_MS = () => (buf && ctx ? (buf.length / ctx.sampleRate) * 500 : 0);
+  // ---- replay: each reading's recording and timeline, kept in this browser only (IndexedDB), never synced ----
+  // Only the last REPLAY_KEEP readings keep theirs. When IndexedDB isn't there (private windows in some
+  // browsers), they last until the page is closed.
+  const REPLAY_KEEP = 10;
+  const Replay = {
+    mem: new Map(), db: null,
+    open() {
+      if (this.db) return this.db;
+      this.db = new Promise((res) => {
+        try {
+          const rq = indexedDB.open('voicetrainer-replay', 1);
+          rq.onupgradeneeded = () => rq.result.createObjectStore('r', { keyPath: 'id' }).createIndex('at', 'at');
+          rq.onsuccess = () => res(rq.result); rq.onerror = () => res(null); rq.onblocked = () => res(null);
+        } catch (e) { res(null); }
+      });
+      return this.db;
+    },
+    has(id) { return this.mem.has(id); },
+    async put(id, part) {
+      const cur = Object.assign(this.mem.get(id) || { id }, part); this.mem.set(id, cur);
+      const db = await this.open(); if (!db || !cur.at) return;
+      try {
+        const tx = db.transaction('r', 'readwrite'), st = tx.objectStore('r');
+        st.put(cur);
+        const cn = st.count();
+        cn.onsuccess = () => {
+          let extra = cn.result - REPLAY_KEEP; if (extra <= 0) return;
+          st.index('at').openKeyCursor().onsuccess = (e) => { const c = e.target.result; if (!c || extra-- <= 0) return; st.delete(c.primaryKey); this.mem.delete(c.primaryKey); c.continue(); };
+        };
+      } catch (e) {}
+    },
+    async get(id) {
+      if (this.mem.has(id)) return this.mem.get(id);
+      const db = await this.open(); if (!db) return null;
+      return new Promise((res) => {
+        try { const rq = db.transaction('r').objectStore('r').get(id); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); } catch (e) { res(null); }
+      });
+    },
+    async forget(id) {
+      this.mem.delete(id);
+      const db = await this.open(); if (!db) return;
+      try { db.transaction('r', 'readwrite').objectStore('r').delete(id); } catch (e) {}
+    },
+  };
+  // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
+  // (a browser's own recordings often can't be seeked in an audio element).
+  const Player = {
+    ac: null, buf: null, src: null, id: null, at0: 0, off: 0, playing: false, raf: 0, onTick: null, onState: null,
+    async load(id, blob) {
+      if (this.id === id && this.buf) return true;
+      this.stop(); this.id = id; this.buf = null;
+      try {
+        this.ac = this.ac || new (window.AudioContext || window.webkitAudioContext)();
+        const data = await blob.arrayBuffer();
+        const b = await new Promise((res, rej) => { const p = this.ac.decodeAudioData(data, res, rej); if (p && p.catch) p.catch(rej); });
+        if (this.id !== id) return false;
+        this.buf = b; this.off = 0; return true;
+      } catch (e) { if (this.id === id) this.id = null; return false; }
+    },
+    get dur() { return this.buf ? this.buf.duration : 0; },
+    pos() { return this.playing ? Math.min(this.dur, this.ac.currentTime - this.at0) : this.off; },
+    play(from, until) { // until: seconds to stop at (one word), or play on to the end
+      if (!this.buf) return;
+      this.halt(); this.until = until || null;
+      const at = clamp(from != null ? from : this.off >= this.dur - 0.05 ? 0 : this.off, 0, Math.max(0, this.dur - 0.01));
+      if (this.ac.state === 'suspended') this.ac.resume();
+      const s = this.ac.createBufferSource(); s.buffer = this.buf; s.connect(this.ac.destination);
+      s.onended = () => { if (this.src === s) { this.off = this.pos(); this.src = null; this.playing = false; this.tick(); if (this.onState) this.onState(); } };
+      s.start(0, at); this.src = s; this.at0 = this.ac.currentTime - at; this.playing = true;
+      if (this.onState) this.onState();
+      const loop = () => { if (!this.playing) return; if (this.until && this.pos() >= this.until) return this.pause(); this.tick(); this.raf = requestAnimationFrame(loop); };
+      this.raf = requestAnimationFrame(loop);
+    },
+    halt() { if (this.src) { const s = this.src; this.src = null; try { s.onended = null; s.stop(); } catch (e) {} } cancelAnimationFrame(this.raf); },
+    pause() { if (!this.playing) return; this.off = this.pos(); this.halt(); this.playing = false; this.tick(); if (this.onState) this.onState(); },
+    seek(t) { if (this.playing) this.play(t); else { this.off = clamp(t, 0, this.dur); this.tick(); } },
+    tick() { if (this.onTick) this.onTick(this.pos()); },
+    stop() { this.halt(); this.playing = false; this.off = 0; this.onTick = null; this.onState = null; },
+  };
+  const clockOf = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const TL_PX_S = 70; // timeline pixels per second of reading: room for a word label most of the time
+  // The reading over time: pitch dots coloured by resonance (as in Sing), the resonance line with its goal band,
+  // and each word where the highlight reached it. Built from the stored timeline, with or without the recording.
+  function timelineSvg(rec, tl) {
+    const [lo, hi] = target(), [plo, phi] = pitchBand(), n = tl.f0.length, bw = tl.bin / 1000 * TL_PX_S;
+    const L = 6, W = Math.ceil(L + n * bw + 40), x = (ms) => L + ms / 1000 * TL_PX_S;
+    const ps = tl.f0.filter(v => v > 0);
+    const pmin = Math.max(50, Math.min(plo, ps.length ? D.quantile(ps, 0.03) : plo) - 15), pmax = Math.max(phi, ps.length ? D.quantile(ps, 0.97) : phi) + 15;
+    const TT = 12, PT = 34, PH = 80, RT = PT + PH + 30, RH = 64, LT = RT + RH + 22, H = LT + 24;
+    const py = (v) => PT + (1 - (clamp(v, pmin, pmax) - pmin) / (pmax - pmin)) * PH, ry = (v) => RT + (1 - clamp(v, 0, 100) / 100) * RH;
+    const f1 = (v) => v.toFixed(1);
+    let g = `<rect class="wr-band" x="0" y="${f1(py(phi))}" width="${W}" height="${f1(py(plo) - py(phi))}"/>`
+      + `<rect class="wr-band" x="0" y="${f1(ry(Math.min(hi, 100)))}" width="${W}" height="${f1(ry(lo) - ry(Math.min(hi, 100)))}"/>`
+      + `<line class="wr-axis" x1="0" x2="${W}" y1="${RT + RH}" y2="${RT + RH}"/>`;
+    // time ticks every 5 seconds
+    for (let s = 0; s * 1000 <= tl.dur; s += 5) g += `<line class="tl-tick" x1="${f1(x(s * 1000))}" x2="${f1(x(s * 1000))}" y1="${TT + 4}" y2="${LT - 12}"/><text class="wr-lane" x="${f1(x(s * 1000) + 3)}" y="${TT}">${clockOf(s)}</text>`;
+    // pitch, each dot coloured from the darker to the brighter average by the resonance heard there
+    tl.f0.forEach((f, i) => {
+      if (!f) return;
+      const r = tl.rs[i], u = r != null ? Math.round(clamp((r - D.RES_AVG.masc) / (D.RES_AVG.fem - D.RES_AVG.masc), 0, 1) * 4) : -1;
+      g += `<circle class="tl-p ${u < 0 ? 'nr' : 'rz' + u}" cx="${f1(x((i + 0.5) * tl.bin))}" cy="${f1(py(f))}" r="${u < 0 ? 1.6 : 2.4}"/>`;
+    });
+    // resonance, broken where no vowel was read
+    let run = [];
+    const flush = () => { if (run.length > 1) g += `<polyline class="tl-rline" points="${run.join(' ')}"/>`; else if (run.length) { const [cx, cy] = run[0].split(','); g += `<circle class="tl-rdot" cx="${cx}" cy="${cy}" r="2"/>`; } run = []; };
+    tl.rs.forEach((r, i) => { if (r != null) run.push(`${f1(x((i + 0.5) * tl.bin))},${f1(ry(r))}`); else flush(); });
+    flush();
+    // words: a tick where each started, labels on two rows, a label left out when it would overlap
+    const end = [-1e9, -1e9], words = rec.byWord || [];
+    (tl.ws || []).forEach((ms, k) => {
+      if (ms == null || !words[k]) return;
+      const t = words[k][0], wx = x(ms), row = k % 2, w = t.length * 6.6 + 6;
+      g += `<line class="tl-wtick" x1="${f1(wx)}" x2="${f1(wx)}" y1="${LT - 12}" y2="${LT - 5 + row * 13}"/>`;
+      if (wx > end[row]) { g += `<text class="wr-word${D.wordVowels(t, PRON).why === 'function' ? ' fn' : ''}" x="${f1(wx + 2)}" y="${LT + 5 + row * 13}">${escapeHtml(t)}</text>`; end[row] = wx + w; }
+    });
+    g += `<text class="wr-lane" x="${L}" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="${L}" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
+    // the lane names again every 15 s, so a phone scrolled along still says which lane is which
+    for (let s = 15; s * 1000 < tl.dur - 2000; s += 15) g += `<text class="wr-lane" x="${f1(x(s * 1000) + 4)}" y="${PT - 8}">Pitch</text><text class="wr-lane" x="${f1(x(s * 1000) + 4)}" y="${RT - 8}">Resonance</text>`;
+    g += `<line class="tl-head" x1="${L}" x2="${L}" y1="${TT + 4}" y2="${H}" visibility="hidden"/>`;
+    return { svg: `<svg class="wr-svg tl-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Pitch and resonance through the reading">${g}</svg>`, x, L };
+  }
+  // Fills the reading's timeline once its stored data is found, and the player when the recording is there too.
+  async function wireTimeline(box, rec) {
+    const el = box.querySelector('#rd-tl'); if (!el) return;
+    const got = await Replay.get(rec.id);
+    if (box.rec !== rec || !got || !got.tl || !got.tl.f0.length) return;
+    const tl = got.tl, blob = got.blob || null, view = timelineSvg(rec, tl);
+    el.hidden = false;
+    el.innerHTML = `<div class="section-head"><h4>Timeline${infoHtml('About the timeline', `Your reading from start to end. Dots are your pitch, coloured from darker to brighter resonance; the line below is your resonance, smoothed over a quarter second, and breaks where no vowel could be read. Words sit where the highlight reached them, which can trail your voice a little. ${blob ? `Tap anywhere to hear the reading from there, or pick a word in Word by word and choose Hear this word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played.'}`)}</h4>
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span></span></div>
+      ${blob ? `<div class="tl-ctl"><button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span></div>` : ''}
+      <div class="wr-scroll tl-scroll">${view.svg}</div>
+      <p class="small" id="tl-read" aria-live="polite">${blob ? 'Tap the timeline to play from that moment.' : 'Tap the timeline for the numbers at that moment.'}</p>`;
+    const svg = el.querySelector('svg'), scroll = el.querySelector('.tl-scroll'), head = svg.querySelector('.tl-head'), read = el.querySelector('#tl-read');
+    const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - view.L) / TL_PX_S * 1000, 0, tl.dur); };
+    const wordAt = (ms) => { let k = -1; (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
+    const say = (ms) => {
+      const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = rec.byWord && rec.byWord[k];
+      // the nearest pitch and resonance within a tenth of a second, so a tap between dots still reads
+      let f = 0, r = null;
+      for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
+      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · “${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
+    };
+    const place = (ms, follow) => {
+      const hx = view.x(ms); head.setAttribute('x1', hx.toFixed(1)); head.setAttribute('x2', hx.toFixed(1)); head.setAttribute('visibility', 'visible');
+      if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
+    };
+    if (!blob) {
+      svg.addEventListener('click', (ev) => { const ms = msAt(ev); place(ms, false); read.innerHTML = say(ms); });
+      return;
+    }
+    const btn = el.querySelector('#tl-play'), clk = el.querySelector('#tl-clock');
+    const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
+    const ok = await Player.load(rec.id, blob);
+    if (box.rec !== rec) return;
+    if (!ok) { btn.remove(); clk.textContent = "This browser couldn't open the recording to play it. Save audio still works."; return; }
+    const last = { s: -1 };
+    const paint = () => { btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
+    const hook = () => {
+      Player.onTick = (s) => {
+        place(s * 1000, Player.playing); clk.textContent = `${clockOf(s)} / ${clockOf(Player.dur)}`;
+        if (Math.abs(s - last.s) > 0.1 || !Player.playing) { last.s = s; read.innerHTML = say(s * 1000); }
+      };
+      Player.onState = paint;
+    };
+    hook(); btn.disabled = false; clk.textContent = `0:00 / ${clockOf(Player.dur)}`; paint();
+    btn.onclick = () => { if (Player.id !== rec.id) return; hook(); Player.playing ? Player.pause() : Player.play(); };
+    svg.addEventListener('click', (ev) => { if (Player.id !== rec.id) return; hook(); Player.play(msAt(ev) / 1000); });
+    box.cue = {
+      canPlay: (i) => tl.ws && tl.ws[i] != null && Player.id === rec.id,
+      word: (i) => {
+        hook();
+        const nx = tl.ws.slice(i + 1).find(v => v != null), to = (nx != null ? nx : tl.dur) + 250;
+        Player.play(Math.max(0, tl.ws[i] - 150) / 1000, to / 1000);
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
+    };
   }
   function startReading(id) {
     endSpots();
@@ -2970,6 +3152,7 @@
   }
   function beginRun() {
     const t = Reader.current; if (!t) return;
+    Player.stop();
     Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now(); Run.frames = [];
     Run.gates = { voiced: 0, formants: 0, steady: 0, scored: 0, loose: 0, refused: 0 };
     stopRunAudio(); if (stream && state.running === 'mic') startRunAudio(stream);
@@ -3007,6 +3190,9 @@
       gates: Run.gates || undefined, // how many voiced moments passed each step, for "How word by word works"
       byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)].concat(w.rough && w.r != null ? [1] : [])),
     };
+    // the timeline is cut from the frames before endRun clears them; it counts from the recording's start
+    const t0 = RunAudio.mr && RunAudio.t0 != null ? RunAudio.t0 : (Run.frames.length ? Run.frames[0].t : 0);
+    const tl = D.readingTimeline(Run.frames.map(f => (f.t != null ? Object.assign({}, f, { t: f.t - FRAME_LAG_MS() }) : f)), t0, Reader.words.length);
     stopRunAudio(rec.id);
     endRun();
     Reader.hide();
@@ -3015,6 +3201,7 @@
       showReadingResult(null, 'Not enough voice was heard to score that reading, so nothing was saved. Check that the microphone is on and read a little louder.');
     } else {
       Data.add('readings', rec);
+      Replay.put(rec.id, { at: rec.at, tl });
       // the weakest sounds become suggested exercises in Practice
       const steps = buildPlan(st);
       if (steps.length) { state.plan = { status: 'offer', source: 'reading', steps, idx: 0 }; renderPlan(); }
@@ -3039,7 +3226,8 @@
     return `<small>${D.SING_WHY[rec.resWhy]}${more ? infoHtml('Why no resonance', more) : ''}</small>`;
   }
   function showReadingResult(rec, msg) {
-    const box = $('rd-result'); box.hidden = false; box.rec = rec;
+    const box = $('rd-result'); box.hidden = false; box.rec = rec; box.cue = null;
+    Player.stop();
     if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
     const prev = fullReadings(rec.text).filter(r => r.id !== rec.id && r.at < rec.at);
     const last = prev.at(-1), best = prev.reduce((m, r) => (r.resonance != null && (m == null || better(r.resonance, m)) ? r.resonance : m), null);
@@ -3059,18 +3247,19 @@
       ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
       ${focusHtml(rec, spots)}
       ${vowelMapHtml(rec)}
+      <div class="tl" id="rd-tl" hidden></div>
       ${wordReportHtml(rec, spots)}
-      <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-audio"${RunAudio.blob && RunAudio.recId === rec.id ? '' : ' hidden'}>Save audio</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
+      <div class="btn-row"><button type="button" class="btn sm" id="rd-again">Read it again</button><button type="button" class="btn sm ghost" id="rd-discard">Discard this reading</button><button type="button" class="btn sm ghost" id="rd-audio" hidden>Save audio</button><button type="button" class="btn sm ghost" id="rd-close">Close</button></div>`;
     wireWordReport(box, rec);
+    wireTimeline(box, rec);
     wireFocus(box, rec, spots);
     box.querySelectorAll('[data-weak], [data-vm]').forEach(b => b.addEventListener('click', () => { const def = DRILLS.vowels.find(d => d.vowel === (b.dataset.weak || b.dataset.vm)); if (def) openDrill(def); }));
-    $('rd-again').onclick = () => { box.hidden = true; startReading(rec.text); };
-    $('rd-audio').onclick = () => saveRunAudio(rec);
-    $('rd-close').onclick = () => { box.hidden = true; };
+    $('rd-again').onclick = () => { box.hidden = true; Player.stop(); startReading(rec.text); };
+    $('rd-close').onclick = () => { box.hidden = true; Player.stop(); };
     $('rd-discard').onclick = (e) => {
       const b = e.currentTarget;
       if (!b.dataset.confirm) { b.dataset.confirm = '1'; b.textContent = 'Discard: tap again'; return; }
-      Data.remove('readings', rec.id); box.hidden = true; renderReadings(); renderHome();
+      Data.remove('readings', rec.id); Replay.forget(rec.id); Player.stop(); box.hidden = true; renderReadings(); renderHome();
     };
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -3351,6 +3540,11 @@
       g.classList.add('sel');
       const [t, p, r, s, rough] = rec.byWord[+g.dataset.i];
       read.innerHTML = `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
+      // with the recording on hand, the word can be heard from the timeline
+      if (box.cue && box.cue.canPlay(+g.dataset.i)) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'btn sm ghost wr-play'; b.textContent = '▶ Hear this word';
+        b.onclick = () => box.cue.word(+g.dataset.i); read.append(' ', b);
+      }
     };
     svg.querySelectorAll('.wr-w').forEach(g => {
       g.addEventListener('click', () => pick(g));
@@ -3424,7 +3618,7 @@
       del.type = 'button'; del.textContent = 'Delete';
       del.addEventListener('click', () => {
         if (!del.dataset.confirm) { del.dataset.confirm = '1'; del.textContent = 'Confirm delete'; return; }
-        Data.remove('readings', r.id); renderReadings(); renderHome();
+        Data.remove('readings', r.id); Replay.forget(r.id); renderReadings(); renderHome();
       });
       td.appendChild(del); tr.appendChild(td); tb.appendChild(tr);
     }
