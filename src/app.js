@@ -298,14 +298,20 @@
   // ---- recognised words over the pitch track (browser speech recognition, mic only) ----
   const Words = {
     KEY: 'voicetrainer.pitchwords', CONSENT: 'voicetrainer.speechconsent', on: false, rec: null, labels: [], lastT: 0, interim: [], note: '', readerIdx: -1,
+    // Check words (reading practice): the same recognition, writing down what was said so missed passage words can be marked
+    READ_KEY: 'voicetrainer.readwords', readOn: false, heard: [], heardLive: '', ran: false, pending: 'show',
     supported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
     init() {
       const box = $('pitch-words'); if (!box) return;
       try { this.on = localStorage.getItem(this.KEY) === '1' && this.consented(); } catch (e) {}
+      try { this.readOn = localStorage.getItem(this.READ_KEY) === '1' && this.consented(); } catch (e) {}
       box.checked = this.on;
+      const rb = $('reader-words');
+      if (rb) { rb.hidden = !this.supported(); rb.addEventListener('click', () => { if (!this.readOn && !this.consented()) { this.pending = 'read'; this.ask(); } else this.setRead(!this.readOn); }); }
+      this.paintRead();
       box.addEventListener('change', () => {
         // recognition sends audio off the device, so it needs an explicit opt-in first
-        if (box.checked && !this.consented()) { box.checked = false; this.ask(); return; }
+        if (box.checked && !this.consented()) { box.checked = false; this.pending = 'show'; this.ask(); return; }
         this.set(box.checked);
       });
       const dlg = $('speech-consent');
@@ -313,11 +319,12 @@
         if (dlg.returnValue !== 'yes') return;
         try { localStorage.setItem(this.CONSENT, '1'); } catch (e) {}
         this.consentNow = true;
-        this.set(true);
+        if (this.pending === 'read') this.setRead(true); else this.set(true);
       });
       $('pw-withdraw').addEventListener('click', () => {
         try { localStorage.removeItem(this.CONSENT); } catch (e) {}
         this.consentNow = false;
+        this.readOn = false; try { localStorage.setItem(this.READ_KEY, '0'); } catch (e) {} this.paintRead();
         this.set(false);
         this.setNote('Consent withdrawn. Speech recognition is off and will ask again before it is used.');
       });
@@ -332,13 +339,26 @@
       try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {}
       this.sync();
     },
+    setRead(on) {
+      this.readOn = on && this.consented();
+      try { localStorage.setItem(this.READ_KEY, this.readOn ? '1' : '0'); } catch (e) {}
+      this.paintRead(); this.sync();
+    },
+    paintRead() { const b = $('reader-words'); if (b) { b.textContent = this.readOn ? 'Check words on' : 'Check words off'; b.setAttribute('aria-pressed', String(this.readOn)); b.title = 'Mark passage words you skipped, using your browser\'s speech recognition (online)'; } },
+    // a new reading starts: forget what was heard before it
+    resetHeard() { this.heard = []; this.heardLive = ''; this.ran = !!this.rec; },
+    // what was heard during this reading, as words, or null when the word check wasn't running
+    said() {
+      if (!this.readOn || !this.ran) return null;
+      return (this.heard.join(' ') + ' ' + this.heardLive).split(/\s+/).filter(Boolean);
+    },
     setNote(t) { const n = $('pitch-words-note'); if (n) { n.textContent = t; n.hidden = !t; } const pv = $('pitch-words-privacy'); if (pv) pv.hidden = !this.on; },
     // Run recognition only while the switch is on and the microphone is live.
     sync() {
       // In reading practice the words come from the passage itself (the highlighted word), so
       // recognition is not needed there.
       const reading = typeof Reader !== 'undefined' && Reader.open && !Reader.collapsed;
-      const want = this.on && this.consented() && state.running === 'mic' && !reading && this.supported();
+      const want = (reading ? this.readOn : this.on) && this.consented() && state.running === 'mic' && this.supported();
       if (want && !this.rec) this.start();
       else if (!want && this.rec) this.stop();
       if (!reading) this.readerIdx = -1;
@@ -354,10 +374,13 @@
       this.rec = r; this.lastT = performance.now(); this.interim = '';
       r.onresult = (e) => {
         let interim = '';
+        const reading = Reader.open && !Reader.collapsed;
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const res = e.results[i], text = res[0].transcript.trim();
+          if (reading) { if (!Run.on) continue; this.ran = true; if (res.isFinal) this.heard.push(text); else interim += ' ' + text; continue; }
           if (res.isFinal) this.place(text); else interim += ' ' + text;
         }
+        if (reading) { this.heardLive = interim.trim(); return; }
         // words still being recognised show straight away (faded) and firm up when final
         this.interim = D.placeWords(interim.trim().split(/\s+/).filter(Boolean), this.voicedSince(this.lastT));
       };
@@ -366,7 +389,7 @@
         else if (e.error === 'network') this.setNote('Speech recognition needs an internet connection in this browser.');
       };
       r.onend = () => { if (this.rec === r) { if (this.on && state.running === 'mic') { try { r.start(); } catch (err) { this.rec = null; } } else this.rec = null; } };
-      try { r.start(); this.setNote(''); } catch (err) { this.rec = null; }
+      try { r.start(); this.setNote(''); if (Run.on) this.ran = true; } catch (err) { this.rec = null; }
     },
     stop() { const r = this.rec; this.rec = null; this.interim = []; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
     voicedSince(t) { const times = []; for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > t) times.push(pitchT[i]); return times; },
@@ -3144,25 +3167,27 @@
     const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
     spans.forEach((sp, k) => {
       if (!sp || !words[k]) return;
-      const [t, p, r, , rough] = words[k], x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2;
-      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
+      let [t, p, r, , rough] = words[k]; const x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2, miss = wordGone(rec, k) === 'miss';
+      if (miss) p = r = null;
+      const tip = miss ? `${t}: ${noResWhy(t, p, 'miss')}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, wordGone(rec, k))}`;
       g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
         + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
         + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
         + (p != null ? `<rect class="tl-wp${pitchOff(p) ? ' off' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wpy(p) - 2)}" width="${f1(wd)}" height="4" rx="2"/>` : '')
         + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wry(r))}" width="${f1(wd)}" height="${f1(Math.max(3, bot('wr') - wry(r)))}" rx="2"/>`
-          : fn ? '' : `<g class="wr-none"><circle cx="${f1(cx)}" cy="${bot('wr') - 7}" r="4"/><line x1="${f1(cx - 3)}" y1="${bot('wr') - 4}" x2="${f1(cx + 3)}" y2="${bot('wr') - 10}"/></g>`)
+          : miss ? missGlyph(cx, bot('wr') - 11) : fn ? '' : `<g class="wr-none"><circle cx="${f1(cx)}" cy="${bot('wr') - 7}" r="4"/><line x1="${f1(cx - 3)}" y1="${bot('wr') - 4}" x2="${f1(cx + 3)}" y2="${bot('wr') - 10}"/></g>`)
         + '</g>';
       const row = k % 2, lw = t.length * 6.6 + 6;
-      if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
+      if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
     });
     g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
     return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram and each word through the reading, on one time line">${g}</svg>`, x, L, W };
   }
   // The numbers for one word of a reading, for the line under a chart.
   function wordReadout(rec, i) {
-    const [t, p, r, s, rough] = rec.byWord[i];
-    return `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
+    const [t, p, r, s, rough] = rec.byWord[i], gone = wordGone(rec, i);
+    if (gone === 'miss' || gone === 'end') return `<b>${escapeHtml(t)}</b>: ${noResWhy(t, p, gone)}`;
+    return `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p, gone)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
   }
   const TLSpec = { id: null, spec: null }; // the last recording's spectrogram, so reopening it is instant
   // Fills the reading's timeline once its stored data is found, and the player and spectrogram when the recording is there too.
@@ -3298,6 +3323,7 @@
     const t = Reader.current; if (!t) return;
     Player.stop();
     Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now(); Run.frames = [];
+    Words.resetHeard();
     Run.gates = { voiced: 0, formants: 0, steady: 0, scored: 0, loose: 0, refused: 0 };
     stopRunAudio(); if (stream && state.running === 'mic') startRunAudio(stream);
     session = newSession();
@@ -3318,6 +3344,8 @@
     const t = Run.text, st = sessionStats(session), pool = D.pooledResonance(Run.frames);
     const cover = Reader.words.length ? clamp((Run.maxIdx + 1) / Reader.words.length, 0, 1) : 0;
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
+    const mw = D.missedWords(Run.frames, Reader.words.length), said = Words.said();
+    const sm = said ? D.matchScript(Reader.words.map(w => w.text), said) : null, reach = Math.max(mw.reach, sm ? sm.last : -1);
     const rec = {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, bs: D.BREATH_SCALE, // resonance and breathiness scale versions
@@ -3332,6 +3360,11 @@
       // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
       vmap: readingVowelMap(st.map, Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
       gates: Run.gates || undefined, // how many voiced moments passed each step, for "How word by word works"
+      // Check words: script words the speech recogniser didn't hear (indices); without it, none (missBy says which)
+      miss: sm && sm.miss.length ? sm.miss : undefined, missBy: sm ? (sm.lost ? 'lost' : 'speech') : undefined,
+      // words the highlight passed with no voice on them (a reason for no reading, not proof of a skip),
+      // and the last word reached when the reading stopped early
+      skip: mw.miss.length ? mw.miss : undefined, reach: reach >= 0 && reach < Reader.words.length - 1 ? reach : undefined,
       byWord: D.wordReport(Run.frames, Reader.words.length).map((w, i) => [Reader.words[i].text, w.p != null ? Math.round(w.p) : null, round(w.r), round(w.s)].concat(w.rough && w.r != null ? [1] : [])),
     };
     // the timeline is cut from the frames before endRun clears them; it counts from the recording's start
@@ -3468,7 +3501,10 @@
   // ---- word by word: pitch and resonance under each word of the passage ----
   // The highlight follows the voice by counting syllables, so a word's numbers can spill into its neighbours.
   // why a word of a reading has no resonance, in a few words (a missing score is never drawn as a low one)
-  function noResWhy(text, pitch) {
+  function noResWhy(text, pitch, gone) {
+    if (gone === 'miss') return 'possibly missed, the word check did not hear it';
+    if (gone === 'skip' && pitch == null) return 'the highlight passed it without hearing your voice on it';
+    if (gone === 'end') return 'not reached, the reading stopped before it';
     const wv = D.wordVowels(text, PRON);
     if (wv.why === 'function') return 'short linking word, not scored';
     if (pitch == null) return 'too little voice heard';
@@ -3479,6 +3515,25 @@
     if (!g || !g.voiced) return '';
     const pc = (n) => Math.round(100 * n / g.voiced) + '%';
     return ` In this reading: ${g.voiced} voiced moments; ${pc(g.formants)} gave formants, ${pc(g.steady)} held still, ${pc(g.scored)} got a reading${g.loose ? ` (plus ${pc(g.loose)} from short vowels)` : ''}${g.refused ? `, ${pc(g.refused)} were refused as unmeasurable` : ''}. Few readings? The microphone and voice check in Settings shows whether the microphone or the voice is the limit.`;
+  }
+  // whether word i of a reading was possibly missed ('miss') or never reached ('end'); readings before 2026-11-15 have neither
+  function wordGone(rec, i) {
+    if (rec.miss && rec.miss.includes(i)) return 'miss';
+    if (rec.reach != null && i > rec.reach) return 'end';
+    return rec.skip && rec.skip.includes(i) ? 'skip' : null;
+  }
+  // the dashed empty slot drawn for a possibly missed word, centred on x with its top at y
+  const missGlyph = (x, y) => `<rect class="wr-miss" x="${(x - 7).toFixed(1)}" y="${y}" width="14" height="9" rx="3"/>`;
+  const MISS_KEY = '<svg class="wr-key-miss" width="14" height="10" viewBox="0 0 14 10" aria-hidden="true"><rect x="1" y="1" width="12" height="8" rx="3"/></svg>';
+  // one line naming the possibly missed words, with how they're found behind a badge
+  const MISS_HOW = "With Check words on, your browser's speech recognition writes down what you said, and the app lines that up with the passage. A passage word with nothing in its place is marked possibly missed. A word heard as something else isn't marked, because recognisers often mishear names and unusual words, and the words after the last one heard count as not reached. Recognition can still drop a word you did say, so take it as a hint to check that bit.";
+  function missLineHtml(rec) {
+    if (rec.missBy === 'speech' && !(rec.miss && rec.miss.length)) return `<p class="small wr-missline">${MISS_KEY}Word check: every word of the passage was heard${rec.reach != null ? ' up to where you stopped' : ''}.${infoHtml('How missed words are found', MISS_HOW)}</p>`;
+    if (rec.missBy === 'lost') return `<p class="small muted wr-missline">Word check: the speech recognition heard too little of the passage to compare, so no words are marked.${infoHtml('How missed words are found', MISS_HOW)}</p>`;
+    const m = (rec.miss || []).filter(i => rec.byWord && rec.byWord[i]);
+    if (!m.length) return '';
+    const names = m.slice(0, 6).map(i => `“${escapeHtml(rec.byWord[i][0].replace(/[.,;:!?]+$/, ''))}”`).join(', ') + (m.length > 6 ? ` and ${m.length - 6} more` : '');
+    return `<p class="small wr-missline">${MISS_KEY}Possibly missed: ${names}${infoHtml('How missed words are found', MISS_HOW)}</p>`;
   }
   function wordReportHtml(rec, spots) {
     const ws = rec.byWord;
@@ -3506,22 +3561,26 @@
     // pitch line, broken where no pitch was heard
     let run = [];
     const flush = () => { if (run.length > 1) svg += `<polyline class="wr-pline" points="${run.join(' ')}"/>`; run = []; };
-    ws.forEach((w, i) => { if (w[1] != null) run.push(`${f1(xs[i])},${f1(py(w[1]))}`); else flush(); });
+    ws.forEach((w, i) => { if (w[1] != null && wordGone(rec, i) !== 'miss') run.push(`${f1(xs[i])},${f1(py(w[1]))}`); else flush(); });
     flush();
     ws.forEach(([t, p, r, , rough], i) => {
-      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
+      const gone = wordGone(rec, i);
+      if (gone === 'miss') p = r = null; // whatever the highlight caught there was a neighbouring word
+      const tip = gone === 'miss' || gone === 'end' ? `${t}: ${noResWhy(t, p, gone)}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, gone)}`;
       svg += `<g class="wr-w" data-i="${i}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
         + `<rect class="wr-hit" x="${f1(xs[i] - wd[i] / 2)}" y="0" width="${f1(wd[i])}" height="${H}"/>`
         + (p != null ? `<circle class="wr-dot${pitchOff(p) ? ' off' : ''}" cx="${f1(xs[i])}" cy="${f1(py(p))}" r="3.5"/>` : '')
         + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(xs[i] - 6)}" y="${f1(ry(r))}" width="12" height="${f1(Math.max(3, RT + RH - ry(r)))}" rx="2"/>`
+          // possibly missed: a dashed empty slot; not reached: nothing, the word is muted
+          : gone === 'miss' ? missGlyph(xs[i], RT + RH + 3) : gone === 'end' ? ''
           // no reading: a hollow, struck-through ring under the axis, never a bar (a very low score is a short filled bar)
           : D.wordVowels(t, PRON).why === 'function' ? '' // "the", "of", "a": never scored, shown as a muted word rather than a miss
           : `<g class="wr-none"><circle cx="${f1(xs[i])}" cy="${RT + RH + 7}" r="4"/><line x1="${f1(xs[i] - 3)}" y1="${RT + RH + 10}" x2="${f1(xs[i] + 3)}" y2="${RT + RH + 4}"/></g>`)
-        + `<text class="wr-word${resOff(r) ? ' off' : ''}${r == null && D.wordVowels(t, PRON).why === 'function' ? ' fn' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
+        + `<text class="wr-word${resOff(r) ? ' off' : ''}${gone === 'miss' ? ' miss' : r == null && (gone === 'end' || D.wordVowels(t, PRON).why === 'function') ? ' fn' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${ws.some(w => w[2] == null && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}</span></div>
-      <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${rec.miss && rec.miss.length ? ` ${MISS_KEY}possibly missed` : ''}${ws.some((w, i) => w[2] == null && !['miss', 'end'].includes(wordGone(rec, i)) && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}</span></div>
+      <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.</p>${missLineHtml(rec)}
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
   }

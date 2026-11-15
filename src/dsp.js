@@ -1003,6 +1003,87 @@
       return { p: m(a.p, 3), r: r != null ? r : rl, s: m(a.s, 2), rough: rl != null };
     });
   }
+  // Script words the reader may have left out. There is no speech recognition, so this goes by the voice alone:
+  // a word the highlight passed with no voice on it (fewer than MISS_VOICED voiced frames tagged with it) is
+  // "possibly missed". That happens when the highlight had to jump over words at a pause to catch up (the
+  // voice had fewer syllables than the script there), or, in tap and pace modes, when a word went by in
+  // silence. Words after the last one reached are "not reached" instead. When more than MISS_MAX_SHARE of the
+  // reached words look missed, the highlight lost the voice rather than the reader the words, so none are flagged.
+  // Returns { miss: [word indices], reach: last word index reached (-1 for none) }.
+  const MISS_VOICED = 2, MISS_MAX_SHARE = 0.4;
+  function missedWords(frames, nWords) {
+    const voiced = new Array(nWords).fill(0);
+    let reach = -1;
+    for (const f of frames || []) {
+      if (!(f.i >= 0 && f.i < nWords)) continue;
+      if (f.i > reach) reach = f.i;
+      if (f.f0 > 0) voiced[f.i]++;
+    }
+    const miss = [];
+    for (let i = 0; i <= reach; i++) if (voiced[i] < MISS_VOICED) miss.push(i);
+    if (miss.length > MISS_MAX_SHARE * (reach + 1)) return { miss: [], reach, lost: true };
+    return { miss, reach };
+  }
+  // Script words the speech recogniser didn't hear, for readings with "Check words" on. script: the passage's words
+  // as shown; heard: the recogniser's words. A word-level edit alignment (like scoring speech recognisers): a
+  // script word the alignment has to drop is missed; a word heard as something else (misheard, or said a bit
+  // differently) is a substitution and is not flagged, so a recogniser's slips don't read as skipped words.
+  // Script words after the last one heard are left alone (the reading stopped, or the last words came in late).
+  // Spellings are compared loosely (case, punctuation, colour/color, numbers as digits, one word split in two).
+  // When under MATCH_MIN of the script up to the last match was heard, the recogniser was off, so none are flagged.
+  // Returns { miss: [script indices], heard: matched count, last: last matched script index (-1 for none), lost }.
+  const MATCH_MIN = 0.5;
+  const NUM_WORDS = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'.split(' ');
+  function normWord(w) {
+    let t = String(w).toLowerCase().replace(/[\u2019']/g, '').replace(/[^a-z0-9]+/g, '');
+    if (/^\d+$/.test(t) && +t <= 20) t = NUM_WORDS[+t];
+    return t.replace(/our$/, 'or').replace(/ise$/, 'ize').replace(/tre$/, 'ter');
+  }
+  function editDist(a, b) {
+    const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = d[0]; d[0] = i;
+      for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+    }
+    return d[b.length];
+  }
+  const sameWord = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && editDist(a, b) <= Math.floor(Math.min(a.length, b.length) / 4));
+  function matchScript(script, heard) {
+    const S = script.map(normWord), H = heard.map(normWord).filter(Boolean), n = S.length, m = H.length;
+    // cost[i][j]: aligning the first i script words with the first j heard ones; moves: match/substitute,
+    // drop a script word (missed), extra heard word, or a script word heard as two (or two as one)
+    const INF = 1e9, cost = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(INF)), how = Array.from({ length: n + 1 }, () => new Int8Array(m + 1));
+    cost[0][0] = 0;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= m; j++) {
+      const c = cost[i][j]; if (c >= INF) continue;
+      const step = (ii, jj, k, v) => { if (ii <= n && jj <= m && c + v < cost[ii][jj]) { cost[ii][jj] = c + v; how[ii][jj] = k; } };
+      if (i < n && !S[i]) { step(i + 1, j, 5, 0); continue; } // a script "word" with no letters (a dash)
+      if (i < n && j < m) step(i + 1, j + 1, sameWord(S[i], H[j]) ? 1 : 2, sameWord(S[i], H[j]) ? 0 : 1);
+      if (i < n) step(i + 1, j, 3, 1);
+      if (j < m) step(i, j + 1, 4, 1);
+      if (i < n && j + 1 < m && S[i] === H[j] + H[j + 1]) step(i + 1, j + 2, 7, 0);
+      if (i + 1 < n && j < m && S[i] + S[i + 1] === H[j]) step(i + 2, j + 1, 6, 0);
+    }
+    // the reading may stop anywhere: end at the cheapest place once every heard word is used
+    let bi = 0; for (let i = 0; i <= n; i++) if (cost[i][m] < cost[bi][m] || (cost[i][m] === cost[bi][m] && i > bi)) bi = i;
+    const drop = [], hit = [];
+    for (let i = bi, j = m; i > 0 || j > 0;) {
+      const k = how[i][j];
+      if (k === 1) { hit.push(i - 1); i--; j--; }
+      else if (k === 7) { hit.push(i - 1); i--; j -= 2; }
+      else if (k === 2) { i--; j--; }
+      else if (k === 3) { drop.push(i - 1); i--; }
+      else if (k === 4) j--;
+      else if (k === 5) i--;
+      else if (k === 6) { hit.push(i - 2, i - 1); i -= 2; j--; }
+      else break;
+    }
+    const last = hit.length ? Math.max(...hit) : -1;
+    const miss = drop.filter(i => i < last).sort((a, b) => a - b);
+    const words = S.slice(0, last + 1).filter(Boolean).length;
+    if (!hit.length || hit.length < MATCH_MIN * words) return { miss: [], heard: hit.length, last, lost: m > 0 };
+    return { miss, heard: hit.length, last };
+  }
   // A reading over time, for the replay timeline: frames ({ t: ms, i: word index, f0, res, loose }) cut into
   // bins of binMs from t0 (when the recording started). Each bin keeps the median pitch of its voiced frames
   // and the mean resonance of its steady vowel frames (or of short-vowel frames, marked rough, when it has no
@@ -2100,7 +2181,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingTimeline, wordSpans, spectrogram, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

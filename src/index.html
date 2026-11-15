@@ -237,6 +237,7 @@
         <button type="button" class="btn" id="reader-restart">Back to start</button>
         <button type="button" class="btn" id="reader-edit" hidden>Edit text</button>
         <button type="button" class="btn" id="reader-focus" aria-pressed="true">Focus line on</button>
+        <button type="button" class="btn" id="reader-words" aria-pressed="false" hidden>Check words off</button>
         <button type="button" class="btn" id="reader-smaller" aria-label="Smaller text">A−</button>
         <button type="button" class="btn" id="reader-bigger" aria-label="Larger text">A+</button>
         <button type="button" class="btn" id="reader-full" aria-pressed="false">Full screen</button>
@@ -460,7 +461,7 @@
   <dialog id="speech-consent" class="voice-dlg" aria-labelledby="speech-consent-h">
     <form method="dialog">
       <h2 id="speech-consent-h">Send your speech for recognition?</h2>
-      <p>Showing words uses your browser's speech recognition. In Chrome and Edge this sends the microphone audio to Google or Microsoft servers to turn it into text, while Show words is on and the microphone is running. Their privacy terms apply to that audio.</p>
+      <p>Show words, and Check words in reading practice, use your browser's speech recognition. In Chrome and Edge this sends the microphone audio to Google or Microsoft servers to turn it into text, while Show words is on and the microphone is running. Their privacy terms apply to that audio.</p>
       <p>Everything else in VoiceTrainer stays on your device, and you can use the app fully without this. You can withdraw consent at any time.</p>
       <div class="btn-row">
         <button type="submit" class="btn primary" value="yes" id="sc-yes">I agree, show words</button>
