@@ -81,22 +81,17 @@
     </dl>
   </div>
 
-  <section class="live" id="live" data-for="freestyle" aria-label="Live dials">
-    <figure class="chart chart-vowel">
-      <figcaption>Vowel space <small>← tongue forward · tongue back → (F2) · jaw more open ↓ (F1)</small></figcaption>
-      <canvas id="cv-vowel" height="300"></canvas>
-      <div class="legend">
-        <span><i class="dot masc"></i>typical masculine</span>
-        <span><i class="dot fem"></i>typical feminine</span>
-        <span><i class="dot you"></i>you</span>
-        <span><i class="dash"></i>path to your target for this vowel</span>
-      </div>
-    </figure>
-
-    <figure class="chart spec-fig">
-      <figcaption>Spectrogram <small>0 to 5 kHz, mouth and throat resonances</small>
-        <button type="button" class="info-btn" id="spec-info" aria-expanded="false" aria-controls="spec-help" aria-label="How to read the spectrogram">i</button>
-      </figcaption>
+  <figure class="chart free-tl spec-fig" id="free-tl" data-for="freestyle">
+    <figcaption>Timeline <small>pitch, resonance and sound on one clock</small>
+      <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words <small>(online)</small></label></figcaption>
+    <p class="muted small ftl-lead">Newest sound on the right; stop to replay and zoom the take.<button type="button" class="info-btn inline" data-info aria-controls="info-ftl" aria-describedby="info-ftl" aria-expanded="false" aria-label="About the timeline">i</button><span class="info-pop" id="info-ftl" role="note" hidden>All three lanes share one clock, so a dot, the resonance line and the sound under it happened at the same moment. Pitch: each dot coloured from darker (teal) to brighter (rose) by the resonance heard then, grey where no vowel was read. Resonance: the score smoothed over a quarter second, against your goal band. Spectrogram: the sound itself with the formants read marked in colour. When you stop the microphone, or a recording or the demo voice ends, the take opens as a timeline you can play from any moment and zoom. Freestyle takes are not saved: the next one replaces it.</span></p>
+    <div class="ftl-live" id="ftl-live">
+      <div class="ftl-lab"><span>Pitch · <span id="pitch-band-label">target band 165 to 255 Hz</span></span></div>
+      <canvas id="cv-pitch" height="130"></canvas>
+      <div class="ftl-lab"><span>Resonance · <span id="res-band-label">goal 52-75</span></span></div>
+      <canvas id="cv-res" height="70"></canvas>
+      <div class="ftl-lab"><span>Spectrogram · 0-5 kHz</span>
+        <button type="button" class="info-btn" id="spec-info" aria-expanded="false" aria-controls="spec-help" aria-label="How to read the spectrogram">i</button></div>
       <div id="spec-help" class="spec-help" role="note" hidden>
         <p class="eyebrow"><span>How to read this</span></p>
         <ul>
@@ -108,10 +103,27 @@
           <li>Hover over the spectrogram, or tap it on a phone, to read the frequency at that point.</li>
         </ul>
       </div>
-      <canvas id="cv-spec" height="200"></canvas>
+      <canvas id="cv-spec" height="170"></canvas>
       <div id="spec-tip" class="spec-tip" role="status" hidden></div>
       <div class="legend">
-        <span><i class="dot f1"></i>jaw (F1)</span><span><i class="dot f2"></i>tongue (F2)</span><span><i class="dot f3"></i>lips, larynx (F3)</span><span><i class="tri"></i>goal for the current vowel</span>
+        <span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot nr"></i>no vowel read</span><span><i class="dot f1"></i>jaw (F1)</span><span><i class="dot f2"></i>tongue (F2)</span><span><i class="dot f3"></i>lips, larynx (F3)</span><span><i class="tri"></i>goal for the current vowel</span>
+      </div>
+    </div>
+    <div class="tl ftl-review" id="ftl-review" hidden></div>
+    <p class="pw-note" id="pitch-words-note" hidden></p>
+    <p class="pw-note" id="pitch-voice-note" hidden>The voice reading aloud is your browser's speech voice. Browsers don't let apps measure it, so it doesn't show on this chart. Your own voice does when the microphone is on.</p>
+    <p class="pw-privacy" id="pitch-words-privacy" hidden>Show words uses your browser's speech recognition, which you agreed to. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. <button type="button" class="linkish" id="pw-withdraw">Withdraw consent</button></p>
+  </figure>
+
+  <section class="live" id="live" data-for="freestyle" aria-label="Live dials">
+    <figure class="chart chart-vowel">
+      <figcaption>Vowel space <small>← tongue forward · tongue back → (F2) · jaw more open ↓ (F1)</small></figcaption>
+      <canvas id="cv-vowel" height="300"></canvas>
+      <div class="legend">
+        <span><i class="dot masc"></i>typical masculine</span>
+        <span><i class="dot fem"></i>typical feminine</span>
+        <span><i class="dot you"></i>you</span>
+        <span><i class="dash"></i>path to your target for this vowel</span>
       </div>
     </figure>
 
@@ -128,14 +140,6 @@
       <p class="tract-note spec-help" id="tract-help" role="note" hidden>Solid: the shape your formants suggest. Dashed: the typical shape for that vowel at your goal. Differences are drawn twice as large so they are easy to see. The app reads jaw opening from F1, tongue front/back from F2, lips from F3, and throat length (larynx height) from how all three shift together. Many shapes can make the same sound, so treat it as a guide, not an X-ray.</p>
     </figure>
 
-    <figure class="chart pitch-fig">
-      <figcaption>Pitch <small id="pitch-band-label">target band 165 to 255 Hz</small>
-        <label class="pw-toggle"><input type="checkbox" id="pitch-words"> Show words <small>(online)</small></label></figcaption>
-      <canvas id="cv-pitch" height="200"></canvas>
-      <p class="pw-note" id="pitch-words-note" hidden></p>
-      <p class="pw-note" id="pitch-voice-note" hidden>The voice reading aloud is your browser's speech voice. Browsers don't let apps measure it, so it doesn't show on this chart. Your own voice does when the microphone is on.</p>
-      <p class="pw-privacy" id="pitch-words-privacy" hidden>Show words uses your browser's speech recognition, which you agreed to. In Chrome and Edge the audio is sent to Google or Microsoft to be recognised; the rest of the app stays on your device. <button type="button" class="linkish" id="pw-withdraw">Withdraw consent</button></p>
-    </figure>
   </section>
 
   <div class="dial-dots" id="dial-dots" data-for="freestyle" aria-hidden="true"></div>

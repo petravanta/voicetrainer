@@ -87,15 +87,15 @@
 
   // ---------------- theme colours for canvases ----------------
   let C = {};
-  let tlRedraw = null; // redraws the open reading timeline (its spectrogram follows the theme)
+  const tlRedraws = new Set(); // redraw the open timelines (their spectrograms follow the theme)
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
     for (const k of ['bg', 'panel', 'ink', 'muted', 'line', 'masc', 'fem', 'accent', 'good', 'warn', 'spec-mid', 'f1', 'f2', 'f3']) C[k] = cs.getPropertyValue('--' + k).trim();
     C.font = cs.getPropertyValue('--font-mono').trim();
     buildLut();
     clearSpec();
-    if (tlRedraw) tlRedraw();
-    drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
+    for (const f of [...tlRedraws]) f();
+    drawVowelChart(); drawPitch(); drawRes(); drawHistory(); renderTractLive();
     Sing.cols = null; Sing.draw();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
     if (state.drill && state.drill.def.type === 'embody') drawEmbody(state.drill);
@@ -211,10 +211,13 @@
     drawSpecAxis();
   }
   let specMax = -20;
-  function drawSpecColumn(fr, fsd) {
+  // Freestyle's live lanes (pitch, resonance, spectrogram) share one clock: the same left axis and one frame per step
+  const LIVE_AXIS = 40;
+  const liveStep = () => Math.max(1, Math.round(dprOf())); // device px per frame, the same in every lane
+  function drawSpecColumn(fr, fsd, tick) {
     const cv = $('cv-spec'); const g = cv.getContext('2d');
     if (fitCanvas(cv)) clearSpec();
-    const dpr = dprOf(), step = Math.max(1, Math.round(2 * dpr)), axisW = 34 * dpr;
+    const dpr = dprOf(), step = liveStep(), axisW = LIVE_AXIS * dpr;
     const w = cv.width, h = cv.height;
     g.drawImage(cv, axisW + step, 0, w - axisW - step, h, axisW, 0, w - axisW - step, h);
     const col = g.createImageData(step, h);
@@ -231,6 +234,7 @@
       }
     }
     g.putImageData(col, w - step, 0);
+    if (tick) { g.fillStyle = C.line; g.globalAlpha = 0.7; g.fillRect(w - step, 0, Math.max(1, Math.round(dpr / 2)), h); g.globalAlpha = 1; }
     if (fr.formants) {
       ['f1', 'f2', 'f3'].forEach((k, i) => {
         g.fillStyle = C[k];
@@ -240,7 +244,7 @@
     }
   }
   function drawSpecAxis() {
-    const cv = $('cv-spec'), g = cv.getContext('2d'), dpr = dprOf(), axisW = 34 * dpr;
+    const cv = $('cv-spec'), g = cv.getContext('2d'), dpr = dprOf(), axisW = LIVE_AXIS * dpr;
     g.fillStyle = C.panel; g.fillRect(0, 0, axisW, cv.height);
     g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right';
     for (const f of [1000, 2000, 3000, 4000]) {
@@ -264,17 +268,35 @@
   }
 
   // ---- pitch trace ----
-  const pitchBuf = [], pitchT = [];
+  // per frame: pitch (0 = none), when it was read, the resonance then (smoothed, null = no vowel), and whether a new second began
+  const pitchBuf = [], pitchT = [], resBuf = [], tickBuf = [];
+  const LIVE_KEEP = 2400; // frames kept for the live lanes: wider than any screen at one step a frame
   const PITCH_RANGE = [60, 400];
   // the goal's typical band, unless you set your own range for this goal in Settings
   const PITCH_MIN_SPAN = 10;
   const validBand = (b) => Array.isArray(b) && b.length === 2 && b.every(Number.isFinite) && b[0] >= PITCH_RANGE[0] && b[1] <= PITCH_RANGE[1] && b[1] - b[0] >= PITCH_MIN_SPAN;
   function customBand(goal = state.goal) { const c = typeof Data !== 'undefined' && Data.d ? (Data.setting('pitchRange') || {})[goal] : null; return validBand(c) ? c : null; }
   function pitchBand() { return customBand() || D.PITCH_BANDS[state.goal === 'fem' ? 'fem' : 'masc']; }
+  // the live lanes' colour for a resonance: from the darker average (masc) to the brighter one (fem), in five steps as in the timeline
+  let resCols = null;
+  function resColor(r) {
+    if (!resCols || resCols.k !== C.masc + C.fem) {
+      const a = parseColor(C.masc), b = parseColor(C.fem);
+      resCols = { k: C.masc + C.fem, c: [0, 1, 2, 3, 4].map(u => `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * u / 4)).join(',')})`) };
+    }
+    return resCols.c[Math.round(clamp((r - D.RES_AVG.masc) / (D.RES_AVG.fem - D.RES_AVG.masc), 0, 1) * 4)];
+  }
+  // a faint line where each second began, the same in all three lanes
+  function drawTicks(g, w, h, axisW, dx) {
+    const n = tickBuf.length;
+    g.strokeStyle = C.line; g.setLineDash([2 * dprOf(), 4 * dprOf()]);
+    for (let i = 0; i < n; i++) if (tickBuf[i]) { const x = w - (n - i) * dx; if (x < axisW) continue; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    g.setLineDash([]);
+  }
   function drawPitch() {
     const cv = $('cv-pitch'); if (!cv || !C.ink) return;
     fitCanvas(cv);
-    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = 40 * dpr;
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = LIVE_AXIS * dpr;
     const y = (f) => h - (Math.log(f / PITCH_RANGE[0]) / Math.log(PITCH_RANGE[1] / PITCH_RANGE[0])) * (h - 8 * dpr) - 4 * dpr;
     g.clearRect(0, 0, w, h);
     const [lo, hi] = pitchBand();
@@ -285,14 +307,45 @@
       g.beginPath(); g.moveTo(axisW, y(f)); g.lineTo(w, y(f)); g.stroke();
       g.fillText(f, axisW - 6 * dpr, y(f) + 4 * dpr);
     }
-    const n = pitchBuf.length, span = 360, dx = (w - axisW) / span;
-    g.fillStyle = C.ink;
+    const n = pitchBuf.length, dx = liveStep();
+    drawTicks(g, w, h, axisW, dx);
     for (let i = 0; i < n; i++) {
       const f = pitchBuf[i]; if (!f) continue;
-      const x = w - (n - i) * dx;
-      g.beginPath(); g.arc(x, y(clamp(f, 60, 400)), 1.8 * dpr, 0, 7); g.fill();
+      const x = w - (n - i) * dx; if (x < axisW) continue;
+      const r = resBuf[i];
+      g.fillStyle = r != null ? resColor(r) : C.muted;
+      g.beginPath(); g.arc(x, y(clamp(f, 60, 400)), (r != null ? 2 : 1.5) * dpr, 0, 7); g.fill();
     }
     Words.draw(g, w, h, axisW, dx, y);
+  }
+  // resonance on the same clock: the smoothed score as a line against the goal band
+  function drawRes() {
+    const cv = $('cv-res'); if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, axisW = LIVE_AXIS * dpr, pad = 4 * dpr;
+    const y = (v) => pad + (1 - clamp(v, 0, 100) / 100) * (h - 2 * pad);
+    g.clearRect(0, 0, w, h);
+    const [lo, hi] = target();
+    g.fillStyle = state.goal === 'fem' ? C.fem : C.masc;
+    g.globalAlpha = 0.14; g.fillRect(axisW, y(Math.min(hi, 100)), w - axisW, y(lo) - y(Math.min(hi, 100))); g.globalAlpha = 1;
+    g.strokeStyle = C.line; g.fillStyle = C.muted; g.font = `${10 * dpr}px ${C.font}`; g.textAlign = 'right';
+    for (const v of [D.RES_AVG.masc, D.RES_AVG.fem]) {
+      g.setLineDash([3 * dpr, 3 * dpr]); g.beginPath(); g.moveTo(axisW, y(v)); g.lineTo(w, y(v)); g.stroke(); g.setLineDash([]);
+    }
+    for (const v of [0, 50, 100]) g.fillText(v, axisW - 6 * dpr, clamp(y(v) + 4 * dpr, 10 * dpr, h - 2 * dpr));
+    const n = resBuf.length, dx = liveStep();
+    drawTicks(g, w, h, axisW, dx);
+    g.strokeStyle = C.accent; g.fillStyle = C.accent; g.lineWidth = 2 * dpr; g.lineJoin = 'round'; g.lineCap = 'round';
+    let on = false, len = 0, lx = 0, ly = 0;
+    const end = () => { if (on) { if (len === 1) { g.beginPath(); g.arc(lx, ly, 1.5 * dpr, 0, 7); g.fill(); } else g.stroke(); } on = false; len = 0; };
+    for (let i = 0; i < n; i++) {
+      const r = resBuf[i], x = w - (n - i) * dx;
+      if (r == null || x < axisW) { end(); continue; }
+      if (!on) { g.beginPath(); g.moveTo(x, y(r)); on = true; } else g.lineTo(x, y(r));
+      len++; lx = x; ly = y(r);
+    }
+    end();
+    g.lineWidth = 1;
   }
 
   // ---- recognised words over the pitch track (browser speech recognition, mic only) ----
@@ -470,6 +523,7 @@
     src.onended = () => { if (node === src) { stop(); setStatus(kind === 'demo' ? 'Demo finished' : 'Recording finished'); } };
     node = src;
     src.start();
+    Free.pendingBuf = audioBuf; // Freestyle replays it on the take's timeline
     begin(kind, label);
   }
   async function playFile(file) {
@@ -651,6 +705,7 @@
   function begin(kind, label) {
     state.running = kind;
     take = newSession(); take.kind = kind;
+    if (mode === 'freestyle' && !Run.on && !Sing.on) Free.start(kind); else Free.pendingBuf = null;
     setStatus(label, true);
     $('btn-stop').hidden = kind === 'mic'; // the mic button itself becomes Stop
     setMicButton(kind === 'mic');
@@ -659,6 +714,7 @@
     ensureLoop();
   }
   function stop() {
+    Free.end();
     if (Sing.on) { take = null; Sing.finish(true); }
     const hadRun = !!state.running;
     if (take) { offerPlanFrom(take); take = null; }
@@ -715,6 +771,7 @@
 
   // ---------------- per-frame logic ----------------
   const AVG_MS = 1500; // averaging window for the resonance meter and the coach gauges
+  let liveSec = null, liveRes = [];
   let frameCount = 0, meterFrames = [], sibShown = 0, exampleEnd = -1e9, breathBuf = [], breathShown = -1e9;
   function onFrame(fr) {
     frameCount++;
@@ -722,9 +779,10 @@
     let frU = NaN, frMiss = false, frLoose = false; // ± of frRes in score points; a vowel heard but not measurable (for Sing's per-line reasons)
     const frWord = Reader.idx; // the word this frame's vowel was checked against (the highlight may move on below)
     let frAny = NaN; // this frame's resonance, demo voice included (for the embody view)
-    drawSpecColumn(fr, an.fsd);
-    pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(performance.now());
-    if (pitchBuf.length > 360) { pitchBuf.shift(); pitchT.shift(); }
+    const now = performance.now(), sec = Math.floor(now / 1000), tick = liveSec !== null && sec !== liveSec; liveSec = sec;
+    drawSpecColumn(fr, an.fsd, tick);
+    pitchBuf.push(fr.kind === 'voiced' ? fr.f0 : 0); pitchT.push(now); tickBuf.push(tick);
+    if (pitchBuf.length > LIVE_KEEP) { pitchBuf.shift(); pitchT.shift(); tickBuf.shift(); }
     // While a reference example plays (and briefly after), show it but don't score it as the user.
     const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
     const d = !gated && state.drill && !state.drill.result && mode !== 'sing' ? state.drill : null; // an open exercise doesn't grade your singing
@@ -870,7 +928,14 @@
     if (frameCount - breathShown > 120) $('ro-breath').textContent = '--'; // old entries leave breathBuf by age
     if (Reader.open) $('rh-breath').textContent = $('ro-breath').textContent;
 
-    if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); renderMeter(); drawSpecAxis(); }
+    // the resonance lane: this frame's score smoothed over about a quarter second, broken where no vowel was read
+    const rNow = Number.isFinite(frAny) ? frAny : frRes;
+    if (Number.isFinite(rNow)) liveRes.push({ n: frameCount, s: rNow });
+    while (liveRes.length && liveRes[0].n < frameCount - 15) liveRes.shift();
+    resBuf.push(liveRes.length && frameCount - liveRes[liveRes.length - 1].n <= 4 ? liveRes.reduce((a, b) => a + b.s, 0) / liveRes.length : null);
+    if (resBuf.length > LIVE_KEEP) resBuf.shift();
+    if (Free.on && !gated) Free.frame(fr, now, frRes);
+    if (frameCount % 3 === 0) { drawVowelChart(); drawPitch(); drawRes(); renderMeter(); drawSpecAxis(); }
     if (!gated) coachFrame(fr, false);
     else if (dd) coachFrame(fr, true);
     if (!gated) Reader.frame(fr);
@@ -3041,6 +3106,70 @@
       try { db.transaction('r', 'readwrite').objectStore('r').delete(id); } catch (e) {}
     },
   };
+  // ---- Freestyle takes: what you just did, replayable on the tall timeline ----
+  // While Freestyle listens, each frame is kept (and the microphone recorded) so that when it stops the take
+  // opens on the same timeline as a reading's. Kept in memory only: the next take replaces it, nothing is saved.
+  const FREE_MAX_MS = 10 * 60 * 1000; // the timeline keeps the first ten minutes of a take
+  const Free = {
+    on: false, frames: [], t0: 0, mr: null, chunks: [], buf: null, pendingBuf: null, kind: null, n: 0, full: false, cur: null,
+    start(kind) {
+      this.end(true);
+      Object.assign(this, { on: true, kind, frames: [], chunks: [], mr: null, full: false, buf: kind !== 'mic' ? this.pendingBuf : null, pendingBuf: null, t0: performance.now() });
+      if (kind === 'mic' && stream && window.MediaRecorder) {
+        try {
+          // its own copy of the stream, so the last second still reaches the recording after the microphone is stopped
+          const own = stream.clone(), mr = new MediaRecorder(own);
+          mr.addEventListener('stop', () => own.getTracks().forEach(t => t.stop()));
+          mr.ondataavailable = (e) => { if (e.data && e.data.size) this.chunks.push(e.data); };
+          mr.start(1000); this.mr = mr; this.t0 = performance.now(); // the timeline counts from here
+        } catch (e) { this.mr = null; }
+      }
+      showFreeLive();
+    },
+    frame(fr, now, res) {
+      if (now - this.t0 > FREE_MAX_MS) { if (!this.full) { this.full = true; if (this.mr && this.mr.state !== 'inactive') this.mr.stop(); } return; }
+      this.frames.push({ t: now - FRAME_LAG_MS(), f0: fr.kind === 'voiced' ? fr.f0 : 0, res, F: fr.kind === 'voiced' ? fr.formants : null });
+    },
+    // ends the take; it opens as a timeline when it held enough voice (quiet: drop it without showing anything)
+    end(quiet) {
+      if (!this.on) return;
+      this.on = false;
+      const frames = this.frames, mr = this.mr, chunks = this.chunks, buf = this.buf;
+      this.frames = []; this.mr = null; this.chunks = []; this.buf = null;
+      if (quiet || frames.filter(f => f.f0 > 0).length < 20) { // under about a third of a second of voice
+        if (mr && mr.state !== 'inactive') { mr.ondataavailable = null; try { mr.stop(); } catch (e) {} }
+        return;
+      }
+      const tk = { id: 'free' + (++this.n), tl: D.readingTimeline(frames, this.t0, 0), kind: this.kind, at: new Date().toISOString(), full: this.full, buf, blob: null };
+      if (!mr) return showFreeReview(tk);
+      const done = () => { tk.blob = chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null; showFreeReview(tk); };
+      if (mr.state === 'inactive') done(); else { mr.addEventListener('stop', done); try { mr.stop(); } catch (e) { done(); } }
+    },
+  };
+  function showFreeLive() {
+    Free.cur = null;
+    if (Player.id && String(Player.id).startsWith('free')) Player.stop();
+    const rv = $('ftl-review'); rv.hidden = true; rv.innerHTML = '';
+    $('ftl-live').hidden = false;
+    drawPitch(); drawRes(); // the canvases were hidden, so they size themselves again
+  }
+  function showFreeReview(tk) {
+    if (Free.on || !tk.tl.f0.length) return; // a new take has already begun
+    const el = $('ftl-review');
+    Free.cur = tk;
+    $('ftl-live').hidden = true; el.hidden = false;
+    const audio = !!(tk.blob || tk.buf), src = tk.kind === 'mic' ? 'take' : tk.kind === 'demo' ? 'demo voice' : 'recording';
+    mountTimeline(el, {
+      id: tk.id, tl: tk.tl, words: null, blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
+      heading: tk.kind === 'mic' ? 'Your last take' : tk.kind === 'demo' ? 'The demo voice' : 'The recording',
+      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ' Tap anywhere to hear it from there.' : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
+      noAudio: "This browser couldn't record the take, so no spectrogram",
+      hint: audio ? 'Tap the timeline to play from that moment.' : 'Tap the timeline for the numbers there.',
+      extraBtns: `${tk.blob ? '<button type="button" class="btn sm ghost" id="ftl-save">Save audio</button>' : ''}<button type="button" class="btn sm ghost" id="ftl-back">Live view</button>`,
+    });
+    $('ftl-back').onclick = () => showFreeLive();
+    const sv = $('ftl-save'); if (sv) sv.onclick = () => saveRunAudio({ title: 'freestyle', at: tk.at }, tk.blob);
+  }
   // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
   // (a browser's own recordings often can't be seeked in an audio element).
   const Player = {
@@ -3055,6 +3184,11 @@
         if (this.id !== id) return false;
         this.buf = b; this.off = 0; return true;
       } catch (e) { if (this.id === id) this.id = null; return false; }
+    },
+    useBuffer(id, b) { // a recording already decoded (a file or the demo voice in Freestyle)
+      if (this.id === id && this.buf === b) return true;
+      this.stop(); this.id = id; this.buf = b; this.off = 0;
+      try { this.ac = this.ac || new (window.AudioContext || window.webkitAudioContext)(); return true; } catch (e) { this.id = null; this.buf = null; return false; }
     },
     get dur() { return this.buf ? this.buf.duration : 0; },
     pos() { return this.playing ? Math.min(this.dur, this.ac.currentTime - this.at0) : this.off; },
@@ -3081,11 +3215,13 @@
   const TL_ZOOM = [15, 320]; // how far it zooms out and in
   let tlPxs = null; // the zoom picked last, kept while the page is open
   // The tall timeline's lanes, top to bottom, each [top, height] in px. They all share one time axis.
-  const TL_LANES = (() => {
+  // A reading has two more lanes for its words; a Freestyle take has none.
+  function tlLanes(words) {
     const y = {}; let at = 38;
-    for (const [k, h] of [['p', 80], ['r', 56], ['s', 110], ['wp', 40], ['wr', 44]]) { y[k] = [at, h]; at += h + 24; }
-    y.lab = at - 10; y.H = y.lab + 22; return y;
-  })();
+    for (const [k, h] of [['p', 80], ['r', 56], ['s', 110]].concat(words ? [['wp', 40], ['wr', 44]] : [])) { y[k] = [at, h]; at += h + 24; }
+    y.lab = at - 10; y.H = words ? y.lab + 22 : at - 12; return y;
+  }
+  const TL_LANES = tlLanes(true);
   // The spectrogram as an image, coloured like the live one; made again when the theme changes.
   function specImage(spec) {
     if (spec._img && spec._lut === LUT) return spec._img;
@@ -3099,11 +3235,12 @@
     spec._img = cv.toDataURL('image/png'); spec._lut = LUT;
     return spec._img;
   }
-  // The reading over time, in lanes on one time axis: pitch dots coloured by resonance (as in Sing), the resonance
-  // line with its goal band, the spectrogram with the formants read, and each word across its own stretch of time
-  // with its pitch and resonance. pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
-  function timelineSvg(rec, tl, pxs, spec, note) {
-    const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = TL_LANES;
+  // A recording over time, in lanes on one time axis: pitch dots coloured by resonance (as in Sing), the resonance
+  // line with its goal band, the spectrogram with the formants read, and (for a reading) each word across its own
+  // stretch of time with its pitch and resonance. words is the reading's byWord, or null for a Freestyle take.
+  // pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
+  function timelineSvg(words, tl, pxs, spec, note) {
+    const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = words ? TL_LANES : tlLanes(false);
     const L = 6, W = Math.ceil(L + tl.dur / 1000 * pxs + 40), x = (ms) => L + ms / 1000 * pxs;
     const ps = tl.f0.filter(v => v > 0);
     const pmin = Math.max(50, Math.min(plo, ps.length ? D.quantile(ps, 0.03) : plo) - 15), pmax = Math.max(phi, ps.length ? D.quantile(ps, 0.97) : phi) + 15;
@@ -3111,8 +3248,8 @@
     const py = (v) => lane('p', v, pmin, pmax), ry = (v) => lane('r', v, 0, 100), wpy = (v) => lane('wp', v, pmin, pmax), wry = (v) => lane('wr', v, 0, 100);
     const f1 = (v) => v.toFixed(1);
     const band = (y0, y1) => `<rect class="wr-band" x="0" y="${f1(y0)}" width="${W}" height="${f1(y1 - y0)}"/>`;
-    let g = band(py(phi), py(plo)) + band(ry(hi), ry(lo)) + band(wpy(phi), wpy(plo)) + band(wry(hi), wry(lo))
-      + `<line class="wr-axis" x1="0" x2="${W}" y1="${bot('r')}" y2="${bot('r')}"/><line class="wr-axis" x1="0" x2="${W}" y1="${bot('wr')}" y2="${bot('wr')}"/>`;
+    let g = band(py(phi), py(plo)) + band(ry(hi), ry(lo)) + `<line class="wr-axis" x1="0" x2="${W}" y1="${bot('r')}" y2="${bot('r')}"/>`;
+    if (words) g += band(wpy(phi), wpy(plo)) + band(wry(hi), wry(lo)) + `<line class="wr-axis" x1="0" x2="${W}" y1="${bot('wr')}" y2="${bot('wr')}"/>`;
     // the spectrogram, stretched to the zoom, with F1-F3 where they were read
     const [S0, SH] = Y.s;
     g += `<rect class="tl-spbg" x="${L}" y="${S0}" width="${f1(W - L - 40)}" height="${SH}"/>`;
@@ -3140,24 +3277,26 @@
     flush();
     // words, each across its own stretch: its pitch as a level, its resonance as a bar, its name under them.
     // Names go on two rows, and one is left out when it would overlap (zoom in to see them all).
-    const end = [-1e9, -1e9], words = rec.byWord || [], spans = D.wordSpans(tl.ws, tl.dur);
-    const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
-    spans.forEach((sp, k) => {
-      if (!sp || !words[k]) return;
-      const [t, p, r, , rough] = words[k], x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2;
-      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
-      g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
-        + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
-        + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
-        + (p != null ? `<rect class="tl-wp${pitchOff(p) ? ' off' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wpy(p) - 2)}" width="${f1(wd)}" height="4" rx="2"/>` : '')
-        + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wry(r))}" width="${f1(wd)}" height="${f1(Math.max(3, bot('wr') - wry(r)))}" rx="2"/>`
-          : fn ? '' : `<g class="wr-none"><circle cx="${f1(cx)}" cy="${bot('wr') - 7}" r="4"/><line x1="${f1(cx - 3)}" y1="${bot('wr') - 4}" x2="${f1(cx + 3)}" y2="${bot('wr') - 10}"/></g>`)
-        + '</g>';
-      const row = k % 2, lw = t.length * 6.6 + 6;
-      if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
-    });
+    if (words) {
+      const end = [-1e9, -1e9], spans = D.wordSpans(tl.ws, tl.dur);
+      const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
+      spans.forEach((sp, k) => {
+        if (!sp || !words[k]) return;
+        const [t, p, r, , rough] = words[k], x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2;
+        const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
+        g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
+          + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
+          + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
+          + (p != null ? `<rect class="tl-wp${pitchOff(p) ? ' off' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wpy(p) - 2)}" width="${f1(wd)}" height="4" rx="2"/>` : '')
+          + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wry(r))}" width="${f1(wd)}" height="${f1(Math.max(3, bot('wr') - wry(r)))}" rx="2"/>`
+            : fn ? '' : `<g class="wr-none"><circle cx="${f1(cx)}" cy="${bot('wr') - 7}" r="4"/><line x1="${f1(cx - 3)}" y1="${bot('wr') - 4}" x2="${f1(cx + 3)}" y2="${bot('wr') - 10}"/></g>`)
+          + '</g>';
+        const row = k % 2, lw = t.length * 6.6 + 6;
+        if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
+      });
+    }
     g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
-    return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram and each word through the reading, on one time line">${g}</svg>`, x, L, W };
+    return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram${words ? ' and each word' : ''} through the ${words ? 'reading' : 'take'}, on one time line">${g}</svg>`, x, L, W };
   }
   // The numbers for one word of a reading, for the line under a chart.
   function wordReadout(rec, i) {
@@ -3170,24 +3309,48 @@
     const el = box.querySelector('#rd-tl'); if (!el) return;
     const got = await Replay.get(rec.id);
     if (box.rec !== rec || !got || !got.tl || !got.tl.f0.length) return;
-    const tl = got.tl, blob = got.blob || null, Y = TL_LANES, [lo, hi] = target(), [plo, phi] = pitchBand();
-    const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === rec.id ? TLSpec.spec : null, note: blob ? 'Reading the recording…' : "No recording on this device, so no spectrogram", view: null, sel: -1, on: -1, head: null, hold: false };
+    const blob = got.blob || null;
     el.hidden = false;
+    const T = mountTimeline(el, {
+      id: rec.id, tl: got.tl, words: rec.byWord || [], blob, alive: () => box.rec === rec,
+      heading: 'Timeline',
+      about: `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap anywhere to hear the reading from there, or tap a word to hear just that word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`,
+      noAudio: 'No recording on this device, so no spectrogram',
+      hint: blob ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.',
+      wordInfo: (i) => wordReadout(rec, i),
+    });
+    if (!blob) return;
+    const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
+    if (!(await T.ready)) return;
+    box.cue = {
+      canPlay: (i) => got.tl.ws && got.tl.ws[i] != null && Player.id === rec.id,
+      word: (i) => { T.pickWord(i); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
+    };
+  }
+  // The tall timeline in el, for a reading (words) or a Freestyle take (no words): zoom, a playhead, tap to cue,
+  // and the spectrogram worked out from the recording once it's decoded. o: { id, tl, words, blob or buf (the
+  // recording, if any), alive() (false once el's owner has moved on), heading, about (the info text), noAudio
+  // (said in the spectrogram lane without a recording), hint, wordInfo(i), extraBtns }.
+  // Returns { ready: a promise of whether it can play, pickWord(i) }.
+  function mountTimeline(el, o) {
+    const tl = o.tl, words = o.words || null, Y = words ? TL_LANES : tlLanes(false), [lo, hi] = target(), [plo, phi] = pitchBand();
+    const hasAudio = !!(o.blob || o.buf), live = () => el.isConnected && o.alive();
+    const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
     const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
-    el.innerHTML = `<div class="section-head"><h4>Timeline${infoHtml('About the timeline', `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap anywhere to hear the reading from there, or tap a word to hear just that word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`)}</h4>
-        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span><span><i class="wr-key off"></i>off your goal</span></span></div>
-      <div class="tl-ctl">${blob ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}
+    el.innerHTML = `<div class="section-head"><h4>${o.heading}${infoHtml('About the timeline', o.about)}</h4>
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}</span></div>
+      <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}
         <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
-        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${lab('wp', 'Each word: pitch')}${lab('wr', 'Each word: resonance')}
+        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', 'Each word: pitch') + lab('wr', 'Each word: resonance') : ''}
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
-      <p class="small" id="tl-read" aria-live="polite">${blob ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.'}</p>`;
+      <p class="small" id="tl-read" aria-live="polite">${o.hint}</p>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
     let svg = null, head = null;
     const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
-    const wordAt = (ms) => { let k = -1; (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
+    const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
     const say = (ms) => {
-      const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = rec.byWord && rec.byWord[k];
+      const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = words && words[k];
       // the nearest pitch and resonance within a tenth of a second, so a tap between dots still reads
       let f = 0, r = null;
       for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
@@ -3200,11 +3363,12 @@
       if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
     };
     const draw = () => {
-      V.view = timelineSvg(rec, tl, V.pxs, V.spec, V.note);
+      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note);
       scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head');
       if (V.head != null) place(V.head, false);
       mark('sel', V.sel); mark('on', V.on);
     };
+    const redraw = () => { const sl = scroll.scrollLeft; draw(); scroll.scrollLeft = sl; };
     // zoom about a point (px from the scroll's left edge): the playhead when it's in view, else the middle
     const zoomTo = (pxs, ax) => {
       pxs = clamp(pxs, TL_ZOOM[0], TL_ZOOM[1]); if (Math.abs(pxs - V.pxs) < 0.5) return;
@@ -3213,8 +3377,11 @@
       V.pxs = tlPxs = pxs; draw();
       scroll.scrollLeft = Math.max(0, V.view.x(ms) - ax);
     };
+    // a short take fills the width rather than sitting in a corner (a reading keeps the zoom picked last)
+    if (o.fitShort && tl.dur > 0) V.pxs = clamp(Math.max(V.pxs, (scroll.clientWidth - 50) / (tl.dur / 1000)), TL_ZOOM[0], TL_ZOOM[1]);
     draw();
-    tlRedraw = () => { if (!el.isConnected || box.rec !== rec) { tlRedraw = null; return; } const sl = scroll.scrollLeft; draw(); scroll.scrollLeft = sl; };
+    const themed = () => { if (!live()) { tlRedraws.delete(themed); return; } redraw(); };
+    tlRedraws.add(themed);
     el.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => {
       const z = b.dataset.z;
       zoomTo(z === 'in' ? V.pxs * 1.5 : z === 'out' ? V.pxs / 1.5 : (scroll.clientWidth - 50) / Math.max(1, tl.dur / 1000));
@@ -3240,6 +3407,8 @@
     scroll.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinEnd(); });
     scroll.addEventListener('touchcancel', pinEnd);
     let playable = false;
+    const btn = el.querySelector('#tl-play');
+    const paint = () => { if (!btn) return; btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
     const hook = () => {
       Player.onTick = (s) => {
         const ms = s * 1000; place(ms, Player.playing);
@@ -3249,12 +3418,11 @@
       };
       Player.onState = paint;
     };
-    const btn = el.querySelector('#tl-play');
-    const paint = () => { if (!btn) return; btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
     const pickWord = (i) => {
-      V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = wordReadout(rec, i);
+      if (!words) return;
+      V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = o.wordInfo(i);
       const sp = D.wordSpans(tl.ws, tl.dur)[i];
-      if (playable && Player.id === rec.id) {
+      if (playable && Player.id === o.id) {
         hook();
         Player.play(Math.max(0, sp[0] - 150) / 1000, (sp[1] + 250) / 1000);
       } else if (sp) place(sp[0], true);
@@ -3264,28 +3432,27 @@
       const g = ev.target.closest('.tl-w');
       if (g) return pickWord(+g.dataset.i);
       const ms = msAt(ev); V.hold = false; V.sel = -1; mark('sel', -1);
-      if (playable && Player.id === rec.id) { hook(); Player.play(ms / 1000); } else { place(ms, false); read.innerHTML = say(ms); }
+      if (playable && Player.id === o.id) { hook(); Player.play(ms / 1000); } else { place(ms, false); read.innerHTML = say(ms); }
     });
     scroll.addEventListener('keydown', (e) => { const g = e.target.closest && e.target.closest('.tl-w'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickWord(+g.dataset.i); } });
-    if (!blob) return;
-    const clk = el.querySelector('#tl-clock');
-    const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
-    const ok = await Player.load(rec.id, blob);
-    if (box.rec !== rec) return;
-    if (!ok) { btn.remove(); clk.textContent = "This browser couldn't open the recording to play it. Save audio still works."; V.note = "This browser couldn't open the recording, so no spectrogram"; draw(); return; }
-    playable = true;
-    hook(); btn.disabled = false; clk.textContent = `0:00 / ${clockOf(Player.dur)}`; paint();
-    btn.onclick = () => { if (Player.id !== rec.id) return; hook(); V.hold = false; Player.playing ? Player.pause() : Player.play(); };
-    box.cue = {
-      canPlay: (i) => tl.ws && tl.ws[i] != null && Player.id === rec.id,
-      word: (i) => { pickWord(i); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
-    };
-    // the spectrogram is worked out from the recording itself, after the page has had a moment to draw
-    if (!V.spec) setTimeout(() => {
-      if (box.rec !== rec || Player.id !== rec.id || !Player.buf) return;
-      try { V.spec = D.spectrogram(Player.buf.getChannelData(0), Player.buf.sampleRate); TLSpec.id = rec.id; TLSpec.spec = V.spec; } catch (e) { V.note = "The spectrogram couldn't be drawn"; }
-      const sl = scroll.scrollLeft; draw(); scroll.scrollLeft = sl;
-    }, 30);
+    const ready = (async () => {
+      if (!hasAudio) return false;
+      const clk = el.querySelector('#tl-clock');
+      const ok = o.buf ? Player.useBuffer(o.id, o.buf) : await Player.load(o.id, o.blob);
+      if (!live()) return false;
+      if (!ok) { btn.remove(); clk.textContent = `This browser couldn't open the recording to play it.${o.blob ? ' Save audio still works.' : ''}`; V.note = "This browser couldn't open the recording, so no spectrogram"; draw(); return false; }
+      playable = true;
+      hook(); btn.disabled = false; clk.textContent = `0:00 / ${clockOf(Player.dur)}`; paint();
+      btn.onclick = () => { if (Player.id !== o.id) return; hook(); V.hold = false; Player.playing ? Player.pause() : Player.play(); };
+      // the spectrogram is worked out from the recording itself, after the page has had a moment to draw
+      if (!V.spec) setTimeout(() => {
+        if (!live() || Player.id !== o.id || !Player.buf) return;
+        try { V.spec = D.spectrogram(Player.buf.getChannelData(0), Player.buf.sampleRate); TLSpec.id = o.id; TLSpec.spec = V.spec; } catch (e) { V.note = "The spectrogram couldn't be drawn"; }
+        redraw();
+      }, 30);
+      return true;
+    })();
+    return { ready, pickWord };
   }
   function startReading(id) {
     endSpots();
@@ -5009,6 +5176,7 @@
     if (!['home', 'readings', 'freestyle', 'practice', 'sing', 'settings'].includes(m)) m = 'home';
     if (m !== 'sing' && Sing.on) Sing.finish();
     if (m !== 'sing') Sing.leave();
+    if (m !== 'freestyle') Free.end();
     mode = m;
     document.body.dataset.mode = m;
     if (m === 'sing') Sing.enter();
@@ -5059,7 +5227,9 @@
   function renderPitchTarget() {
     const [lo, hi] = pitchBand();
     $('pitch-band-label').textContent = `target band ${lo} to ${hi} Hz${customBand() ? ' (yours)' : ''}`;
-    drawPitch(); paintPitchRange();
+    const [rlo, rhi] = target(); $('res-band-label').textContent = `goal ${rlo}-${Math.min(rhi, 100)}`;
+    drawPitch(); drawRes(); paintPitchRange();
+    if (Free.cur && !Free.on) showFreeReview(Free.cur); // its goal bands
     if (Data.d) renderSession();
     const rd = $('rd-result'); if (rd && !rd.hidden && rd.rec) showReadingResult(rd.rec);
   }
