@@ -87,12 +87,14 @@
 
   // ---------------- theme colours for canvases ----------------
   let C = {};
+  let tlRedraw = null; // redraws the open reading timeline (its spectrogram follows the theme)
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
     for (const k of ['bg', 'panel', 'ink', 'muted', 'line', 'masc', 'fem', 'accent', 'good', 'warn', 'spec-mid', 'f1', 'f2', 'f3']) C[k] = cs.getPropertyValue('--' + k).trim();
     C.font = cs.getPropertyValue('--font-mono').trim();
     buildLut();
     clearSpec();
+    if (tlRedraw) tlRedraw();
     drawVowelChart(); drawPitch(); drawHistory(); renderTractLive();
     Sing.cols = null; Sing.draw();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
@@ -3075,61 +3077,114 @@
     stop() { this.halt(); this.playing = false; this.off = 0; this.onTick = null; this.onState = null; },
   };
   const clockOf = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  const TL_PX_S = 70; // timeline pixels per second of reading: room for a word label most of the time
-  // The reading over time: pitch dots coloured by resonance (as in Sing), the resonance line with its goal band,
-  // and each word where the highlight reached it. Built from the stored timeline, with or without the recording.
-  function timelineSvg(rec, tl) {
-    const [lo, hi] = target(), [plo, phi] = pitchBand(), n = tl.f0.length, bw = tl.bin / 1000 * TL_PX_S;
-    const L = 6, W = Math.ceil(L + n * bw + 40), x = (ms) => L + ms / 1000 * TL_PX_S;
+  const TL_PX_S = 70; // the timeline's starting zoom, in pixels per second of reading: room for a word label most of the time
+  const TL_ZOOM = [15, 320]; // how far it zooms out and in
+  let tlPxs = null; // the zoom picked last, kept while the page is open
+  // The tall timeline's lanes, top to bottom, each [top, height] in px. They all share one time axis.
+  const TL_LANES = (() => {
+    const y = {}; let at = 38;
+    for (const [k, h] of [['p', 80], ['r', 56], ['s', 110], ['wp', 40], ['wr', 44]]) { y[k] = [at, h]; at += h + 24; }
+    y.lab = at - 10; y.H = y.lab + 22; return y;
+  })();
+  // The spectrogram as an image, coloured like the live one; made again when the theme changes.
+  function specImage(spec) {
+    if (spec._img && spec._lut === LUT) return spec._img;
+    const cv = document.createElement('canvas'); cv.width = Math.max(1, spec.cols); cv.height = spec.rows;
+    const g = cv.getContext('2d'), im = g.createImageData(cv.width, cv.height);
+    for (let c = 0; c < spec.cols; c++) for (let r = 0; r < spec.rows; r++) {
+      const v = spec.v[c * spec.rows + r], o = ((spec.rows - 1 - r) * cv.width + c) * 4;
+      im.data[o] = LUT[v * 3]; im.data[o + 1] = LUT[v * 3 + 1]; im.data[o + 2] = LUT[v * 3 + 2]; im.data[o + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+    spec._img = cv.toDataURL('image/png'); spec._lut = LUT;
+    return spec._img;
+  }
+  // The reading over time, in lanes on one time axis: pitch dots coloured by resonance (as in Sing), the resonance
+  // line with its goal band, the spectrogram with the formants read, and each word across its own stretch of time
+  // with its pitch and resonance. pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
+  function timelineSvg(rec, tl, pxs, spec, note) {
+    const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = TL_LANES;
+    const L = 6, W = Math.ceil(L + tl.dur / 1000 * pxs + 40), x = (ms) => L + ms / 1000 * pxs;
     const ps = tl.f0.filter(v => v > 0);
     const pmin = Math.max(50, Math.min(plo, ps.length ? D.quantile(ps, 0.03) : plo) - 15), pmax = Math.max(phi, ps.length ? D.quantile(ps, 0.97) : phi) + 15;
-    const TT = 12, PT = 34, PH = 80, RT = PT + PH + 30, RH = 64, LT = RT + RH + 22, H = LT + 24;
-    const py = (v) => PT + (1 - (clamp(v, pmin, pmax) - pmin) / (pmax - pmin)) * PH, ry = (v) => RT + (1 - clamp(v, 0, 100) / 100) * RH;
+    const lane = (k, v, a, b) => Y[k][0] + (1 - (clamp(v, a, b) - a) / (b - a)) * Y[k][1], bot = (k) => Y[k][0] + Y[k][1];
+    const py = (v) => lane('p', v, pmin, pmax), ry = (v) => lane('r', v, 0, 100), wpy = (v) => lane('wp', v, pmin, pmax), wry = (v) => lane('wr', v, 0, 100);
     const f1 = (v) => v.toFixed(1);
-    let g = `<rect class="wr-band" x="0" y="${f1(py(phi))}" width="${W}" height="${f1(py(plo) - py(phi))}"/>`
-      + `<rect class="wr-band" x="0" y="${f1(ry(Math.min(hi, 100)))}" width="${W}" height="${f1(ry(lo) - ry(Math.min(hi, 100)))}"/>`
-      + `<line class="wr-axis" x1="0" x2="${W}" y1="${RT + RH}" y2="${RT + RH}"/>`;
-    // time ticks every 5 seconds
-    for (let s = 0; s * 1000 <= tl.dur; s += 5) g += `<line class="tl-tick" x1="${f1(x(s * 1000))}" x2="${f1(x(s * 1000))}" y1="${TT + 4}" y2="${LT - 12}"/><text class="wr-lane" x="${f1(x(s * 1000) + 3)}" y="${TT}">${clockOf(s)}</text>`;
+    const band = (y0, y1) => `<rect class="wr-band" x="0" y="${f1(y0)}" width="${W}" height="${f1(y1 - y0)}"/>`;
+    let g = band(py(phi), py(plo)) + band(ry(hi), ry(lo)) + band(wpy(phi), wpy(plo)) + band(wry(hi), wry(lo))
+      + `<line class="wr-axis" x1="0" x2="${W}" y1="${bot('r')}" y2="${bot('r')}"/><line class="wr-axis" x1="0" x2="${W}" y1="${bot('wr')}" y2="${bot('wr')}"/>`;
+    // the spectrogram, stretched to the zoom, with F1-F3 where they were read
+    const [S0, SH] = Y.s;
+    g += `<rect class="tl-spbg" x="${L}" y="${S0}" width="${f1(W - L - 40)}" height="${SH}"/>`;
+    if (spec) g += `<image class="tl-spec" href="${specImage(spec)}" x="${L}" y="${S0}" width="${f1(spec.cols * spec.hop / 1000 * pxs)}" height="${SH}" preserveAspectRatio="none"/>`;
+    else if (note) g += `<text class="wr-lane" x="${L + 150}" y="${S0 + SH / 2 + 4}">${escapeHtml(note)}</text>`;
+    const fmax = spec ? spec.fmax : 5000;
+    (tl.fm || []).forEach((F, i) => {
+      if (!F) return;
+      F.forEach((f, j) => { if (f < fmax) g += `<rect class="tl-fm f${j + 1}" x="${f1(x(i * tl.bin))}" y="${f1(S0 + (1 - f / fmax) * SH - 1)}" width="${f1(Math.max(1.5, tl.bin / 1000 * pxs))}" height="2"/>`; });
+    });
+    // time ticks, closer together when zoomed in
+    const step = [1, 2, 5, 10, 15, 30].find(s => s * pxs >= 110) || 60;
+    for (let s = 0; s * 1000 <= tl.dur; s += step) g += `<line class="tl-tick" x1="${f1(x(s * 1000))}" x2="${f1(x(s * 1000))}" y1="16" y2="${Y.H - 4}"/><text class="wr-lane" x="${f1(x(s * 1000) + 3)}" y="12">${clockOf(s)}</text>`;
     // pitch, each dot coloured from the darker to the brighter average by the resonance heard there
+    const dotR = pxs < 40 ? 1.8 : 2.4;
     tl.f0.forEach((f, i) => {
       if (!f) return;
       const r = tl.rs[i], u = r != null ? Math.round(clamp((r - D.RES_AVG.masc) / (D.RES_AVG.fem - D.RES_AVG.masc), 0, 1) * 4) : -1;
-      g += `<circle class="tl-p ${u < 0 ? 'nr' : 'rz' + u}" cx="${f1(x((i + 0.5) * tl.bin))}" cy="${f1(py(f))}" r="${u < 0 ? 1.6 : 2.4}"/>`;
+      g += `<circle class="tl-p ${u < 0 ? 'nr' : 'rz' + u}" cx="${f1(x((i + 0.5) * tl.bin))}" cy="${f1(py(f))}" r="${u < 0 ? 1.6 : dotR}"/>`;
     });
     // resonance, broken where no vowel was read
     let run = [];
     const flush = () => { if (run.length > 1) g += `<polyline class="tl-rline" points="${run.join(' ')}"/>`; else if (run.length) { const [cx, cy] = run[0].split(','); g += `<circle class="tl-rdot" cx="${cx}" cy="${cy}" r="2"/>`; } run = []; };
     tl.rs.forEach((r, i) => { if (r != null) run.push(`${f1(x((i + 0.5) * tl.bin))},${f1(ry(r))}`); else flush(); });
     flush();
-    // words: a tick where each started, labels on two rows, a label left out when it would overlap
-    const end = [-1e9, -1e9], words = rec.byWord || [];
-    (tl.ws || []).forEach((ms, k) => {
-      if (ms == null || !words[k]) return;
-      const t = words[k][0], wx = x(ms), row = k % 2, w = t.length * 6.6 + 6;
-      g += `<line class="tl-wtick" x1="${f1(wx)}" x2="${f1(wx)}" y1="${LT - 12}" y2="${LT - 5 + row * 13}"/>`;
-      if (wx > end[row]) { g += `<text class="wr-word${D.wordVowels(t, PRON).why === 'function' ? ' fn' : ''}" x="${f1(wx + 2)}" y="${LT + 5 + row * 13}">${escapeHtml(t)}</text>`; end[row] = wx + w; }
+    // words, each across its own stretch: its pitch as a level, its resonance as a bar, its name under them.
+    // Names go on two rows, and one is left out when it would overlap (zoom in to see them all).
+    const end = [-1e9, -1e9], words = rec.byWord || [], spans = D.wordSpans(tl.ws, tl.dur);
+    const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
+    spans.forEach((sp, k) => {
+      if (!sp || !words[k]) return;
+      const [t, p, r, , rough] = words[k], x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2;
+      const tip = `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p)}`;
+      g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
+        + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
+        + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
+        + (p != null ? `<rect class="tl-wp${pitchOff(p) ? ' off' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wpy(p) - 2)}" width="${f1(wd)}" height="4" rx="2"/>` : '')
+        + (r != null ? `<rect class="wr-bar${resOff(r) ? ' off' : ''}${rough ? ' rough' : ''}" x="${f1(x0 + 0.5)}" y="${f1(wry(r))}" width="${f1(wd)}" height="${f1(Math.max(3, bot('wr') - wry(r)))}" rx="2"/>`
+          : fn ? '' : `<g class="wr-none"><circle cx="${f1(cx)}" cy="${bot('wr') - 7}" r="4"/><line x1="${f1(cx - 3)}" y1="${bot('wr') - 4}" x2="${f1(cx + 3)}" y2="${bot('wr') - 10}"/></g>`)
+        + '</g>';
+      const row = k % 2, lw = t.length * 6.6 + 6;
+      if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
     });
-    g += `<text class="wr-lane" x="${L}" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="${L}" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    // the lane names again every 15 s, so a phone scrolled along still says which lane is which
-    for (let s = 15; s * 1000 < tl.dur - 2000; s += 15) g += `<text class="wr-lane" x="${f1(x(s * 1000) + 4)}" y="${PT - 8}">Pitch</text><text class="wr-lane" x="${f1(x(s * 1000) + 4)}" y="${RT - 8}">Resonance</text>`;
-    g += `<line class="tl-head" x1="${L}" x2="${L}" y1="${TT + 4}" y2="${H}" visibility="hidden"/>`;
-    return { svg: `<svg class="wr-svg tl-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Pitch and resonance through the reading">${g}</svg>`, x, L };
+    g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
+    return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram and each word through the reading, on one time line">${g}</svg>`, x, L, W };
   }
-  // Fills the reading's timeline once its stored data is found, and the player when the recording is there too.
+  // The numbers for one word of a reading, for the line under a chart.
+  function wordReadout(rec, i) {
+    const [t, p, r, s, rough] = rec.byWord[i];
+    return `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
+  }
+  const TLSpec = { id: null, spec: null }; // the last recording's spectrogram, so reopening it is instant
+  // Fills the reading's timeline once its stored data is found, and the player and spectrogram when the recording is there too.
   async function wireTimeline(box, rec) {
     const el = box.querySelector('#rd-tl'); if (!el) return;
     const got = await Replay.get(rec.id);
     if (box.rec !== rec || !got || !got.tl || !got.tl.f0.length) return;
-    const tl = got.tl, blob = got.blob || null, view = timelineSvg(rec, tl);
+    const tl = got.tl, blob = got.blob || null, Y = TL_LANES, [lo, hi] = target(), [plo, phi] = pitchBand();
+    const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === rec.id ? TLSpec.spec : null, note: blob ? 'Reading the recording…' : "No recording on this device, so no spectrogram", view: null, sel: -1, on: -1, head: null, hold: false };
     el.hidden = false;
-    el.innerHTML = `<div class="section-head"><h4>Timeline${infoHtml('About the timeline', `Your reading from start to end. Dots are your pitch, coloured from darker to brighter resonance; the line below is your resonance, smoothed over a quarter second, and breaks where no vowel could be read. Words sit where the highlight reached them, which can trail your voice a little. ${blob ? `Tap anywhere to hear the reading from there, or pick a word in Word by word and choose Hear this word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played.'}`)}</h4>
-        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span></span></div>
-      ${blob ? `<div class="tl-ctl"><button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span></div>` : ''}
-      <div class="wr-scroll tl-scroll">${view.svg}</div>
-      <p class="small" id="tl-read" aria-live="polite">${blob ? 'Tap the timeline to play from that moment.' : 'Tap the timeline for the numbers at that moment.'}</p>`;
-    const svg = el.querySelector('svg'), scroll = el.querySelector('.tl-scroll'), head = svg.querySelector('.tl-head'), read = el.querySelector('#tl-read');
-    const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - view.L) / TL_PX_S * 1000, 0, tl.dur); };
+    const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
+    el.innerHTML = `<div class="section-head"><h4>Timeline${infoHtml('About the timeline', `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap anywhere to hear the reading from there, or tap a word to hear just that word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`)}</h4>
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span><span><i class="wr-key off"></i>off your goal</span></span></div>
+      <div class="tl-ctl">${blob ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}
+        <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
+      <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
+        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${lab('wp', 'Each word: pitch')}${lab('wr', 'Each word: resonance')}
+          ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
+      <p class="small" id="tl-read" aria-live="polite">${blob ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.'}</p>`;
+    const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
+    let svg = null, head = null;
+    const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
     const wordAt = (ms) => { let k = -1; (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
     const say = (ms) => {
       const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = rec.byWord && rec.byWord[k];
@@ -3138,39 +3193,99 @@
       for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
       return `<b>${clockOf(ms / 1000)}</b>${w ? ` · “${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
     };
+    const mark = (cls, k) => { svg.querySelectorAll(`.tl-w.${cls}`).forEach(x => x.classList.remove(cls)); const g = k >= 0 && svg.querySelector(`.tl-w[data-i="${k}"]`); if (g) g.classList.add(cls); };
     const place = (ms, follow) => {
-      const hx = view.x(ms); head.setAttribute('x1', hx.toFixed(1)); head.setAttribute('x2', hx.toFixed(1)); head.setAttribute('visibility', 'visible');
+      V.head = ms;
+      const hx = V.view.x(ms); head.setAttribute('x1', hx.toFixed(1)); head.setAttribute('x2', hx.toFixed(1)); head.setAttribute('visibility', 'visible');
       if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
     };
-    if (!blob) {
-      svg.addEventListener('click', (ev) => { const ms = msAt(ev); place(ms, false); read.innerHTML = say(ms); });
-      return;
-    }
-    const btn = el.querySelector('#tl-play'), clk = el.querySelector('#tl-clock');
-    const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
-    const ok = await Player.load(rec.id, blob);
-    if (box.rec !== rec) return;
-    if (!ok) { btn.remove(); clk.textContent = "This browser couldn't open the recording to play it. Save audio still works."; return; }
-    const last = { s: -1 };
-    const paint = () => { btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
+    const draw = () => {
+      V.view = timelineSvg(rec, tl, V.pxs, V.spec, V.note);
+      scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head');
+      if (V.head != null) place(V.head, false);
+      mark('sel', V.sel); mark('on', V.on);
+    };
+    // zoom about a point (px from the scroll's left edge): the playhead when it's in view, else the middle
+    const zoomTo = (pxs, ax) => {
+      pxs = clamp(pxs, TL_ZOOM[0], TL_ZOOM[1]); if (Math.abs(pxs - V.pxs) < 0.5) return;
+      if (ax == null) { const hx = V.head != null ? V.view.x(V.head) - scroll.scrollLeft : -1; ax = hx >= 0 && hx <= scroll.clientWidth ? hx : scroll.clientWidth / 2; }
+      const ms = (scroll.scrollLeft + ax - V.view.L) / V.pxs * 1000;
+      V.pxs = tlPxs = pxs; draw();
+      scroll.scrollLeft = Math.max(0, V.view.x(ms) - ax);
+    };
+    draw();
+    tlRedraw = () => { if (!el.isConnected || box.rec !== rec) { tlRedraw = null; return; } const sl = scroll.scrollLeft; draw(); scroll.scrollLeft = sl; };
+    el.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => {
+      const z = b.dataset.z;
+      zoomTo(z === 'in' ? V.pxs * 1.5 : z === 'out' ? V.pxs / 1.5 : (scroll.clientWidth - 50) / Math.max(1, tl.dur / 1000));
+    }));
+    // Ctrl + wheel (and a trackpad pinch, which arrives the same way) zooms about the pointer
+    let wz = null;
+    scroll.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return; e.preventDefault();
+      const ax = e.clientX - scroll.getBoundingClientRect().left;
+      wz = { f: (wz ? wz.f : 1) * Math.exp(-e.deltaY * 0.01), ax };
+      if (!wz.raf) wz.raf = requestAnimationFrame(() => { const w = wz; wz = null; zoomTo(V.pxs * w.f, w.ax); });
+    }, { passive: false });
+    // two-finger pinch on a phone: stretch the picture while pinching, then draw it again at the new zoom
+    let pin = null;
+    const gap = (t) => Math.abs(t[0].clientX - t[1].clientX);
+    scroll.addEventListener('touchstart', (e) => { if (e.touches.length === 2) pin = { d: Math.max(20, gap(e.touches)), ax: (e.touches[0].clientX + e.touches[1].clientX) / 2 - scroll.getBoundingClientRect().left, f: 1 }; }, { passive: true });
+    scroll.addEventListener('touchmove', (e) => {
+      if (!pin || e.touches.length !== 2) return; e.preventDefault();
+      pin.f = clamp(Math.max(20, gap(e.touches)) / pin.d, TL_ZOOM[0] / V.pxs, TL_ZOOM[1] / V.pxs);
+      svg.style.transformOrigin = `${scroll.scrollLeft + pin.ax}px 0`; svg.style.transform = `scaleX(${pin.f})`;
+    }, { passive: false });
+    const pinEnd = () => { if (!pin) return; const p = pin; pin = null; svg.style.transform = ''; zoomTo(V.pxs * p.f, p.ax); };
+    scroll.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinEnd(); });
+    scroll.addEventListener('touchcancel', pinEnd);
+    let playable = false;
     const hook = () => {
       Player.onTick = (s) => {
-        place(s * 1000, Player.playing); clk.textContent = `${clockOf(s)} / ${clockOf(Player.dur)}`;
-        if (Math.abs(s - last.s) > 0.1 || !Player.playing) { last.s = s; read.innerHTML = say(s * 1000); }
+        const ms = s * 1000; place(ms, Player.playing);
+        const clk = el.querySelector('#tl-clock'); if (clk) clk.textContent = `${clockOf(s)} / ${clockOf(Player.dur)}`;
+        const k = Player.playing ? wordAt(ms) : -1; if (k !== V.on) { V.on = k; mark('on', k); }
+        if (!V.hold && (Math.abs(s - (V.lastS || -1)) > 0.1 || !Player.playing)) { V.lastS = s; read.innerHTML = say(ms); }
       };
       Player.onState = paint;
     };
+    const btn = el.querySelector('#tl-play');
+    const paint = () => { if (!btn) return; btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
+    const pickWord = (i) => {
+      V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = wordReadout(rec, i);
+      const sp = D.wordSpans(tl.ws, tl.dur)[i];
+      if (playable && Player.id === rec.id) {
+        hook();
+        Player.play(Math.max(0, sp[0] - 150) / 1000, (sp[1] + 250) / 1000);
+      } else if (sp) place(sp[0], true);
+    };
+    scroll.addEventListener('click', (ev) => {
+      if (!svg) return;
+      const g = ev.target.closest('.tl-w');
+      if (g) return pickWord(+g.dataset.i);
+      const ms = msAt(ev); V.hold = false; V.sel = -1; mark('sel', -1);
+      if (playable && Player.id === rec.id) { hook(); Player.play(ms / 1000); } else { place(ms, false); read.innerHTML = say(ms); }
+    });
+    scroll.addEventListener('keydown', (e) => { const g = e.target.closest && e.target.closest('.tl-w'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickWord(+g.dataset.i); } });
+    if (!blob) return;
+    const clk = el.querySelector('#tl-clock');
+    const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
+    const ok = await Player.load(rec.id, blob);
+    if (box.rec !== rec) return;
+    if (!ok) { btn.remove(); clk.textContent = "This browser couldn't open the recording to play it. Save audio still works."; V.note = "This browser couldn't open the recording, so no spectrogram"; draw(); return; }
+    playable = true;
     hook(); btn.disabled = false; clk.textContent = `0:00 / ${clockOf(Player.dur)}`; paint();
-    btn.onclick = () => { if (Player.id !== rec.id) return; hook(); Player.playing ? Player.pause() : Player.play(); };
-    svg.addEventListener('click', (ev) => { if (Player.id !== rec.id) return; hook(); Player.play(msAt(ev) / 1000); });
+    btn.onclick = () => { if (Player.id !== rec.id) return; hook(); V.hold = false; Player.playing ? Player.pause() : Player.play(); };
     box.cue = {
       canPlay: (i) => tl.ws && tl.ws[i] != null && Player.id === rec.id,
-      word: (i) => {
-        hook();
-        const nx = tl.ws.slice(i + 1).find(v => v != null), to = (nx != null ? nx : tl.dur) + 250;
-        Player.play(Math.max(0, tl.ws[i] - 150) / 1000, to / 1000);
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
+      word: (i) => { pickWord(i); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
     };
+    // the spectrogram is worked out from the recording itself, after the page has had a moment to draw
+    if (!V.spec) setTimeout(() => {
+      if (box.rec !== rec || Player.id !== rec.id || !Player.buf) return;
+      try { V.spec = D.spectrogram(Player.buf.getChannelData(0), Player.buf.sampleRate); TLSpec.id = rec.id; TLSpec.spec = V.spec; } catch (e) { V.note = "The spectrogram couldn't be drawn"; }
+      const sl = scroll.scrollLeft; draw(); scroll.scrollLeft = sl;
+    }, 30);
   }
   function startReading(id) {
     endSpots();
@@ -3567,8 +3682,7 @@
     const pick = (g) => {
       svg.querySelectorAll('.wr-w.sel').forEach(x => x.classList.remove('sel'));
       g.classList.add('sel');
-      const [t, p, r, s, rough] = rec.byWord[+g.dataset.i];
-      read.innerHTML = `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
+      read.innerHTML = wordReadout(rec, +g.dataset.i);
       // with the recording on hand, the word can be heard from the timeline
       if (box.cue && box.cue.canPlay(+g.dataset.i)) {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'btn sm ghost wr-play'; b.textContent = '▶ Hear this word';

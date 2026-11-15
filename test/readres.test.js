@@ -102,5 +102,23 @@ for (const [pitch, t] of [[120, 0], [200, 1]]) {
   check(tl.rs[13] == null && tl.rs[9] != null && tl.rs[9] > 40 === false, 'smoothed line keeps a long gap open and does not bleed across it');
   check(Math.abs(tl.dur - 1990) <= 1, `duration ${tl.dur} ms`);
 }
+// ---- the tall timeline: words across their own stretch, formants per bin, and a spectrogram of the recording ----
+{
+  const sp = D.wordSpans([0, 400, null, 900, null], 1500);
+  check(JSON.stringify(sp) === '[[0,400],[400,900],null,[900,1500],null]', `word spans ${JSON.stringify(sp)}: each word runs to the next one reached, or to the end`);
+  const fr = [];
+  for (let k = 0; k < 100; k++) fr.push({ t: k * 10, i: 0, f0: 200, res: 60, F: [500 + (k % 2) * 10, 1800, 2900] });
+  const tl = D.readingTimeline(fr, 0, 1, 50);
+  check(tl.fm.length === tl.f0.length && tl.fm[0][1] === 1800 && tl.fm[0][2] === 2900, `formants per bin (${JSON.stringify(tl.fm[0])})`);
+  // 1 s of a 1 kHz tone, then 1 s of a 3 kHz tone, at 48 kHz
+  const sr = 48000, x = new Float32Array(2 * sr);
+  for (let i = 0; i < x.length; i++) x[i] = 0.3 * Math.sin(2 * Math.PI * (i < sr ? 1000 : 3000) * i / sr);
+  const t0 = Date.now(), g = D.spectrogram(x, sr), ms = Date.now() - t0;
+  const peak = (c) => { let b = 0; for (let r = 0; r < g.rows; r++) if (g.v[c * g.rows + r] > g.v[c * g.rows + b]) b = r; return (b + 0.5) * g.fmax / g.rows; };
+  check(g.hop === 10 && Math.abs(g.cols - 198) <= 2, `spectrogram: ${g.cols} columns of ${g.hop} ms for 2 s`);
+  check(Math.abs(peak(40) - 1000) <= 100 && Math.abs(peak(150) - 3000) <= 100, `spectrogram peaks at the tones (${Math.round(peak(40))}, ${Math.round(peak(150))} Hz), ${ms} ms`);
+  const long = D.spectrogram(new Float32Array(sr * 100), sr);
+  check(long.cols <= 8000 && long.hop > 10, `a long recording keeps under 8000 columns (${long.cols} of ${long.hop} ms)`);
+}
 console.log(fails ? `\n${fails} failed` : '\nall reading resonance checks passed');
 process.exit(fails ? 1 : 0);

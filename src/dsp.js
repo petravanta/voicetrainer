@@ -1031,7 +1031,58 @@
       for (let j = Math.max(0, i - k); j <= Math.min(n - 1, i + k); j++) if (res[j] != null) { near.push(res[j]); if (Math.abs(j - i) <= 1) anyClose = true; }
       return near.length && (v != null || anyClose) ? Math.round(mean(near) * 10) / 10 : null;
     });
-    return { bin: binMs, dur, f0, res, rough, rs, ws };
+    // formants per bin (median F1-F3 of the voiced frames), drawn over the spectrogram
+    const fm = Array.from({ length: n }, () => [[], [], []]);
+    for (const f of fr) {
+      if (!(f.f0 > 0) || !Array.isArray(f.F) || f.F.length < 3) continue;
+      const a = fm[Math.min(n - 1, Math.floor((f.t - t0) / binMs))];
+      for (let j = 0; j < 3; j++) if (f.F[j] > 0) a[j].push(f.F[j]);
+    }
+    const fmt = fm.map(a => (a[0].length && a[1].length && a[2].length ? a.map(v => Math.round(median(v))) : null));
+    return { bin: binMs, dur, f0, res, rough, rs, ws, fm: fmt };
+  }
+  // Each word's stretch of the reading, [start, end] in ms: from where the highlight reached it to where it
+  // reached the next word (or the end), or null for a word the highlight never reached.
+  function wordSpans(ws, dur) {
+    return (ws || []).map((s, i) => {
+      if (s == null) return null;
+      let e = dur;
+      for (let j = i + 1; j < ws.length; j++) if (ws[j] != null) { e = ws[j]; break; }
+      return [s, Math.max(s, e)];
+    });
+  }
+  // A spectrogram of a whole recording, for drawing under the reading timeline: the sound brought down to about
+  // 11 kHz, 23 ms Hann windows every hopMs (wider for long recordings, so a column count stays under maxCols),
+  // rows from 0 Hz up to fmax, each cell 0..255 over the loudest 65 dB. v[col * rows + row], row 0 = 0 Hz.
+  function spectrogram(x, sr, { hopMs = 10, fmax = 5000, rows = 100, maxCols = 8000 } = {}) {
+    const factor = Math.max(1, Math.floor(sr / 11025)), fs = sr / factor;
+    let y = x;
+    if (factor > 1) {
+      const h = lowpassFIR(31, 0.45 / factor), m = Math.floor((x.length - h.length) / factor) + 1;
+      y = new Float32Array(Math.max(0, m));
+      for (let k = 0; k < m; k++) { let s = 0; const o = k * factor; for (let j = 0; j < h.length; j++) s += h[j] * x[o + j]; y[k] = s; }
+    }
+    const dur = y.length / fs * 1000;
+    const hop = Math.max(hopMs, Math.ceil(dur / maxCols)), N = 256, w = hann(N), step = fs * hop / 1000;
+    const cols = Math.max(0, Math.floor((y.length - N) / step) + 1), binHz = fs / N;
+    const db = new Float32Array(cols * rows), re = new Float64Array(N), im = new Float64Array(N);
+    for (let c = 0; c < cols; c++) {
+      const o = Math.round(c * step);
+      for (let i = 0; i < N; i++) { const a = o + i; re[i] = (y[a] - 0.9 * (a > 0 ? y[a - 1] : 0)) * w[i]; im[i] = 0; } // pre-emphasis lifts the formants
+      fft(re, im);
+      for (let r = 0; r < rows; r++) {
+        const b0 = Math.floor(r * fmax / rows / binHz), b1 = Math.max(b0, Math.floor((r + 1) * fmax / rows / binHz));
+        let p = 0;
+        for (let b = b0; b <= Math.min(b1, N / 2); b++) p = Math.max(p, re[b] * re[b] + im[b] * im[b]);
+        db[c * rows + r] = 10 * Math.log10(p + 1e-12);
+      }
+    }
+    // the top is the 99.5th percentile, so a click or pop doesn't wash the rest out
+    const sample = [];
+    for (let i = 0; i < db.length; i += Math.max(1, Math.floor(db.length / 20000))) sample.push(db[i]);
+    const top = sample.length ? quantile(sample, 0.995) : 0, v = new Uint8Array(cols * rows);
+    for (let i = 0; i < db.length; i++) v[i] = Math.max(0, Math.min(255, Math.round((db[i] - top + 65) / 65 * 255)));
+    return { hop, rows, cols, fmax, v };
   }
   // Shorter vowels: in a reading, a frame whose formants didn't hold still is still read on its own (its own 30 ms,
   // not smoothed across the consonant next to it) when it fits one of the word's vowels. One such frame is noisy,
@@ -2049,7 +2100,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingTimeline, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingTimeline, wordSpans, spectrogram, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
