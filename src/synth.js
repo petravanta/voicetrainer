@@ -47,7 +47,7 @@
     // mild high-pass to remove low-frequency energy
     let prev = 0;
     for (let i = 0; i < n; i++) { const v = x[i]; x[i] = v - 0.95 * prev; prev = v; }
-    return normalize(x, opts.level || 0.12, fs);
+    return normalize(x, opts.level || 0.12, fs, STYLE === 'natural' ? 0.035 : 0.02);
   }
 
   function silence(fs, dur) { return new Float32Array(Math.round(fs * dur)); }
@@ -163,8 +163,33 @@
       const f0w = o.f0At ? o.pitch * o.f0At(wi, 0) : o.pitch * (1.12 - 0.24 * sentPos / Math.max(1, sentLen - 1 || 1));
       starts.push(time);
       let vi = 0;
-      for (const u of units) {
+      // natural voice: voiced sounds in a row are said as one run (see voicedRun)
+      const nat = STYLE === 'natural';
+      let run = [];
+      const flush = () => { if (run.length) { push(voicedRun(fs, run, { bright: b, seed, ramp: 0.015 })); run = []; } };
+      // next to a consonant, F1 falls and F2 leans toward the tongue-tip position (~1700 Hz)
+      const edge = (F) => [Math.max(250, F[0] * 0.8), F[1] + 0.25 * (1700 - F[1]), F[2]];
+      for (let ui = 0; ui < units.length; ui++) {
+        const u = units[ui];
         seed += 7;
+        if (nat && (u.v || u.nasal || u.glide)) {
+          const voicedU = (q) => q && (q.v || q.nasal || q.glide), prev = units[ui - 1], next = units[ui + 1];
+          let seg;
+          if (u.v) {
+            const F = mixV[u.v] || mixV.V, last = vi === nv - 1, first = vi === 0;
+            const dur = (first ? 0.17 : 0.13) * (last && /[.!?,;:]$/.test(words[wi]) ? 1.35 : 1) / rate;
+            const fa = o.f0At ? o.pitch * o.f0At(wi, vi / nv) : f0w * (first ? 1.05 : 1);
+            const fb = o.f0At ? o.pitch * o.f0At(wi, (vi + 1) / nv) : f0w * (first ? 1.0 : 0.96);
+            seg = { dur, f0a: fa, f0b: fb, F, level: 0.3, trans: 0.05 };
+            if (prev && !voicedU(prev)) seg.from = edge(F);
+            if (next && !voicedU(next)) seg.to = edge(F);
+            vi++;
+          } else seg = { dur: 0.06 / rate, f0a: f0w, f0b: f0w, F: [300, 1350, 2500], level: 0.12, bws: [90, 200, 250, 300, 350], trans: 0.025 };
+          run.push(seg);
+          continue;
+        }
+        flush();
+        if (nat && u.stop) { push(concat([silence(fs, 0.036 / rate), burst(fs, 0.014 / rate, 3200, 0.05, seed)])); continue; }
         if (u.v) {
           const F = mixV[u.v] || mixV.V, last = vi === nv - 1, first = vi === 0;
           const dur = (first ? 0.17 : 0.13) * (last && /[.!?,;:]$/.test(words[wi]) ? 1.35 : 1) / rate;
@@ -177,6 +202,7 @@
         else if (u.fric) push(sibilant(fs, 0.06 / rate, 2000, { level: 0.04, seed }));
         else push(silence(fs, 0.05 / rate));
       }
+      flush();
       ends.push(time);
       const wd = words[wi];
       const gap = /[.!?]["')\]]*$/.test(wd) ? 0.45 : /[,;:]["')\]]*$/.test(wd) ? 0.22 : 0.05;
@@ -191,6 +217,7 @@
   // Voiced segment with gliding pitch and formant transitions: formants move from Fa to F over
   // the first `trans` seconds and from F to Fb over the last `trans` seconds (coarticulation).
   function voiced(fs, dur, f0a, f0b, F, opts = {}) {
+    if (STYLE === 'natural' && !opts.classic) return voicedNatural(fs, dur, f0a, f0b, F, opts);
     const n = Math.round(fs * dur), x = new Float32Array(n), rand = rng(opts.seed || 13);
     const trans = opts.trans || 0.07, Fa = opts.from || F, Fb = opts.to || F;
     let phase = 0, lp = 0;
@@ -230,6 +257,153 @@
     return normalize(x, opts.level || 0.3, fs, opts.ramp);
   }
   function smooth(u) { return u * u * (3 - 2 * u); }
+
+  // ---------- natural voice (LF glottal source) ----------
+  // The classic voice above is a smooth Rosenberg pulse with almost no cycle-to-cycle variation,
+  // which is what makes it sound like a machine. The natural voice uses the Liljencrants-Fant (LF)
+  // glottal flow derivative, shaped by one "Rd" number (0.3 pressed .. 1 modal .. 2.7 breathy;
+  // Fant 1995), with cycle-to-cycle jitter and shimmer, pitch-synchronous aspiration noise and
+  // slow formant flutter. F1-F3 targets are unchanged, so the analyzer reads the same vowels.
+  let STYLE = 'classic';
+  function setStyle(s) { STYLE = s === 'natural' ? 'natural' : 'classic'; }
+  function getStyle() { return STYLE; }
+  const LF_N = 1024, lfCache = new Map();
+  function lfTable(Rd) {
+    Rd = Math.max(0.3, Math.min(2.7, Rd));
+    const key = Math.round(Rd * 20);
+    if (lfCache.has(key)) return lfCache.get(key);
+    Rd = key / 20;
+    const Rap = (-1 + 4.8 * Rd) / 100, Rkp = (22.4 + 11.8 * Rd) / 100;
+    const Rgp = 0.25 * Rkp / ((0.11 * Rd / (0.5 + 1.2 * Rkp)) - Rap);
+    const tp = 1 / (2 * Rgp), te = tp * (1 + Rkp), ta = Rap, tr = 1 - te, wg = Math.PI / tp;
+    let eps = 1 / ta;
+    for (let k = 0; k < 60; k++) eps = (1 - Math.exp(-eps * tr)) / ta;
+    const ex = Math.exp(-eps * tr);
+    const ret = -(1 / (eps * ta)) * ((1 - ex) / eps - tr * ex); // area of the return phase (< 0)
+    const openArea = (a) => {
+      const E0 = -1 / (Math.exp(a * te) * Math.sin(wg * te));
+      return E0 * (Math.exp(a * te) * (a * Math.sin(wg * te) - wg * Math.cos(wg * te)) + wg) / (a * a + wg * wg);
+    };
+    let lo = -30, hi = 300; // the flow must return to zero: open area + return area = 0
+    for (let k = 0; k < 80; k++) { const m = (lo + hi) / 2; if (openArea(m) + ret > 0) lo = m; else hi = m; }
+    const a = (lo + hi) / 2, E0 = -1 / (Math.exp(a * te) * Math.sin(wg * te));
+    const tab = new Float32Array(LF_N + 1);
+    for (let i = 0; i <= LF_N; i++) {
+      const t = i / LF_N;
+      tab[i] = t <= te ? E0 * Math.exp(a * t) * Math.sin(wg * t) : -(1 / (eps * ta)) * (Math.exp(-eps * (t - te)) - ex);
+    }
+    const out = { tab, te };
+    lfCache.set(key, out);
+    return out;
+  }
+  function gauss(rand) { return (rand() + rand() + rand() - 1.5) * 2; }
+  // LF source with jitter, shimmer and aspiration. f0(i) and rd(i) give pitch and voice quality per
+  // sample; breath(i) 0..1 adds airflow noise. Returns the glottal flow derivative (lip radiation
+  // included), ready for the vocal tract filter.
+  function lfSource(fs, n, f0, rd, breath, rand, o = {}) {
+    const x = new Float32Array(n), jit = o.jitter ?? 0.006, shim = o.shimmer ?? 0.04;
+    let phase = 0, jf = 1, sf = 1, L = lfTable(rd(0)), n1 = 0, n2 = 0;
+    for (let i = 0; i < n; i++) {
+      phase += f0(i) * jf / fs;
+      if (phase >= 1) { // a new glottal cycle: its own period, loudness and pulse shape
+        phase -= 1;
+        jf = 1 + jit * gauss(rand); sf = 1 + shim * gauss(rand);
+        L = lfTable(rd(i));
+      }
+      const p = phase * LF_N, k = p | 0, fr = p - k;
+      const g = L.tab[k] + (L.tab[k + 1] - L.tab[k]) * fr;
+      // turbulence at the glottis: high-passed noise, strongest while the folds are open
+      const w = rand() - 0.5, hp = w - 0.5 * n1 + 0.1 * n2; n2 = n1; n1 = w;
+      const br = breath(i), open = phase < L.te ? 1 : 0.35;
+      x[i] = sf * g + (0.05 + 0.9 * br) * open * hp;
+    }
+    return x;
+  }
+  // A run of voiced sounds said in one breath (a vowel into an "n", "oo-w-oo"...): voicing and
+  // pitch carry on across the joins and formants glide between targets, as in real speech.
+  // segs: [{dur, f0a, f0b, F, level?, bws?, from?, to?}]. o: {bright, breath, seed, trans, ramp}.
+  function voicedRun(fs, segs, o = {}) {
+    const ns = segs.map(s => Math.round(fs * s.dur)), N = ns.reduce((a, b) => a + b, 0);
+    const rand = rng((o.seed || 13) * 31 + 7), t0 = (o.seed || 13) * 0.37, dur = N / fs;
+    const ph = [0, 0, 0, 0, 0, 0, 0, 0].map(() => rand() * 6.283);
+    const br = o.breath || 0;
+    // brighter voices close the folds faster (lower Rd); breathy ones stay open longer
+    const rd0 = Math.min(2.7, (o.bright == null ? 0.95 : 1.4 - 0.9 * o.bright) + 1.4 * br);
+    const bwScale = (o.bright == null ? 1 : 1.3 - 0.5 * o.bright) * (1 + 0.4 * br);
+    const f0 = new Float32Array(N), Ft = [0, 1, 2].map(() => new Float32Array(N)), bw = [0, 1, 2, 3, 4].map(() => new Float32Array(N));
+    const start = [];
+    let off = 0;
+    segs.forEach((s, j) => {
+      start.push(off);
+      const prev = segs[j - 1], next = segs[j + 1], n = ns[j];
+      const tr = Math.min(s.trans || o.trans || 0.07, 0.45 * s.dur);
+      const bws = (s.bws || [65, 95, 110, 190, 240]).map(b => b * bwScale);
+      for (let k = 0; k < 3; k++) {
+        const a = s.from ? s.from[k] : prev ? (prev.F[k] + s.F[k]) / 2 : s.F[k];
+        const b = s.to ? s.to[k] : next ? (next.F[k] + s.F[k]) / 2 : s.F[k], m = s.F[k];
+        for (let i = 0; i < n; i++) {
+          const t = i / fs;
+          Ft[k][off + i] = t < tr ? a + (m - a) * smooth(t / tr) : t > s.dur - tr ? m + (b - m) * smooth((t - (s.dur - tr)) / tr) : m;
+        }
+      }
+      for (let i = 0; i < n; i++) {
+        f0[off + i] = s.f0a + (s.f0b - s.f0a) * i / n;
+        for (let k = 0; k < 5; k++) bw[k][off + i] = bws[k];
+      }
+      off += n;
+    });
+    // smooth the joins of pitch and bandwidth (about 15 ms)
+    const a15 = 1 - Math.exp(-1 / (0.015 * fs));
+    for (const arr of [f0, ...bw]) { let y = arr[0]; for (let i = 0; i < N; i++) { y += a15 * (arr[i] - y); arr[i] = y; } }
+    const last = segs[segs.length - 1], sags = last.f0b <= last.f0a;
+    for (let i = 0; i < N; i++) {
+      const t = i / fs, tt = t + t0;
+      const drift = 0.008 * Math.sin(6.283 * 1.1 * tt + ph[0]) + 0.006 * Math.sin(6.283 * 2.7 * tt + ph[1]) + 0.004 * Math.sin(6.283 * 0.5 * tt + ph[2]);
+      // pitch settles in at the onset and sags a little as the sound dies away
+      // (only when the run is falling anyway, so a question still ends high)
+      const on = 1 + 0.02 * Math.exp(-t / 0.04), fall = sags ? 1 - 0.015 * Math.max(0, (t - dur + 0.08) / 0.08) : 1;
+      f0[i] *= (1 + drift + 0.004 * Math.sin(6.283 * 5.3 * t)) * on * fall;
+      // formants are never quite still: a slow wander of under 1%
+      for (let k = 0; k < 3; k++) Ft[k][i] *= 1 + 0.007 * Math.sin(6.283 * (0.7 + 0.4 * k) * tt + ph[5 + k]);
+    }
+    const x = lfSource(fs, N, (i) => f0[i], (i) => rd0 + 0.3 * Math.max(0, 1 - i / (fs * 0.05)), () => br, rand, o);
+    const F4 = (i) => Ft[2][i] * 1.22 + 250, F5 = (i) => Ft[2][i] * 1.38 + 500;
+    const tracks = [(i) => Ft[0][i], (i) => Ft[1][i], (i) => Ft[2][i], F4, F5];
+    tracks.forEach((tr, k) => { if (tr(0) < fs / 2 - 100) resonateArr(x, fs, tr, bw[k]); });
+    // loudness: each segment at its own level, blended across the joins, soft start and end
+    const gains = segs.map((s, j) => {
+      let e = 0; const a = start[j], n = ns[j];
+      for (let i = a; i < a + n; i++) e += x[i] * x[i];
+      return (s.level || o.level || 0.3) / Math.sqrt(e / Math.max(1, n) || 1);
+    });
+    const xf = Math.round(0.02 * fs), ramp = Math.max(1, Math.round(fs * Math.max(o.ramp || 0.02, 0.012)));
+    for (let j = 0; j < segs.length; j++) {
+      const a = start[j], n = ns[j];
+      for (let i = 0; i < n; i++) {
+        let g = gains[j];
+        if (j > 0 && i < xf / 2) g = Math.exp(Math.log(gains[j - 1]) + (Math.log(gains[j]) - Math.log(gains[j - 1])) * smooth(0.5 + i / xf));
+        if (j < segs.length - 1 && i >= n - xf / 2) g = Math.exp(Math.log(gains[j]) + (Math.log(gains[j + 1]) - Math.log(gains[j])) * smooth((i - (n - xf / 2)) / xf));
+        const p = a + i, env = smooth(Math.min(1, p / ramp, (N - 1 - p) / ramp));
+        x[p] *= g * env;
+      }
+    }
+    for (let i = 0; i < N; i++) { const tt = i / fs + t0; x[i] *= 1 + 0.04 * Math.sin(6.283 * 2.9 * tt + ph[3]) + 0.025 * Math.sin(6.283 * 6.7 * tt + ph[4]); }
+    return x;
+  }
+  function resonateArr(x, fs, track, bwArr) {
+    let y1 = 0, y2 = 0, c = 0, g = 0, r2 = 0;
+    for (let n = 0; n < x.length; n++) {
+      if (n % 32 === 0) {
+        const r = Math.exp(-Math.PI * bwArr[n] / fs);
+        r2 = r * r; c = 2 * r * Math.cos(2 * Math.PI * track(n) / fs); g = 1 - c + r2;
+      }
+      const y = g * x[n] + c * y1 - r2 * y2;
+      y2 = y1; y1 = y; x[n] = y;
+    }
+  }
+  function voicedNatural(fs, dur, f0a, f0b, F, opts = {}) {
+    return voicedRun(fs, [{ dur, f0a, f0b, F, from: opts.from, to: opts.to, bws: opts.bws, level: opts.level, trans: opts.trans }], opts);
+  }
   function trackResonate(x, fs, track, bw) {
     const r = Math.exp(-Math.PI * bw / fs), r2 = r * r;
     let y1 = 0, y2 = 0, c = 0, g = 0;
@@ -328,7 +502,11 @@
     const fem = goal === 'fem', V = (k) => { const v = VOWELS.find(x => x.key === k); return fem ? v.W : v.M; };
     const ee = V('i'), oo = V('u'), w = [oo[0] * 0.9, oo[1] * 0.85, oo[2]];
     const f0 = (fem ? 190 : 118) * (o.f0 || 1), lead = silence(fs, 0.15);
-    const one = () => concat([
+    const one = () => STYLE === 'natural' ? voicedRun(fs, [
+      { dur: 0.34, f0a: f0 * 1.04, f0b: f0, F: oo, from: ee, to: w, trans: 0.12, level: 0.3 },
+      { dur: 0.07, f0a: f0, f0b: f0 * 1.02, F: w, level: 0.16, trans: 0.03 },
+      { dur: 0.5, f0a: f0 * 1.06, f0b: f0 * 0.94, F: oo, from: w, trans: 0.06, level: 0.3 },
+    ], { seed: 9, ramp: 0.04 }) : concat([
       voiced(fs, 0.34, f0 * 1.04, f0, oo, { from: ee, to: w, trans: 0.12, ramp: 0.03 }),
       voiced(fs, 0.07, f0, f0 * 1.02, w, { level: 0.12, ramp: 0.01 }),
       voiced(fs, 0.5, f0 * 1.06, f0 * 0.94, oo, { from: w, trans: 0.06, ramp: 0.06 }),
@@ -339,7 +517,7 @@
     return concat(parts);
   }
 
-  const api = { vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
+  const api = { setStyle, getStyle, voicedRun, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
