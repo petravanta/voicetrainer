@@ -1003,6 +1003,36 @@
       return { p: m(a.p, 3), r: r != null ? r : rl, s: m(a.s, 2), rough: rl != null };
     });
   }
+  // A reading over time, for the replay timeline: frames ({ t: ms, i: word index, f0, res, loose }) cut into
+  // bins of binMs from t0 (when the recording started). Each bin keeps the median pitch of its voiced frames
+  // and the mean resonance of its steady vowel frames (or of short-vowel frames, marked rough, when it has no
+  // steady one). rs is the resonance smoothed over about a quarter second, so the line follows the voice
+  // rather than frame jitter; gaps longer than that stay gaps. ws: when the highlight first reached each word.
+  function readingTimeline(frames, t0, nWords, binMs = 50) {
+    const fr = (frames || []).filter(f => Number.isFinite(f.t) && f.t >= t0);
+    const dur = fr.length ? Math.ceil(fr[fr.length - 1].t - t0) : 0, n = Math.max(1, Math.ceil(dur / binMs));
+    const acc = Array.from({ length: n }, () => ({ p: [], r: [], l: [] }));
+    const ws = Array(nWords).fill(null);
+    let reached = -1;
+    for (const f of fr) {
+      const ms = f.t - t0, a = acc[Math.min(n - 1, Math.floor(ms / binMs))];
+      if (f.f0 > 0) a.p.push(f.f0);
+      if (Number.isFinite(f.res)) (f.loose ? a.l : a.r).push(f.res);
+      // the highlight only moves forward in a reading, so a word starts when it (or a later word) is first reached
+      while (reached < Math.min(f.i, nWords - 1)) { reached++; ws[reached] = Math.round(ms); }
+    }
+    const mean = (v) => v.reduce((x, y) => x + y, 0) / v.length;
+    const f0 = acc.map(a => (a.p.length ? Math.round(median(a.p)) : 0));
+    const res = acc.map(a => (a.r.length ? Math.round(mean(a.r) * 10) / 10 : a.l.length ? Math.round(mean(a.l) * 10) / 10 : null));
+    const rough = acc.map(a => (!a.r.length && a.l.length ? 1 : 0));
+    const k = Math.max(1, Math.round(125 / binMs));
+    const rs = res.map((v, i) => {
+      const near = []; let anyClose = false;
+      for (let j = Math.max(0, i - k); j <= Math.min(n - 1, i + k); j++) if (res[j] != null) { near.push(res[j]); if (Math.abs(j - i) <= 1) anyClose = true; }
+      return near.length && (v != null || anyClose) ? Math.round(mean(near) * 10) / 10 : null;
+    });
+    return { bin: binMs, dur, f0, res, rough, rs, ws };
+  }
   // Shorter vowels: in a reading, a frame whose formants didn't hold still is still read on its own (its own 30 ms,
   // not smoothed across the consonant next to it) when it fits one of the word's vowels. One such frame is noisy,
   // so a word needs 3 of them, and they only fill words and readings the steady frames leave empty. On 8 clips of a
@@ -2019,7 +2049,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, readingTimeline, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
