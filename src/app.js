@@ -699,8 +699,23 @@
       $('reader-voice').addEventListener('change', (e) => { this.get().voice = e.target.value; this.save(); });
     },
   };
+  // Sustain: Hear target (and Play example) hold the sound steady until Stop, instead of a short clip.
+  // Only single sounds have a held version (Synth.canSustain); the choice is kept on this device.
+  const Sustain = {
+    KEY: 'voicetrainer.sustain', on: (() => { try { return localStorage.getItem('voicetrainer.sustain') === '1'; } catch (e) { return false; } })(),
+    MAX_S: 120, // a held sound stops by itself after two minutes
+    set(on) { this.on = !!on; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} },
+    applies: (def) => Synth.canSustain(def),
+  };
+  function playHeld(def) {
+    ensureCtx();
+    const fem = state.goal === 'fem', h = Synth.sustain(ctx.sampleRate, def, state.goal, D.VOWELS, D.SIBILANTS, { shift: D.WHISPER_SHIFT });
+    const what = def.type === 'sib' ? `"${def.cue}"` : def.type === 'whisper' ? 'whisper' : def.type === 'word' ? `"${def.cue}" (vowel)` : `"${D.VOWEL_BY_KEY[def.vowel].cue}"`;
+    playSamples(h.x, 'hold', `${what} held, typical ${fem ? 'feminine' : 'masculine'}`, h);
+  }
   function playExample(def, mode) {
     ensureCtx();
+    if (mode === 'play' && Sustain.on && Sustain.applies(def)) return playHeld(def);
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
     if (def.type === 'embody') return playSamples(Synth.uwu(fs, state.goal, D.VOWELS), mode, `plain "${def.say}", typical ${fem ? 'feminine' : 'masculine'}`);
@@ -708,7 +723,8 @@
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
   }
-  function playSamples(x, mode, label) {
+  // loop: {loopStart, loopEnd} (seconds) plays the start once, then repeats that stretch until stopped
+  function playSamples(x, mode, label, loop) {
     ensureCtx();
     stopExample();
     const fs = ctx.sampleRate;
@@ -716,12 +732,15 @@
     ab.copyToChannel(x, 0);
     const src = ctx.createBufferSource();
     src.buffer = ab;
-    src.connect(ctx.destination);
+    if (loop) { src.loop = true; src.loopStart = loop.loopStart; src.loopEnd = loop.loopEnd; }
+    // the speakers get it through a gain, so Stop can fade it out instead of clicking
+    const out = ctx.createGain(); src.connect(out); out.connect(ctx.destination); exOut = out;
     // the natural voice gets a touch of room sound on the speakers only; the charts see it dry
-    if (Synth.getStyle() === 'natural') { const r = roomFor(fs); src.connect(r.input); r.output.connect(ctx.destination); exRoom = r; }
+    if (Synth.getStyle() === 'natural') { const r = roomFor(fs); out.connect(r.input); r.output.connect(ctx.destination); exRoom = r; }
+    clearTimeout(exCap); if (loop) exCap = setTimeout(() => { if (exSrc === src) stopExample(); }, Sustain.MAX_S * 1000);
     if (state.running !== 'file' && state.running !== 'demo') src.connect(analyser); // show it on the charts
     src.onended = () => { if (exSrc === src) finishExample(); };
-    exSrc = src;
+    exSrc = src; exMode = mode;
     meterFrames = []; an.reset();
     startDemoView(state.drill, label);
     src.start();
@@ -729,7 +748,7 @@
     setExampleUi(mode);
   }
   // A small, soft room: a quiet decaying noise tail (about 0.3 s) mixed in under the dry voice.
-  let exRoom = null, roomIR = null;
+  let exRoom = null, roomIR = null, exOut = null, exCap = 0, exMode = null;
   function roomFor(fs) {
     if (!roomIR || roomIR.sampleRate !== fs) {
       const n = Math.round(fs * 0.45), ir = ctx.createBuffer(2, n, fs);
@@ -752,13 +771,17 @@
   }
   function stopExample() {
     if (!exSrc) return;
-    const s = exSrc;
-    try { s.onended = null; s.stop(); } catch (e) {}
-    try { s.disconnect(); } catch (e) {}
+    const s = exSrc, g = exOut;
+    s.onended = null;
+    // a short fade (about 60 ms) so a held sound doesn't end in a click
+    try { const t = ctx.currentTime; g.gain.setValueAtTime(1, t); g.gain.linearRampToValueAtTime(0, t + 0.06); s.stop(t + 0.07); }
+    catch (e) { try { s.stop(); } catch (e2) {} }
+    try { s.disconnect(analyser); } catch (e) {} // the charts let go at once
+    setTimeout(() => { try { s.disconnect(); } catch (e) {} try { g.disconnect(); } catch (e) {} }, 120);
     finishExample();
   }
   function finishExample() {
-    exSrc = null; exampleEnd = performance.now();
+    exSrc = null; exOut = null; exMode = null; clearTimeout(exCap); exampleEnd = performance.now();
     if (exRoom) { const r = exRoom; exRoom = null; setTimeout(() => { try { r.output.disconnect(); } catch (e) {} }, 600); }
     if (an) an.reset();
     meterFrames = [];
@@ -810,8 +833,13 @@
   function setExampleUi(mode) {
     if (!mode) document.querySelectorAll('.proof-play.playing').forEach(x => { if (!exSrc) { x.classList.remove('playing'); x.textContent = '▶'; } });
     const p = $('ex-play'), c = $('ex-compare');
-    if (p) p.textContent = mode === 'play' ? 'Stop example' : 'Play example';
+    if (p) p.textContent = mode === 'play' || mode === 'hold' ? 'Stop example' : 'Play example';
     if (c) c.textContent = mode === 'compare' ? 'Stop comparison' : 'Compare masculine and feminine';
+    if (p && !mode && state.drill && Sustain.on && Sustain.applies(state.drill.def)) p.textContent = 'Play example (held)';
+    document.querySelectorAll('.tvy-play').forEach(b => {
+      const on = !!mode && mode !== 'compare' && !b.dataset.spot;
+      b.textContent = on ? '■ Stop' : '▶ Hear target'; b.setAttribute('aria-pressed', String(on));
+    });
   }
   function begin(kind, label) {
     state.running = kind;
@@ -1149,6 +1177,7 @@
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
       state.plan.status = 'paused'; renderPlan();
     }
+    if (exMode === 'hold') stopExample(); // a held sound belongs to the exercise it was started from
     state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], breathLog: [], isoFr: [], pts: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
     TvY.drill.el = null; TvY.drill.cfg = null;
@@ -2874,7 +2903,7 @@
       play: (x) => playSamples(x, 'play', def.type === 'iso' ? 'the movement' : `typical ${fem ? 'feminine' : 'masculine'}`),
       make: (fs) => def.type === 'whisper' ? Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT)
         : def.type === 'iso' ? isoExample(fs, def, fem, true) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS),
-      key: [def.id, state.goal, Synth.getStyle()].join('|'),
+      key: [def.id, state.goal, Synth.getStyle()].join('|'), def,
     };
   }
   function tvyStrip(T, frames, trim) { return D.specStrip(frames, { fmax: T.cfg.fmax, wide: T.cfg.wide, trim }); }
@@ -2943,15 +2972,24 @@
     if (host) T.el = host;
     const el = T.el; if (!el || !T.cfg) return;
     const spot = T.cfg.spot;
-    el.innerHTML = `<div class="tvy-head"><b>Target vs you</b><button type="button" class="btn sm ghost tvy-play">▶ Hear target</button></div>
+    const hold = !spot && T.cfg.def && Sustain.applies(T.cfg.def);
+    el.innerHTML = `<div class="tvy-head"><b>Target vs you</b><span class="tvy-btns">${hold ? '<button type="button" class="btn sm ghost tvy-hold"></button>' : ''}<button type="button" class="btn sm ghost tvy-play"${spot ? ' data-spot="1"' : ''}>▶ Hear target</button></span></div>
       <canvas class="tvy-cv" height="170" role="img" aria-label="Spectrogram of the target and of you, side by side on one frequency scale"></canvas>
       <p class="small tvy-read"><span class="tvy-say"></span></p>`;
     el.querySelector('.tvy-read').append(infoBadge('About Target vs you', `Left: ${spot ? 'the reference voice reading these words' : "this exercise's demo sound"}. Right: you, ${spot ? 'from your latest try' : 'live while you practise, then the stretch that was scored'}. Both are drawn the same way, low to high (0-${T.cfg.fmax / 1000} kHz), on the same time scale, with the formants read marked: F1 amber (jaw), F2 rose (tongue), F3 blue (lips and larynx)${T.cfg.wide ? ', and the centre of a hiss in the accent colour' : ''}. ${T.cfg.lines.length ? 'Dashed lines run across both at your goal for this sound; a band of yours sitting under its line means that part is darker than the goal. ' : spot ? 'A phrase has many vowels, so there is no single goal line; compare the shape of the bands word by word. ' : ''}The target is ${spot ? 'a machine reading (neural or demo voice), a guide rather than the only right way' : 'synthetic, at typical values, so your bands can sit a little apart and still be on goal'}. Measured on synthetic voices; real voices vary more.`));
-    const btn = el.querySelector('.tvy-play');
+    const btn = el.querySelector('.tvy-play'), hb = el.querySelector('.tvy-hold');
     btn.onclick = () => {
+      if (!spot && exSrc) return stopExample();
+      if (!spot && hold && Sustain.on) return playHeld(T.cfg.def);
       const x = T.cfg && T.cfg.x; if (!x) return;
-      if (spot) { if (Run.on) return; tvyPlayRaw(x, T.cfg.fs); } else (exSrc ? stopExample() : T.cfg.play(x));
+      if (spot) { if (Run.on) return; tvyPlayRaw(x, T.cfg.fs); } else T.cfg.play(x);
     };
+    if (hb) {
+      const paint = () => { hb.textContent = Sustain.on ? 'Sustain on' : 'Sustain off'; hb.setAttribute('aria-pressed', String(Sustain.on)); hb.classList.toggle('ghost', !Sustain.on); hb.title = Sustain.on ? 'Hear target holds the sound until you press Stop' : 'Hear target plays a short example'; };
+      hb.onclick = () => { Sustain.set(!Sustain.on); paint(); if (exSrc) stopExample(); setExampleUi(null); };
+      paint();
+      hb.after(infoBadge('About Sustain', `With Sustain on, Hear target holds the ${T.cfg.def.type === 'sib' ? 'hiss' : T.cfg.def.type === 'word' ? "word's vowel" : 'sound'} at one steady pitch and the same goal formants until you press Stop (or two minutes pass), so you can tune to it by ear and watch it on the charts. Like every demo, it is not scored as you while it plays: press Stop, then make the sound yourself. If you hum along anyway, use headphones so the microphone hears only you. Works in both the Natural and Classic practice voice.`));
+    }
     btn.disabled = spot && Run.on;
     tvyDraw(T);
   }
@@ -6042,6 +6080,7 @@
     if (m !== 'sing' && Sing.on) Sing.finish();
     if (m !== 'sing') Sing.leave();
     if (m !== 'freestyle') Free.end();
+    if (m !== 'practice' && exMode === 'hold') stopExample();
     mode = m;
     document.body.dataset.mode = m;
     if (m === 'sing') Sing.enter();
