@@ -997,8 +997,37 @@ a { color: var(--accent); }
 .tl-cue { pointer-events: none; }
 .tl-svg { -webkit-user-select: none; user-select: none; }
 .tl-scrub .tl-svg { cursor: ew-resize; }
-.tl-fmt { white-space: nowrap; }
-.tl-fmt .k { font-weight: 600; }
+/* the cue readout under the timeline (cueHtml): fixed slots so nothing moves as the values change.
+   Wide: one line, F1-F3 in columns of their own; narrow (a phone): two fixed rows. The reference's row lines
+   its numbers up under yours; the note line is always reserved. */
+.tl-readbox { container-type: inline-size; margin-top: 8px; }
+.tl-read { display: grid; grid-template-columns: 7ch 12em repeat(5, max-content); grid-template-areas: "t w p r f1 f2 f3" "n n n n n n n";
+  column-gap: 16px; row-gap: 4px; align-items: baseline; font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-read.has-ref { grid-template-areas: "t w p r f1 f2 f3" "rl rl rp rr . . ." "n n n n n n n"; }
+.tl-read.no-words { grid-template-columns: 7ch repeat(5, max-content); grid-template-areas: "t p r f1 f2 f3" "n n n n n n"; }
+.tl-read.no-words .tr-w { display: none; }
+.tl-read small { color: var(--muted); font-size: 0.85em; }
+.tl-read .tr-v { display: inline-block; width: var(--w); text-align: right; font-weight: 600; }
+.tr-t { grid-area: t; font-weight: 700; text-align: right; }
+.tr-w { grid-area: w; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.tr-w.unsure { text-decoration: underline dotted; text-underline-offset: 3px; }
+.tr-w.miss { text-decoration: line-through; color: var(--muted); }
+.tr-p { grid-area: p; } .tr-r { grid-area: r; } .tr-rp { grid-area: rp; } .tr-rr { grid-area: rr; }
+.tr-p small, .tr-rp small, .tr-f3 small { margin-left: 3px; }
+.tr-r small, .tr-rr small { margin-right: 4px; }
+.tr-fm { display: contents; }
+.tr-f1 { grid-area: f1; } .tr-f2 { grid-area: f2; } .tr-f3 { grid-area: f3; }
+.tr-f .k { font-weight: 600; margin-right: 2px; }
+.tr-rl { grid-area: rl; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.tr-n { grid-area: n; color: var(--muted); white-space: normal; min-height: 1.35em; }
+@container (max-width: 640px) {
+  .tl-read { grid-template-columns: 7ch minmax(0, 1fr) max-content max-content; grid-template-areas: "t w p r" "fm fm fm fm" "n n n n"; column-gap: 12px; }
+  .tl-read.has-ref { grid-template-areas: "t w p r" "fm fm fm fm" "rl rl rp rr" "n n n n"; }
+  .tl-read.no-words { grid-template-columns: 7ch max-content max-content minmax(0, 1fr); grid-template-areas: "t p r ." "fm fm fm fm" "n n n n"; }
+  .tr-fm { grid-area: fm; display: grid; grid-template-columns: repeat(3, max-content); column-gap: 16px; }
+  .tr-f1 { grid-area: 1 / 1; } .tr-f2 { grid-area: 1 / 2; } .tr-f3 { grid-area: 1 / 3; }
+  .tr-n { min-height: 2.7em; }
+}
 .tvy-btns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Rainbow resonance: with Settings › Spectrogram colours on Rainbow, every resonance bar or mark that is on
