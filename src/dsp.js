@@ -1322,6 +1322,21 @@
   // length), so the two line up word by word even when the pace differs. A word's stretch is scaled by at most
   // 2.5 times either way, and a word the other reading never reached is left out.
   // Returns { f0: [[ms, Hz]], rs: [[ms, resonance or null]] } in that reading's ms.
+  // What the timeline read at one moment (ms), for the readout under it when a spot is cued: the nearest pitch,
+  // resonance and F1-F3 within reach ms (so a tap between dots still reads), and the reference's pitch and
+  // resonance there when one is laid over it (ref: warpTimeline's { f0: [[ms, Hz]], rs: [[ms, score]] }).
+  function timelineAt(tl, ms, ref, reach = 100) {
+    const n = tl.f0.length, i = Math.max(0, Math.min(n - 1, Math.floor(ms / tl.bin))), k = Math.max(1, Math.round(reach / tl.bin));
+    let f0 = 0, res = null, F = null;
+    for (let d = 0; d <= k && (!f0 || res == null || !F); d++) for (const j of d ? [i - d, i + d] : [i]) {
+      if (j < 0 || j >= n) continue;
+      if (!f0 && tl.f0[j]) f0 = tl.f0[j];
+      if (res == null && tl.rs[j] != null) res = tl.rs[j];
+      if (!F && tl.fm && tl.fm[j]) F = tl.fm[j];
+    }
+    const near = (pts) => { let best = null, bd = reach + 1; for (const [t, v] of pts || []) { const d = Math.abs(t - ms); if (v != null && d < bd) { bd = d; best = v; } } return best; };
+    return { i, f0, res, F, ref: ref ? { f0: near(ref.f0), res: near(ref.rs) } : null };
+  }
   function warpTimeline(ref, ws, dur) {
     const rsp = wordSpans(ref.ws, ref.dur), usp = wordSpans(ws, dur), out = { f0: [], rs: [] };
     for (let k = 0; k < rsp.length; k++) {
@@ -2463,7 +2478,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
