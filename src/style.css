@@ -700,6 +700,14 @@ a { color: var(--accent); }
 .tl-spbg { fill: var(--panel); stroke: var(--line); }
 .tl-spec { image-rendering: auto; }
 .tl-fm { opacity: 0.85; } .tl-fm.f1 { fill: var(--f1); } .tl-fm.f2 { fill: var(--f2); } .tl-fm.f3 { fill: var(--f3); }
+/* on the colourful spectrogram ramps the formant marks get an outline (dark round light marks, light round dark ones) */
+:root:not([data-spec="classic"]) .tl-fm { opacity: 1; stroke: rgba(255,255,255,0.9); stroke-width: 1; paint-order: stroke; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not([data-spec="classic"]) .tl-fm { stroke: rgba(0,0,0,0.8); } }
+:root[data-theme="dark"]:not([data-spec="classic"]) .tl-fm { stroke: rgba(0,0,0,0.8); }
+.spec-pick { flex-wrap: wrap; border-radius: 18px; gap: 2px; }
+.spec-pick button { display: inline-flex; align-items: center; gap: 7px; }
+.spec-sw { display: inline-block; width: 26px; height: 10px; border-radius: 3px; border: 1px solid var(--line); }
+.spec-preview { display: block; width: 100%; margin-top: 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
 .tl-wp { fill: var(--good); } .tl-wp.off { fill: var(--warn); }
 .tl-w { cursor: pointer; outline: none; }
 .tl-w.on .wr-hit { fill: var(--ink); fill-opacity: 0.07; }
