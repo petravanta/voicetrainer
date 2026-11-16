@@ -49,6 +49,7 @@ jobs:
       - run: node test/heardwords.test.js
       - run: node test/refread.test.js
       - run: node test/refclips.test.js
+      - run: node test/tvy.test.js
       - run: node test/natural.test.js
       - run: node test/build.test.js
       - run: node build.js

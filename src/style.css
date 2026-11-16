@@ -917,3 +917,13 @@ a { color: var(--accent); }
 .ref-line .small { min-width: 0; }
 .rd-result .stat small.ref-num, .ref-num { color: var(--muted); }
 .rd-result .stat small.ref-num::before { content: ""; display: inline-block; width: 12px; border-top: 2px dashed currentColor; vertical-align: 3px; margin-right: 4px; }
+
+/* Target vs you: the exercise's target sound and you, side by side on one frequency scale */
+.tvy { margin: 12px 0 0; display: grid; gap: 4px; }
+.tvy:empty { display: none; }
+.tvy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tvy-head b { font-size: 0.92rem; }
+.tvy-cv { width: 100%; display: block; border-radius: 8px; }
+.tvy-read { margin: 0; color: var(--muted); }
+.tvy-read .tvy-say { color: var(--ink); }
+.reader-spot .tvy, #reader-spot .tvy { margin-top: 8px; }
