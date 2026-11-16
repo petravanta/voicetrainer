@@ -502,6 +502,41 @@
     return concat([example(fs, def, 'masc', VOWELS, SIBILANTS), silence(fs, 0.35), example(fs, def, 'fem', VOWELS, SIBILANTS)]);
   }
 
+  // ---------- held references ----------
+  // A drill's reference held for as long as you like: it starts the way the example does (a word's
+  // hiss leads into its vowel), then holds one pitch and fixed formants on a loop with no seam, so it
+  // can play until stopped. Returns {x, loopStart, loopEnd} in seconds, or null for sounds that move.
+  // Pitch is the middle of the example's glide, formants are the same goal values, so it reads the same.
+  const HOLD_LOOP = 4, HOLD_XF = 0.15;
+  function canSustain(def) {
+    return !!def && (def.type === 'vowel' || def.type === 'sib' || def.type === 'word' || (def.type === 'whisper' && def.kind !== 'siren'));
+  }
+  function sustain(fs, def, goal, VOWELS, SIBILANTS, o = {}) {
+    if (!canSustain(def)) return null;
+    const fem = goal === 'fem', f0 = fem ? 200 : 112;
+    const V = def.vowel && VOWELS.find(v => v.key === def.vowel), F = V && (fem ? V.W : V.M);
+    const peak = def.sib && (fem ? SIBILANTS[def.sib].W : SIBILANTS[def.sib].M);
+    const lead = 0.12, settle = 0.3, body = settle + HOLD_LOOP + HOLD_XF + 0.15;
+    let head = [], x;
+    if (def.type === 'vowel') x = voiced(fs, body, f0, f0, F, { ramp: 0.06 });
+    else if (def.type === 'sib') x = sibilant(fs, body, peak, { level: 0.12 });
+    else if (def.type === 'word') {
+      head = [sibilant(fs, 0.26, peak, { level: 0.11, seed: 31 })];
+      x = voiced(fs, body, f0, f0, F, { from: [300, SIB_LOCUS[def.sib], F[2]], trans: 0.08, ramp: 0.012 });
+    } else {
+      const shift = o.shift || [1, 1, 1], base = F.map((f, i) => f * shift[i]);
+      x = whispered(fs, body, () => base, { seed: 45 });
+    }
+    const out = concat([silence(fs, lead), ...head, x]);
+    const a = out.length - x.length + Math.round(fs * settle), L = Math.round(fs * HOLD_LOOP), n = Math.round(fs * HOLD_XF);
+    // the stretch just past the loop's end fades into its start (equal power), so the jump back is seamless
+    for (let i = 0; i < n; i++) {
+      const u = (i + 0.5) / n;
+      out[a + i] = out[a + i] * Math.sin(0.5 * Math.PI * u) + out[a + L + i] * Math.cos(0.5 * Math.PI * u);
+    }
+    return { x: out.subarray(0, a + L), loopStart: a / fs, loopEnd: (a + L) / fs, fs };
+  }
+
   // ---------- whispers ----------
   // Whispered vowel: turbulent airflow noise (no tone) through the formants, which are wider than in
   // a voiced vowel. track(t) gives [F1, F2, F3] at time t (seconds), so a whisper can glide.
@@ -561,7 +596,7 @@
     return concat(parts);
   }
 
-  const api = { setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
+  const api = { canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
