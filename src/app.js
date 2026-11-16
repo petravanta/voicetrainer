@@ -3790,9 +3790,9 @@
       id: tk.id, tl: tk.tl, words: H ? H.words : null, unsure: H ? (i) => H.unsure[i] : null, gone: () => null,
       wordInfo: (i) => freeWordInfo(H, i), blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
       heading: tk.kind === 'mic' ? 'Your last take' : tk.kind === 'demo' ? 'The demo voice' : 'The recording',
-      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap anywhere to hear it from there${H ? ', or tap a word to hear just that word' : ''}.` : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
+      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it.${H ? ' Tap a word to cue it and see its numbers.' : ''}` : ' Tap anywhere for the numbers at that moment.'}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
       noAudio: "This browser couldn't record the take, so no spectrogram",
-      hint: (tk.heard && !H ? 'Show words was on, but the speech recognition heard no words in this take. ' : '') + (audio ? `Tap the timeline to play from that moment${H ? ', or a word to hear it' : ''}.` : 'Tap the timeline for the numbers there.'),
+      hint: (tk.heard && !H ? 'Show words was on, but the speech recognition heard no words in this take. ' : '') + (audio ? `Tap the timeline${H ? ' (or a word)' : ''} to cue it and see the numbers there, then ▶ Play from it.` : 'Tap the timeline for the numbers there.'),
       extraBtns: `${tk.blob ? '<button type="button" class="btn sm ghost" id="ftl-save">Save audio</button>' : ''}<button type="button" class="btn sm ghost" id="ftl-back">Live view</button>`,
     });
     $('ftl-back').onclick = () => showFreeLive();
@@ -3943,6 +3943,8 @@
         if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}${un ? ' unsure' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
       });
     }
+    // the cued spot (moved with a transform) and the playhead
+    g += `<g class="tl-cue" visibility="hidden"><line x1="0" x2="0" y1="16" y2="${Y.H}"/><path d="M-6 16h12l-6 7z"/></g>`;
     g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
     return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram${words ? ' and each word' : ''} through the ${words ? 'reading' : 'take'}, on one time line">${g}</svg>`, x, L, W };
   }
@@ -3965,18 +3967,18 @@
     const T = mountTimeline(el, {
       id: rec.id, tl: got.tl, words: rec.byWord || [], blob, alive: () => box.rec === rec,
       heading: 'Timeline',
-      about: `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap anywhere to hear the reading from there, or tap a word to hear just that word. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`,
+      about: `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`,
       noAudio: 'No recording on this device, so no spectrogram',
-      hint: blob ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.',
+      hint: blob ? 'Tap the timeline (or a word) to cue it and see the numbers there, then ▶ Play from it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i, ref), gone: (i) => wordGone(rec, i),
-      ref: ref ? Object.assign(D.warpTimeline(ref.tl, got.tl.ws, got.tl.dur), { words: ref.byWord }) : null,
+      ref: ref ? Object.assign(D.warpTimeline(ref.tl, got.tl.ws, got.tl.dur), { words: ref.byWord }) : null, refWho: ref ? RefRead.who(ref) : null,
     });
     if (!blob) return;
     const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
     if (!(await T.ready)) return;
     box.cue = {
       canPlay: (i) => got.tl.ws && got.tl.ws[i] != null && Player.id === rec.id,
-      word: (i) => { T.pickWord(i); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
+      word: (i) => { T.pickWord(i, true); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); },
     };
   }
   // the demo voice's measured reading on the same timeline, playable from its own audio
@@ -3988,14 +3990,14 @@
     const T = mountTimeline(el, {
       id: rec.id, tl: rec.tl, words: rec.byWord, buf, alive: () => box.rec === rec,
       heading: 'Timeline',
-      about: `The ${RefRead.who(rec)} reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap anywhere to hear it from there, or tap a word to hear just that word. Zoom with −, + or by pinching.`,
+      about: `The ${RefRead.who(rec)} reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. Zoom with −, + or by pinching.`,
       noAudio: `This browser couldn't hold the ${RefRead.who(rec)}'s audio, so no spectrogram`,
-      hint: buf ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.',
+      hint: buf ? 'Tap the timeline (or a word) to cue it and see the numbers there, then ▶ Play from it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i), gone: () => null,
     });
     T.ready.then(ok => {
       if (!ok || box.rec !== rec) return;
-      box.cue = { canPlay: (i) => rec.tl.ws[i] != null && Player.id === rec.id, word: (i) => { T.pickWord(i); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } };
+      box.cue = { canPlay: (i) => rec.tl.ws[i] != null && Player.id === rec.id, word: (i) => { T.pickWord(i, true); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } };
     });
   }
   // The tall timeline in el, for a reading (words) or a Freestyle take (no words): zoom, a playhead, tap to cue,
@@ -4006,7 +4008,7 @@
   function mountTimeline(el, o) {
     const tl = o.tl, words = o.words || null, Y = words ? TL_LANES : tlLanes(false), [lo, hi] = target(), [plo, phi] = pitchBand();
     const hasAudio = !!(o.blob || o.buf), live = () => el.isConnected && o.alive();
-    const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
+    const V = { cue: null, info: null, pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
     const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
     el.innerHTML = `<div class="section-head"><h4>${o.heading}${infoHtml('About the timeline', o.about)}</h4>
         <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.unsure ? '<span><u class="unsure-key">word</u>unsure</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
@@ -4017,25 +4019,50 @@
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
       <p class="small" id="tl-read" aria-live="polite">${o.hint}</p>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
-    let svg = null, head = null;
-    const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
+    let svg = null, head = null, cueG = null, playable = false, drag = null, grab = null, noClick = false;
+    const btn = el.querySelector('#tl-play');
+    const msAtX = (cx) => { const r = svg.getBoundingClientRect(); return clamp(((cx - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
+    const msAt = (ev) => msAtX(ev.clientX);
     const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k >= 0 && tl.we && tl.we[k] != null && ms > tl.we[k] + 60 ? -1 : k; };
+    const clockMs = (ms) => { const s = Math.max(0, ms) / 1000; return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
+    // the line under the timeline for one moment: the word there, pitch, resonance, F1-F3, and the reference's numbers when one is laid over it
     const say = (ms) => {
-      const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = words && words[k];
-      // the nearest pitch and resonance within a tenth of a second, so a tap between dots still reads
-      let f = 0, r = null;
-      for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
-      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · ${o.unsure ? 'heard as ' : ''}“${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
+      const k = wordAt(ms), w = words && words[k], a = D.timelineAt(tl, ms, o.ref);
+      const word = w ? ` · ${o.unsure ? 'heard as ' : ''}“${escapeHtml(w[0])}”${o.unsure && o.unsure(k) ? ' (unsure)' : ''}${o.gone && o.gone(k) === 'miss' ? ' (possibly missed)' : ''}` : '';
+      const fm = a.F ? ` · <span class="tl-fmt"><span class="k f1">F1</span> ${a.F[0]} <span class="k f2">F2</span> ${a.F[1]} <span class="k f3">F3</span> ${a.F[2]} Hz</span>` : '';
+      const ref = a.ref ? ` · <span class="ref-num">${o.refWho || 'demo voice'}: ${a.ref.f0 ? a.ref.f0 + ' Hz' : 'no pitch'}, ${a.ref.res != null ? 'resonance ' + Math.round(a.ref.res) : 'no vowel read'}</span>` : '';
+      return `<b>${clockMs(ms)}</b>${word} · ${a.f0 ? a.f0 + ' Hz' : 'no pitch'} · ${a.res != null ? 'resonance ' + Math.round(a.res) : 'no vowel read'}${fm}${ref}`;
     };
     const mark = (cls, k) => { svg.querySelectorAll(`.tl-w.${cls}`).forEach(x => x.classList.remove(cls)); const g = k >= 0 && svg.querySelector(`.tl-w[data-i="${k}"]`); if (g) g.classList.add(cls); };
-    const place = (ms, follow) => {
+    // keep a spot in view: scroll when it's near or past an edge
+    const follow = (hx) => { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); };
+    // the playhead, shown only while playing
+    const place = (ms, fol) => {
       V.head = ms;
       const hx = V.view.x(ms); head.setAttribute('x1', hx.toFixed(1)); head.setAttribute('x2', hx.toFixed(1)); head.setAttribute('visibility', 'visible');
-      if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
+      if (fol) follow(hx);
+    };
+    const unplace = () => { V.head = null; if (head) head.setAttribute('visibility', 'hidden'); };
+    const showCue = () => {
+      if (!cueG) return;
+      if (V.cue == null) { cueG.setAttribute('visibility', 'hidden'); return; }
+      cueG.setAttribute('transform', `translate(${V.view.x(V.cue).toFixed(1)} 0)`); cueG.setAttribute('visibility', 'visible');
+    };
+    const mine = () => playable && Player.id === o.id;
+    const restClock = () => { const clk = el.querySelector('#tl-clock'); if (clk && mine()) clk.textContent = `${clockMs(V.cue || 0)} / ${clockOf(Player.dur)}`; };
+    // cue a spot: mark it and say what was heard there (info: the readout for a word instead). Play starts from it;
+    // a playback already going carries on, and the readout stays on the cue until the next Play.
+    const setCue = (ms, info) => {
+      V.cue = ms; showCue();
+      if (!info) { V.sel = -1; mark('sel', -1); }
+      V.info = info || say(ms); read.innerHTML = V.info;
+      V.hold = mine() && Player.playing;
+      if (mine() && !Player.playing) { Player.off = ms / 1000; restClock(); }
     };
     const draw = () => {
       V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref, o.unsure);
-      scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head');
+      scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head'); cueG = svg.querySelector('.tl-cue');
+      showCue();
       if (V.head != null) place(V.head, false);
       mark('sel', V.sel); mark('on', V.on);
     };
@@ -4043,7 +4070,7 @@
     // zoom about a point (px from the scroll's left edge): the playhead when it's in view, else the middle
     const zoomTo = (pxs, ax) => {
       pxs = clamp(pxs, TL_ZOOM[0], TL_ZOOM[1]); if (Math.abs(pxs - V.pxs) < 0.5) return;
-      if (ax == null) { const hx = V.head != null ? V.view.x(V.head) - scroll.scrollLeft : -1; ax = hx >= 0 && hx <= scroll.clientWidth ? hx : scroll.clientWidth / 2; }
+      if (ax == null) { const at = V.head != null ? V.head : V.cue, hx = at != null ? V.view.x(at) - scroll.scrollLeft : -1; ax = hx >= 0 && hx <= scroll.clientWidth ? hx : scroll.clientWidth / 2; }
       const ms = (scroll.scrollLeft + ax - V.view.L) / V.pxs * 1000;
       V.pxs = tlPxs = pxs; draw();
       scroll.scrollLeft = Math.max(0, V.view.x(ms) - ax);
@@ -4077,35 +4104,87 @@
     const pinEnd = () => { if (!pin) return; const p = pin; pin = null; svg.style.transform = ''; zoomTo(V.pxs * p.f, p.ax); };
     scroll.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinEnd(); });
     scroll.addEventListener('touchcancel', pinEnd);
-    let playable = false;
-    const btn = el.querySelector('#tl-play');
-    const paint = () => { if (!btn) return; btn.textContent = Player.playing ? '❚❚ Pause' : '▶ Play'; btn.setAttribute('aria-pressed', String(Player.playing)); };
+    const paint = () => { if (!btn) return; const on = mine() && Player.playing; btn.textContent = on ? '■ Stop' : '▶ Play'; btn.setAttribute('aria-pressed', String(on)); btn.title = on ? 'Stop (the cue stays)' : V.cue != null ? `Play from ${clockMs(V.cue)}` : 'Play from the start'; };
+    // stopped (by Stop, at the end, or at the end of a word): the playhead goes, the cue and its numbers stay
+    const rest = () => {
+      unplace(); if (V.on !== -1) { V.on = -1; mark('on', -1); }
+      V.lastS = null; V.hold = false;
+      if (mine()) Player.off = (V.cue || 0) / 1000;
+      read.innerHTML = V.info || o.hint; restClock();
+    };
     const hook = () => {
       Player.onTick = (s) => {
-        const ms = s * 1000; place(ms, Player.playing);
+        if (!Player.playing) return;
+        const ms = s * 1000; place(ms, !drag && !grab);
         const clk = el.querySelector('#tl-clock'); if (clk) clk.textContent = `${clockOf(s)} / ${clockOf(Player.dur)}`;
-        const k = Player.playing ? wordAt(ms) : -1; if (k !== V.on) { V.on = k; mark('on', k); }
-        if (!V.hold && (Math.abs(s - (V.lastS || -1)) > 0.1 || !Player.playing)) { V.lastS = s; read.innerHTML = say(ms); }
+        const k = wordAt(ms); if (k !== V.on) { V.on = k; mark('on', k); }
+        if (!V.hold && Math.abs(s - (V.lastS || -1)) > 0.1) { V.lastS = s; read.innerHTML = say(ms); }
       };
-      Player.onState = paint;
+      Player.onState = () => { paint(); if (!Player.playing) rest(); };
     };
-    const pickWord = (i) => {
+    // a word: cue its start and show its numbers; play (from the word-by-word chart) also plays just that word
+    const pickWord = (i, play) => {
       if (!words) return;
-      V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = o.wordInfo(i);
       const sp = D.wordSpans(tl.ws, tl.dur, tl.we)[i];
-      if (playable && Player.id === o.id) {
-        hook();
-        Player.play(Math.max(0, sp[0] - 150) / 1000, (sp[1] + 250) / 1000);
-      } else if (sp) place(sp[0], true);
+      V.sel = i; mark('sel', i);
+      const at = sp ? Math.max(0, sp[0] - 150) : (V.cue || 0);
+      setCue(at, `<b>${clockMs(sp ? sp[0] : at)}</b> · ${o.wordInfo(i)}`);
+      if (sp) follow(V.view.x(sp[0]));
+      if (play && sp && mine()) { hook(); V.hold = true; Player.play(at / 1000, (sp[1] + 250) / 1000); }
+      paint();
     };
+    // a tap or click cues the spot under it (or the word); nothing plays until Play
     scroll.addEventListener('click', (ev) => {
       if (!svg) return;
+      if (noClick) { noClick = false; return; }
       const g = ev.target.closest('.tl-w');
       if (g) return pickWord(+g.dataset.i);
-      const ms = msAt(ev); V.hold = false; V.sel = -1; mark('sel', -1);
-      if (playable && Player.id === o.id) { hook(); Player.play(ms / 1000); } else { place(ms, false); read.innerHTML = say(ms); }
+      setCue(msAt(ev)); paint();
     });
-    scroll.addEventListener('keydown', (e) => { const g = e.target.closest && e.target.closest('.tl-w'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickWord(+g.dataset.i); } });
+    const skipClick = () => { noClick = true; setTimeout(() => { noClick = false; }, 0); };
+    // dragging nudges the view along when it reaches an edge
+    const edge = (cx) => { const r = scroll.getBoundingClientRect(); if (cx < r.left + 28) scroll.scrollLeft -= 14; else if (cx > r.right - 28) scroll.scrollLeft += 14; };
+    // with a mouse (or pen), drag across the timeline to scrub the cue
+    scroll.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType === 'touch' || ev.button !== 0 || !svg || ev.target.closest('.tl-w')) return;
+      drag = { x: ev.clientX, id: ev.pointerId, moved: false };
+    });
+    scroll.addEventListener('pointermove', (ev) => {
+      if (!drag || ev.pointerId !== drag.id) return;
+      if (!drag.moved) {
+        if (Math.abs(ev.clientX - drag.x) < 4) return;
+        drag.moved = true; el.classList.add('tl-scrub');
+        try { scroll.setPointerCapture(ev.pointerId); } catch (e) {}
+      }
+      ev.preventDefault(); edge(ev.clientX); setCue(msAt(ev)); paint();
+    });
+    const dragEnd = (ev) => { if (!drag || ev.pointerId !== drag.id) return; if (drag.moved) skipClick(); drag = null; el.classList.remove('tl-scrub'); };
+    scroll.addEventListener('pointerup', dragEnd); scroll.addEventListener('pointercancel', dragEnd);
+    // on a touch screen a finger still pans the timeline; one put down on the cue line drags the cue instead
+    scroll.addEventListener('touchstart', (e) => {
+      grab = null;
+      if (e.touches.length !== 1 || V.cue == null || !svg) return;
+      const r = svg.getBoundingClientRect(), cx = r.left + V.view.x(V.cue) * (r.width / svg.viewBox.baseVal.width);
+      if (Math.abs(e.touches[0].clientX - cx) <= 22) grab = { moved: false };
+    }, { passive: true });
+    scroll.addEventListener('touchmove', (e) => {
+      if (!grab || e.touches.length !== 1) { grab = null; return; }
+      e.preventDefault(); grab.moved = true;
+      const cx = e.touches[0].clientX; edge(cx); setCue(msAtX(cx)); paint();
+    }, { passive: false });
+    const grabEnd = () => { if (grab && grab.moved) skipClick(); grab = null; };
+    scroll.addEventListener('touchend', grabEnd); scroll.addEventListener('touchcancel', grabEnd);
+    // keyboard: arrows move the cue (Shift for a second at a time), Space plays or stops
+    scroll.addEventListener('keydown', (e) => {
+      const g = e.target.closest && e.target.closest('.tl-w');
+      if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); return pickWord(+g.dataset.i); }
+      if (e.target !== scroll) return;
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && V.cue != null) {
+        e.preventDefault();
+        const ms = clamp(V.cue + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 1000 : 100), 0, tl.dur);
+        setCue(ms); follow(V.view.x(ms)); paint();
+      } else if (e.key === ' ' && btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    });
     const ready = (async () => {
       if (!hasAudio) return false;
       const clk = el.querySelector('#tl-clock');
@@ -4113,8 +4192,8 @@
       if (!live()) return false;
       if (!ok) { btn.remove(); clk.textContent = `This browser couldn't open the recording to play it.${o.blob ? ' Save audio still works.' : ''}`; V.note = "This browser couldn't open the recording, so no spectrogram"; draw(); return false; }
       playable = true;
-      hook(); btn.disabled = false; clk.textContent = `0:00 / ${clockOf(Player.dur)}`; paint();
-      btn.onclick = () => { if (Player.id !== o.id) return; hook(); V.hold = false; Player.playing ? Player.pause() : Player.play(); };
+      hook(); btn.disabled = false; restClock(); paint();
+      btn.onclick = () => { if (Player.id !== o.id) return; hook(); if (Player.playing) return Player.pause(); V.hold = false; Player.play((V.cue || 0) / 1000); };
       // the spectrogram is worked out from the recording itself, after the page has had a moment to draw
       if (!V.spec) setTimeout(() => {
         if (!live() || Player.id !== o.id || !Player.buf) return;
