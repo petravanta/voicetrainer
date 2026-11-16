@@ -72,7 +72,15 @@
   }
 
   // Demo: a few vowels and sibilants, first at typical masculine resonance, then feminine.
+  // The natural voice says the demo words three times instead (see demoWords).
   function demo(fs, VOWELS) {
+    if (STYLE === 'natural') {
+      const parts = [silence(fs, 0.1)];
+      [[0, 115, 40], [50, 160, 52], [100, 205, 65]].forEach(([res, pitch, bright], j) => {
+        parts.push(demoWords(fs, VOWELS, { pitch, res, bright }, 60 + 40 * j), silence(fs, 0.45));
+      });
+      return concat(parts);
+    }
     const keys = ['i', 'a', 'u', 'E'];
     const parts = [];
     const mix = (v, t) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
@@ -90,6 +98,7 @@
   // Demo at chosen settings: o = {pitch (Hz), res (0 = typical masculine, 100 = typical
   // feminine, may go past either end), bright (0..100)}. An s, then four vowels.
   function demoVoice(fs, VOWELS, o) {
+    if (STYLE === 'natural') return concat([silence(fs, 0.1), demoWords(fs, VOWELS, o, 5), silence(fs, 0.1)]);
     const t = o.res / 100, b = clamp01(o.bright / 100);
     const mix = (v) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
     const parts = [silence(fs, 0.1), sibilant(fs, 0.45, 6200 + 1600 * Math.max(-0.3, Math.min(1.3, t)), { seed: 3 }), silence(fs, 0.15)];
@@ -100,6 +109,37 @@
     return concat(parts);
   }
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  // The natural demo: the same s and four vowels, said as words in a list ("see, spa, sue, said")
+  // instead of held one by one. Each vowel glides in from the s (or p) and, in "said", out to the d;
+  // pitch rises on each listed word and falls on the last, around o.pitch. The middle of every vowel
+  // sits on its target for about a quarter second, so the analyzer reads the set resonance.
+  const DEMO_WORDS = [
+    { v: 'i', f0: [0.96, 1.04], dur: 0.4 },
+    { v: 'a', f0: [0.97, 1.05], dur: 0.42, p: true },
+    { v: 'u', f0: [0.98, 1.07], dur: 0.42 },
+    { v: 'E', f0: [1.07, 0.86], dur: 0.36, d: true },
+  ];
+  function demoWords(fs, VOWELS, o, seed = 5) {
+    const t = o.res / 100, b = clamp01(o.bright / 100), tc = Math.max(-0.3, Math.min(1.3, t));
+    const mix = (v) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
+    const sPeak = 6200 + 1600 * tc, parts = [];
+    DEMO_WORDS.forEach((w, j) => {
+      const F = mix(VOWELS.find(q => q.key === w.v));
+      parts.push(sibilant(fs, j ? 0.17 : 0.2, sPeak, { level: 0.11, seed: seed + 3 * j }));
+      if (w.p) parts.push(silence(fs, 0.045), burst(fs, 0.015, 1500, 0.05, seed + 3 * j + 1));
+      const from = w.p ? [320, 900, F[2]] : [300, SIB_LOCUS.s, F[2]];
+      const x = voicedRun(fs, [{ dur: w.dur, f0a: o.pitch * w.f0[0], f0b: o.pitch * w.f0[1], F, from,
+        to: w.d ? [320, 1750, F[2]] : undefined, trans: 0.07, level: 0.3 }], { bright: b, seed: seed + 3 * j + 2, ramp: 0.015 });
+      if (!w.d) { // an open syllable fades out over ~90 ms rather than stopping dead
+        const k = Math.round(0.09 * fs);
+        for (let i = 0; i < k; i++) x[x.length - 1 - i] *= smooth(i / k);
+      }
+      parts.push(x);
+      if (w.d) parts.push(silence(fs, 0.04), burst(fs, 0.025, 3800, 0.05, seed + 3 * j + 1));
+      if (j < DEMO_WORDS.length - 1) parts.push(silence(fs, 0.22));
+    });
+    return concat(parts);
+  }
 
   // ---------- reading a text aloud (for analysis, not intelligibility) ----------
   // Spelling -> rough sound units. English spelling is irregular, so this only aims for plausible
@@ -517,7 +557,7 @@
     return concat(parts);
   }
 
-  const api = { setStyle, getStyle, voicedRun, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
+  const api = { setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
