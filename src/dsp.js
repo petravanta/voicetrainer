@@ -886,6 +886,12 @@
   // period), and is asked when the first reading is unvoiced or could be an octave under a note from HIGH_PASS_FROM
   const HIGH_PASS_MIN = 100, HIGH_PASS_FROM = 230;
 
+  // A spectrum column's level (dB) between lo and hi Hz; binHz: the column's bin spacing.
+  function bandLevel(col, binHz, lo, hi) {
+    let p = 0;
+    for (let k = Math.max(1, Math.ceil(lo / binHz)); k <= Math.min(col.length - 1, Math.floor(hi / binHz)); k++) p += Math.pow(10, col[k] / 10);
+    return Math.round(100 * Math.log10(p + 1e-12)) / 10;
+  }
   class Analyzer {
     constructor(sampleRate) {
       this.sr = sampleRate;
@@ -925,6 +931,7 @@
 
       const y = decimate(x, this.dec, this.h, this.decLen);
       out.spec = this.spectrumColumn(y);
+      out.ve = bandLevel(out.spec, this.fsd / 512, 250, 2500); // loudness where vowels are strong, for finding syllables
       if (rms < gate) { this.reset(); return out; }
 
       // pitch on ~65 ms of the decimated signal
@@ -1060,6 +1067,170 @@
       peak: ss[pi], peakAt: t1 > t0 ? (sm[pi].t - t0) / (t1 - t0) : 0.5,
       dur: (t1 - t0) / 1000, contour: sm,
     };
+  }
+
+  // ---------- word edges after a reading ----------
+  // While you read, the highlight moves a word on each syllable it hears, and a missed syllable or a jump at a pause
+  // can leave one word holding its neighbour's sound ("beautiful" covering "beautiful colors", "colors" a sliver).
+  // Once the reading is over the whole recording is there, so the edges are placed again from the sound itself:
+  //  1. pauses (ALIGN_PAUSE ms or more of quiet) cut the reading into stretches of speech;
+  //  2. the words are shared out over the stretches so each stretch's length fits its words' expected length
+  //     (syllables count most, then consonants; quick linking words less), and a word ending in . , ; : ! ? (or one
+  //     the reference voice paused after) likes to end a stretch;
+  //  3. inside a stretch each edge starts where the expected lengths put it and moves to the nearest real cue:
+  //     a loudness dip in the vowel band (where one syllable gives way to the next) or a break in voicing (a stop
+  //     like the /k/ of "colors", or a hiss).
+  // frames: { t: ms, f0, e: vowel-band loudness dB, a: overall loudness dB } (Run.frames form). words: the
+  // passage's words up to the last one reached. opt.ref: the reference voice's word times ([[start, end] s]) for
+  // the same words; when given, their lengths are the expected lengths (a template), so it breaks ties.
+  // Returns { ws, we } in the frames' ms (we[i]: where word i stops sounding before a pause, else null), or null
+  // when the frames have no loudness or the words can't be fitted (then the highlight's edges stay).
+  const ALIGN_PAUSE = 180, ALIGN_REF_MIX = 0.25;
+  const isFnWord = (w) => FUNCTION_WORDS.has(String(w).toLowerCase().replace(/[^a-z']/g, ''));
+  function wordWeight(w) {
+    const t = String(w).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!t) return 0.3;
+    const cons = (t.match(/[^aeiouy]/g) || []).length;
+    return (countSyllables(t) + 0.3 * cons + 0.3) * (isFnWord(t) ? 0.6 : 1);
+  }
+  function speechStretches(frames) {
+    const n = frames.length, t = frames.map(f => f.t);
+    const a = frames.map(f => (Number.isFinite(f.a) ? f.a : f.e));
+    const sa = a.slice().sort((x, y) => x - y), fa = sa[Math.floor(n * 0.1)], top = sa[Math.floor(n * 0.95)];
+    const thr = Math.max(fa + 10, fa + 0.4 * (top - fa)); // well above the room, well below the voice
+    const snd = a.map((x, i) => (frames[i].f0 > 0 && x > fa + 6) || x > thr);
+    const out = [];
+    let cur = null, quietFrom = -1;
+    for (let i = 0; i < n; i++) {
+      if (snd[i]) {
+        if (cur && quietFrom >= 0 && t[i] - t[quietFrom] >= ALIGN_PAUSE) { out.push(cur); cur = null; }
+        if (!cur) cur = { a: i, b: i }; else cur.b = i;
+        quietFrom = -1;
+      } else if (quietFrom < 0) quietFrom = i;
+    }
+    if (cur) out.push(cur);
+    // a stretch shorter than 60 ms with no voicing is a click or a breath, not speech
+    const list = out.filter(s => t[s.b] - t[s.a] >= 60 || frames.slice(s.a, s.b + 1).some(f => f.f0 > 0))
+      .map(s => ({ a: s.a, b: s.b, t0: t[s.a], t1: t[s.b] + 16 }));
+    list.snd = snd;
+    return list;
+  }
+  // places inside frames[a..b] where a word edge sounds likely, with how strong a cue each is (about 0..2)
+  function edgeCues(frames, a, b, opt = {}) {
+    const es = [];
+    for (let i = a; i <= b; i++) { let s = 0, c = 0; for (let j = Math.max(a, i - 1); j <= Math.min(b, i + 1); j++) { s += frames[j].e; c++; } es.push(s / c); }
+    const cues = [], quiet = opt.snd ? (i) => !opt.snd[i] : () => false;
+    // a short quiet inside the stretch (a breath, a comma, a long stop): a strong cue where the sound comes back
+    for (let i = a + 1, q0 = -1; i <= b; i++) {
+      if (quiet(i)) { if (q0 < 0) q0 = i; continue; }
+      if (q0 >= 0 && frames[i].t - frames[q0].t >= 60) cues.push({ t: frames[i].t, s: Math.min(2, 1.2 + (frames[i].t - frames[q0].t) / 100), q: frames[i].t - frames[q0].t, end: frames[q0].t });
+      q0 = -1;
+    }
+    for (let i = a + 1; i < b; i++) {
+      const k = i - a, v = frames[i].f0 > 0, pv = frames[i - 1].f0 > 0;
+      if (!v && pv) cues.push({ t: frames[i].t, s: 0.8 }); // voicing stops: a stop or hiss, which can start the next word
+      else if (v && !pv) cues.push({ t: frames[i].t, s: 0.3 }); // voicing starts again
+      if (es[k] <= es[k - 1] && es[k] < es[k + 1]) {
+        let l = es[k], r = es[k];
+        for (let j = k - 1; j >= Math.max(0, k - 8); j--) l = Math.max(l, es[j]);
+        for (let j = k + 1; j <= Math.min(es.length - 1, k + 8); j++) r = Math.max(r, es[j]);
+        const depth = Math.min(l, r) - es[k];
+        if (depth >= 1.5) cues.push({ t: frames[i].t, s: Math.min(1.5, depth / 6) });
+      }
+    }
+    return cues.sort((x, y) => x.t - y.t);
+  }
+  function alignWords(frames, words, opt = {}) {
+    const fr = (frames || []).filter(f => Number.isFinite(f.t) && Number.isFinite(f.e));
+    const W = words.length;
+    if (!W || fr.length < 20 || fr.length < 0.8 * (frames || []).length) return null;
+    const st = speechStretches(fr), C = st.length;
+    if (!C) return null;
+    const ref = opt.ref && opt.ref.length >= W ? opt.ref : null;
+    // a reference word's length runs to the next word's start (the gap between words is part of saying them), but
+    // not across a pause
+    // Another voice's timing only partly carries over to yours, so it is blended with the rule of thumb (ALIGN_REF_MIX).
+    let d = words.map(wordWeight);
+    if (ref) {
+      const rd = ref.slice(0, W).map(([x, y], i) => Math.max(0.04, i + 1 < ref.length && ref[i + 1][0] - y < 0.15 ? ref[i + 1][0] - x : y - x + 0.05));
+      const mix = opt.mix != null ? opt.mix : ALIGN_REF_MIX, sd = d.reduce((x, y) => x + y, 0), sr = rd.reduce((x, y) => x + y, 0);
+      d = d.map((v, i) => (1 - mix) * v / sd + mix * rd[i] / sr);
+    }
+    const punct = words.map(w => (/[.!?]["'”’)]*$/.test(w) ? 2 : /[,;:]["'”’)]*$/.test(w) ? 1 : 0));
+    const refPause = ref && !opt.noRefPause ? words.map((_, w) => w + 1 < ref.length && ref[w + 1][0] - ref[w][1] >= 0.15) : null;
+    const len = st.map(s => s.t1 - s.t0), rate = len.reduce((x, y) => x + y, 0) / d.reduce((x, y) => x + y, 0);
+    // 2. words to stretches
+    const INF = 1e18, cost = Array.from({ length: C + 1 }, () => new Float64Array(W + 1).fill(INF)), back = Array.from({ length: C + 1 }, () => new Int32Array(W + 1).fill(-1));
+    cost[0][0] = 0;
+    for (let c = 0; c < C; c++) for (let w = 0; w <= W; w++) {
+      const base = cost[c][w]; if (base >= INF) continue;
+      // a stretch with no words: a cough, an "um", a word said again
+      const skip = base + 1.5 + Math.min(2, len[c] / 400);
+      if (skip < cost[c + 1][w]) { cost[c + 1][w] = skip; back[c + 1][w] = w; }
+      let sum = 0, inner = 0;
+      for (let m = 1; w + m <= W && m <= 40; m++) {
+        const k = w + m - 1; sum += d[k];
+        if (m > 1) { const p = punct[k - 1]; inner += p === 2 ? 1.2 : p === 1 ? 0.25 : 0; if (refPause && refPause[k - 1]) inner += 0.4; }
+        const r = Math.log(len[c] / (sum * rate));
+        let v = base + 3 * r * r + inner;
+        if (c + 1 < C && w + m < W) v -= (punct[k] === 2 ? 1 : punct[k] === 1 ? 0.6 : 0) + (refPause && refPause[k] ? 0.6 : 0);
+        if (v < cost[c + 1][w + m]) { cost[c + 1][w + m] = v; back[c + 1][w + m] = w; }
+        if (sum * rate > 4 * len[c] + 400) break;
+      }
+    }
+    if (cost[C][W] >= INF) return null;
+    const groups = Array(C);
+    for (let c = C, w = W; c > 0; c--) { const p = back[c][w]; groups[c - 1] = [p, w]; w = p; }
+    // 3. edges inside each stretch
+    const ws = Array(W).fill(null), we = Array(W).fill(null);
+    for (let c = 0; c < C; c++) {
+      const [w0, w1] = groups[c], m = w1 - w0; if (!m) continue;
+      const s = st[c], L = s.t1 - s.t0, tot = d.slice(w0, w1).reduce((x, y) => x + y, 0);
+      ws[w0] = s.t0; we[w1 - 1] = s.t1;
+      if (m === 1) continue;
+      // segment the stretch: each word ends at a cue or a plain point (every 30 ms); a word costs the squared log of
+      // its length over its expected length (the stretch's pace), less how strong a cue its end is
+      const pts = [{ t: s.t0, s: 0 }];
+      for (let t = s.t0 + 30; t < s.t1 - 20; t += 30) pts.push({ t, s: 0 });
+      for (const cu of edgeCues(fr, s.a, s.b, { snd: st.snd })) pts.push(cu);
+      pts.sort((x, y) => x.t - y.t);
+      pts.push({ t: s.t1, s: 0 });
+      const P = pts.length, pace = L / tot;
+      let row = new Float64Array(P).fill(INF); row[0] = 0;
+      const from = [];
+      for (let k = w0; k < w1; k++) {
+        const nxt = new Float64Array(P).fill(INF), fb = new Int32Array(P).fill(-1), e = d[k] * pace, last = k === w1 - 1;
+        for (let i = 0; i < P; i++) {
+          if (row[i] >= INF) continue;
+          for (let j = i + 1; j < P; j++) {
+            const len = pts[j].t - pts[i].t;
+            if (len < 40) continue;
+            if (len > 4 * e + 200) break;
+            if (last && j !== P - 1) continue;
+            const r = Math.log(len / e), v = row[i] + 2 * r * r - (last ? 0 : 0.6 * pts[j].s + (pts[j].q ? (punct[k] ? 1 : -0.2) : 0));
+            if (v < nxt[j]) { nxt[j] = v; fb[j] = i; }
+          }
+        }
+        from.push(fb); row = nxt;
+      }
+      if (row[P - 1] < INF) {
+        for (let k = w1 - 1, j = P - 1; k > w0; k--) { j = from[k - w0][j]; ws[k] = pts[j].t; }
+      } else { // no way through (a stretch too short for its words): by expected length
+        let acc = 0; for (let k = w0; k < w1 - 1; k++) { acc += d[k]; ws[k + 1] = s.t0 + L * acc / tot; }
+      }
+    }
+    // words in no stretch (skipped, or said too quickly to find): squeezed in where they belong
+    for (let w = 0; w < W; w++) if (ws[w] == null) ws[w] = w > 0 ? (we[w - 1] != null ? we[w - 1] : ws[w - 1] + 40) : fr[0].t;
+    for (let w = 1; w < W; w++) if (ws[w] < ws[w - 1]) ws[w] = ws[w - 1];
+    return { ws: ws.map(Math.round), we: we.map(x => (x == null ? null : Math.round(x))), stretches: C };
+  }
+  // Tag each frame with the word whose stretch it falls in (the realigned edges), for the word by word report.
+  function retagFrames(frames, ws) {
+    let k = 0;
+    return frames.map(f => {
+      while (k + 1 < ws.length && ws[k + 1] != null && ws[k + 1] <= f.t) k++;
+      return f.i === k ? f : Object.assign({}, f, { i: k });
+    });
   }
 
   // ---------- word labels for the pitch track ----------
@@ -1282,7 +1453,7 @@
       const fr = an.analyze(x.subarray(0, end)), tc = end / fs - REF_LAG;
       while (wi + 1 < spans.length && spans[wi + 1][0] <= tc + 0.01) wi++; // the word being said, as a highlight would have it
       const i = Math.max(0, wi), f = { i, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: NaN, u: NaN, miss: false, sib: NaN, k: null,
-        t: Math.round(tc * 1000), F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: i };
+        t: Math.round(tc * 1000), e: fr.ve, a: Math.round(200 * Math.log10(fr.rms + 1e-9)) / 10, F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: i };
       const w = wv[i];
       if (fr.kind === 'voiced') {
         out.pitch.push(fr.f0);
@@ -2478,7 +2649,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
