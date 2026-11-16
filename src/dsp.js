@@ -1152,13 +1152,39 @@
   }
   // Each word's stretch of the reading, [start, end] in ms: from where the highlight reached it to where it
   // reached the next word (or the end), or null for a word the highlight never reached.
-  function wordSpans(ws, dur) {
+  // we (optional): where each word ends, when that's known (words heard in a Freestyle take, which have pauses between them).
+  function wordSpans(ws, dur, we) {
     return (ws || []).map((s, i) => {
       if (s == null) return null;
+      if (we && we[i] != null) return [s, Math.max(s, we[i])];
       let e = dur;
       for (let j = i + 1; j < ws.length; j++) if (ws[j] != null) { e = ws[j]; break; }
       return [s, Math.max(s, e)];
     });
+  }
+  // Words the browser's speech recogniser heard during a Freestyle take, put on the take's timeline. heard: [{ w, t0, t1,
+  // conf, tent }] on the page clock (t0/t1 where the words were placed on the voice, see placeWords; conf the
+  // recogniser's confidence 0-1, 0 when it gives none; tent when the word never firmed up). frames: the take's frames
+  // (t on the frame clock, which runs lag ms behind the page clock), t0: when the take started, dur: its length.
+  // Returns the words in byWord form ([word, pitch, resonance, sibilance, rough?]), when each starts (ws) and ends (we),
+  // and which ones the recogniser was unsure of (low confidence or never final). Frames get tagged with their word (f.i).
+  const HEARD_SURE = 0.6;
+  function heardWords(frames, t0, dur, heard, lag) {
+    const list = (heard || []).filter(L => L && L.w && Number.isFinite(L.t0) && Number.isFinite(L.t1))
+      .map(L => ({ L, s: Math.round(L.t0 - lag - t0), e: Math.round(L.t1 - lag - t0) }))
+      .filter(x => x.e > 0 && x.s < dur).sort((a, b) => a.s - b.s);
+    const ws = list.map(x => Math.max(0, x.s)), we = list.map((x, i) => Math.max(ws[i], Math.min(dur, x.e)));
+    let k = 0;
+    const tagged = [];
+    for (const f of frames || []) {
+      const ms = f.t - t0;
+      while (k < ws.length && we[k] < ms) k++;
+      if (k < ws.length && ws[k] <= ms) tagged.push(Object.assign({}, f, { i: k }));
+    }
+    const round = (v) => (v != null ? Math.round(v * 10) / 10 : null);
+    const words = wordReport(tagged, list.length).map((r, i) => [list[i].L.w, r.p != null ? Math.round(r.p) : null, round(r.r), round(r.s)].concat(r.rough && r.r != null ? [1] : []));
+    const unsure = list.map(x => !!x.L.tent || (x.L.conf > 0 && x.L.conf < HEARD_SURE));
+    return { words, ws, we, unsure };
   }
   // ---------- a reference reading (the demo voice reading a passage) ----------
   // The demo voice's audio is made here, so each word's timing is known exactly. It is analysed offline the way a
@@ -2345,7 +2371,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
