@@ -1,0 +1,83 @@
+// Word edges placed again after a reading (D.alignWords): from pauses, loudness dips and voicing breaks, with the
+// passage's expected word lengths and, on built-in passages, the neural voice's timing as a light template.
+// node test/align.test.js
+const fsys = require('fs'), path = require('path'), cp = require('child_process');
+const D = require('../src/dsp.js'), S = require('../src/synth.js');
+const PRON = D.pronIndex(require('../data/pron.json'));
+const texts = require('../data/texts.json');
+let fails = 0;
+const check = (ok, msg) => { if (!ok) fails++; console.log((ok ? 'ok   ' : 'FAIL ') + msg); };
+const fs = 48000;
+
+// analyzer frames the way a live reading stores them (t in ms, f0, e vowel-band loudness, a overall loudness);
+// i is the live highlight's word, given here by tag(t)
+function frames(x, tag, lagMs = 40) {
+  const an = new D.Analyzer(fs), hop = Math.round(fs / 60), out = [];
+  for (let end = an.needed; end <= x.length; end += hop) {
+    const fr = an.analyze(x.subarray(0, end)), t = end / fs * 1000 - lagMs;
+    out.push({ i: tag(t), t, f0: fr.kind === 'voiced' ? fr.f0 : 0, e: fr.ve, a: 20 * Math.log10(fr.rms + 1e-9) });
+  }
+  return out;
+}
+const errs = (ws, truth) => ws.map((s, i) => Math.abs(s - truth[i])).sort((a, b) => a - b);
+const med = (a) => a[a.length >> 1];
+
+// ---- the case from a real reading: "beautiful" took "colors." too, "colors." got a sliver ----
+{
+  S.setStyle('natural');
+  const words = 'The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch,'.split(' ');
+  const r = S.readText(fs, words, D.VOWELS, { pitch: 205, res: 100, bright: 50, rate: 1, vowelsOf: (w) => D.wordVowelSeq(w, PRON) });
+  const st = r.starts.map(s => s * 1000), en = r.ends.map(s => s * 1000), bi = words.indexOf('beautiful'), ci = bi + 1;
+  // the live highlight: on time until "beautiful", which it held through "colors." and the pause after it, then two
+  // words at once just before "These"
+  const fr = frames(r.x, (t) => { let k = 0; while (k + 1 < words.length && st[k + 1] <= t) k++; return k === ci && t < st[ci + 1] - 30 ? bi : k; });
+  const live = D.readingTimeline(fr, 0, words.length), lsp = D.wordSpans(live.ws, live.dur);
+  check(lsp[ci][1] - lsp[ci][0] < 0.25 * (en[ci] - st[ci]), `the live highlight gives "colors." a sliver (${Math.round(lsp[ci][1] - lsp[ci][0])} ms of ${Math.round(en[ci] - st[ci])})`);
+  const al = D.alignWords(fr, words);
+  check(!!al, 'the words fit the sound');
+  const sp = D.wordSpans(al.ws, live.dur, al.we);
+  check(Math.abs(al.ws[ci] - st[ci]) <= 100, `"colors." starts ${Math.round(al.ws[ci])} ms, said at ${Math.round(st[ci])}`);
+  check(Math.abs(al.ws[bi] - st[bi]) <= 250, `"beautiful" starts ${Math.round(al.ws[bi])} ms, said at ${Math.round(st[bi])}`);
+  check(sp[ci][1] - sp[ci][0] >= 0.7 * (en[ci] - st[ci]), `"colors." now spans ${Math.round(sp[ci][1] - sp[ci][0])} ms (said for ${Math.round(en[ci] - st[ci])})`);
+  check(sp[bi][1] <= st[ci] + 100, `"beautiful" ends by ${Math.round(sp[bi][1])} ms, before "colors."`);
+  // the word by word report follows the new edges: "colors." gets its own voice
+  const re = D.retagFrames(fr, al.ws), voiced = (fs_, k) => fs_.filter(f => f.i === k && f.f0 > 0).length;
+  check(voiced(fr, ci) <= 2 && voiced(re, ci) >= 10, `voiced moments on "colors.": ${voiced(fr, ci)} live, ${voiced(re, ci)} after`);
+  check(al.we[ci] != null && Math.abs(al.we[ci] - en[ci]) <= 120, `"colors." ends at the pause (${Math.round(al.we[ci])} ms, said until ${Math.round(en[ci])})`);
+}
+
+// ---- a whole passage in the demo voice: edges near where the words were said ----
+for (const [style, pitch, res] of [['natural', 205, 100], ['classic', 115, 0]]) {
+  S.setStyle(style);
+  const words = texts.find(t => t.id === 'b-northwind').body.split(/\s+/).filter(Boolean);
+  const r = S.readText(fs, words, D.VOWELS, { pitch, res, bright: 50, rate: 1, vowelsOf: (w) => D.wordVowelSeq(w, PRON) });
+  const st = r.starts.map(s => s * 1000);
+  const al = D.alignWords(frames(r.x, () => 0), words), e = errs(al.ws, st);
+  check(med(e) <= 70 && e.filter(v => v <= 150).length >= 0.75 * e.length, `${style} demo voice, North Wind: median ${Math.round(med(e))} ms off, ${Math.round(100 * e.filter(v => v <= 150).length / e.length)}% within 150 ms`);
+}
+
+// ---- the neural voice (where ffmpeg can decode it), with and without its own timing as the template ----
+let ff = true; try { cp.execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch (e) { ff = false; }
+if (!ff) console.log('skip the neural voice: no ffmpeg here to decode the clips');
+else {
+  const dir = path.join(__dirname, '..', 'refclips'), ix = require(path.join(dir, 'clips.json'));
+  const t = texts.find(x => x.id === 'b-rainbow'), words = t.body.split(/\s+/).filter(Boolean), c = ix.clips['b-rainbow.fem'];
+  if (c && c.hash === D.textHash(t.body) && fsys.existsSync(path.join(dir, c.file))) {
+    const buf = cp.execFileSync('ffmpeg', ['-v', 'error', '-i', path.join(dir, c.file), '-f', 'f32le', '-ac', '1', '-ar', '48000', '-'], { maxBuffer: 1 << 28 });
+    const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length));
+    const shift = D.soundOnset(x, fs) - c.onset, st = c.words.map(w => (w[0] + shift) * 1000);
+    const fr = frames(x, () => 0);
+    // the model's own word times run up to ~80 ms late, so this is looser than the demo voice
+    for (const [name, opt] of [['alone', {}], ['with its timing', { ref: c.words }]]) {
+      const al = D.alignWords(fr, words, opt), e = errs(al.ws, st), ci = words.indexOf('colors.');
+      check(med(e) <= 120 && Math.abs(al.ws[ci] - st[ci]) <= 150, `neural voice, Rainbow, ${name}: median ${Math.round(med(e))} ms off, "colors." ${Math.round(al.ws[ci] - st[ci])} ms`);
+    }
+  }
+}
+
+// ---- odds and ends ----
+check(D.alignWords([{ t: 0, f0: 0, i: 0 }], ['a']) === null, 'frames without loudness (an older reading): keeps the live edges');
+check(JSON.stringify(D.retagFrames([{ t: 0, i: 0 }, { t: 50, i: 0 }, { t: 120, i: 0 }, { t: 300, i: 2 }], [0, 100, 250]).map(f => f.i)) === '[0,0,1,2]', 'frames are tagged with the word whose stretch they fall in');
+
+console.log(fails ? `\n${fails} failed` : '\nall alignment checks passed');
+process.exit(fails ? 1 : 0);
