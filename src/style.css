@@ -199,7 +199,7 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 @media (min-width: 861px) {
   /* Practice uses more of a wide screen than the other modes */
   body[data-mode="practice"] .wrap { max-width: 1440px; }
-  .drill-grid { grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 6px; }
+  .drill-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
   .drill-grid .drill { padding: 6px 10px; gap: 0; }
   .drill-grid .drill .cue { font-size: 1rem; margin-bottom: 1px; }
   .drill-grid .drill .sub, .drill-grid .drill .last { font-size: 0.74rem; }
