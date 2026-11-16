@@ -434,15 +434,26 @@
     return m;
   }
   // -> { keys: [vowel keys], why: 'ok' | 'function' | 'glide' | 'unknown' }; keys is empty unless why is 'ok'
-  function wordVowels(text, idx) {
+  // a word's dictionary code (its full vowels in order, 'x' for a gliding one), or why there is none
+  function pronCode(text, idx) {
     const w = String(text || '').toLowerCase().replace(/[‘’]/g, "'").replace(/^[^a-z']+|[^a-z']+$/g, '').replace(/^'+|'+$/g, '');
-    if (!w) return { keys: [], why: 'unknown' };
-    if (FUNCTION_WORDS.has(w)) return { keys: [], why: 'function' };
+    if (!w) return { why: 'unknown' };
+    if (FUNCTION_WORDS.has(w)) return { why: 'function' };
     const look = (x) => idx.get(x) || (/'s$/.test(x) ? idx.get(x.slice(0, -2)) : null) || (/s$/.test(x) && !/ss$/.test(x) ? idx.get(x.slice(0, -1)) : null);
     // a hyphenated word ("ninety-three", "mmm-me") has the vowels of its parts; a part we can't look up
     // (a hum like "mmm") is skipped, and a short part is said in full here, so it counts
     const code = w.includes('-') ? w.split('-').map(look).filter(Boolean).join('') : look(w);
-    if (!code) return { keys: [], why: 'unknown' };
+    return code ? { code } : { why: 'unknown' };
+  }
+  // The full vowels of a word in order, as vowel keys ('x' for a gliding vowel), or null for a linking word or one
+  // not in the dictionary. The demo voice uses it to say a passage's words with the vowels the reading expects.
+  function wordVowelSeq(text, idx) {
+    const r = pronCode(text, idx);
+    return r.code ? [...r.code].map(c => CODE_KEY[c] || c) : null;
+  }
+  function wordVowels(text, idx) {
+    const pc = pronCode(text, idx), code = pc.code;
+    if (!code) return { keys: [], why: pc.why };
     const keys = [...new Set([...code].filter(c => c !== 'x').map(c => CODE_KEY[c] || c))];
     return keys.length ? { keys, why: 'ok' } : { keys: [], why: 'glide' };
   }
@@ -1131,6 +1142,80 @@
       for (let j = i + 1; j < ws.length; j++) if (ws[j] != null) { e = ws[j]; break; }
       return [s, Math.max(s, e)];
     });
+  }
+  // ---------- a reference reading (the demo voice reading a passage) ----------
+  // The demo voice's audio is made here, so each word's timing is known exactly. It is analysed offline the way a
+  // live reading is (app.js onFrame): 60 frames a second, each tagged with its word; on steady frames the word's
+  // own vowels first, else any clear vowel (counted overall, not per vowel), linking words not scored; short
+  // vowels read from single frames (loose); /s/ and /sh/ scored; formants kept for the timeline and vowel map.
+  // x: samples at fs; words: the passage's words; spans: [[start, end] in seconds] per word; pron: pronIndex.
+  // A generator, so a page can analyse a long passage in slices without freezing: it yields the share done
+  // every `every` frames and returns { frames (Run.frames form, t in ms from the start), vf (formants and score
+  // per vowel key, for vowelMap), all (every resonance score), pitch, breath, sibs: { s, sh } }.
+  const REF_LAG = 0.04; // s: the analysis looks at the newest ~30 ms, smoothed over a few frames
+  function* analyzeReadingSteps(x, fs, words, spans, pron, every = 400) {
+    const an = new Analyzer(fs), hop = Math.round(fs / 60), out = { frames: [], vf: {}, all: [], pitch: [], breath: [], sibs: { s: [], sh: [] } };
+    const wv = words.map(w => wordVowels(w, pron));
+    const score = (a) => Math.max(0, Math.min(100, resScore(a)));
+    let wi = -1, n = 0;
+    for (let end = an.needed; end <= x.length; end += hop) {
+      const fr = an.analyze(x.subarray(0, end)), tc = end / fs - REF_LAG;
+      while (wi + 1 < spans.length && spans[wi + 1][0] <= tc + 0.01) wi++; // the word being said, as a highlight would have it
+      const i = Math.max(0, wi), f = { i, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: NaN, u: NaN, miss: false, sib: NaN, k: null,
+        t: Math.round(tc * 1000), F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: i };
+      const w = wv[i];
+      if (fr.kind === 'voiced') {
+        out.pitch.push(fr.f0);
+        if (fr.formants && (fr.stable || fr.steady)) {
+          const F = fr.formants, cls = classifyVowel(F, VOWELS, fr.f0);
+          let fit = null, perVowel = false;
+          if (w.why === 'ok') {
+            const m = matchWordVowel(F, w.keys, cls, fr.f0);
+            if (m) { fit = m; perVowel = true; } else if (cls.cost < 0.07 && cls.ok) fit = cls; else if (cls.cost < 0.07) f.miss = true;
+          } else if (w.why !== 'function') {
+            if (cls.cost < 0.07 && !cls.ok) f.miss = true; else if (cls.cost < 0.07) fit = cls;
+          }
+          if (fit) {
+            f.res = score(fit.alpha); f.u = fit.spread * RES_PER_ALPHA / 100; out.all.push(f.res);
+            if (perVowel) { f.k = fit.vowel.key; (out.vf[f.k] = out.vf[f.k] || []).push([F[0], F[1], F[2], f.res]); }
+          }
+        } else if (fr.rawF && w.why !== 'function') {
+          const cls = classifyVowel(fr.rawF, VOWELS, fr.f0);
+          const m = w.why === 'ok' ? matchWordVowel(fr.rawF, w.keys, cls, fr.f0) : null, fit = m || (cls.cost < 0.07 && cls.ok ? cls : null);
+          if (fit) { f.res = score(fit.alpha); f.u = fit.spread * RES_PER_ALPHA / 100; f.loose = true; }
+        }
+      } else if (fr.kind === 'fricative' && SIBILANTS[fr.sib]) {
+        f.sib = score(sibilantAlpha(fr.cog, SIBILANTS[fr.sib])); out.sibs[fr.sib].push(f.sib);
+      }
+      if (fr.breath != null) out.breath.push(fr.breath);
+      out.frames.push(f);
+      if (++n % every === 0) yield end / x.length;
+    }
+    return out;
+  }
+  function analyzeReading(x, fs, words, spans, pron) {
+    const it = analyzeReadingSteps(x, fs, words, spans, pron);
+    for (;;) { const r = it.next(); if (r.done) return r.value; }
+  }
+  // A reference reading's timeline laid on another reading's clock: each word's stretch of the reference is
+  // stretched or squeezed onto the same word's stretch there (ws: that reading's word starts in ms, dur its
+  // length), so the two line up word by word even when the pace differs. A word's stretch is scaled by at most
+  // 2.5 times either way, and a word the other reading never reached is left out.
+  // Returns { f0: [[ms, Hz]], rs: [[ms, resonance or null]] } in that reading's ms.
+  function warpTimeline(ref, ws, dur) {
+    const rsp = wordSpans(ref.ws, ref.dur), usp = wordSpans(ws, dur), out = { f0: [], rs: [] };
+    for (let k = 0; k < rsp.length; k++) {
+      const a = rsp[k], b = usp[k]; if (!a || !b) continue;
+      const rl = Math.max(1, a[1] - a[0]), ul = b[1] - b[0], g = Math.max(0.4, Math.min(2.5, ul / rl));
+      const i0 = Math.max(0, Math.floor(a[0] / ref.bin)), i1 = Math.min(ref.f0.length - 1, Math.ceil(a[1] / ref.bin) - 1);
+      for (let i = i0; i <= i1; i++) {
+        const ms = (i + 0.5) * ref.bin; if (ms < a[0] || ms >= a[1]) continue;
+        const at = b[0] + (ms - a[0]) * g; if (at > b[1]) break;
+        if (ref.f0[i]) out.f0.push([Math.round(at), ref.f0[i]]);
+        out.rs.push([Math.round(at), ref.rs[i]]);
+      }
+    }
+    return out;
   }
   // A spectrogram of a whole recording, for drawing under the reading timeline: the sound brought down to about
   // 11 kHz, 23 ms Hann windows every hopMs (wider for long recordings, so a column count stays under maxCols),
@@ -2181,7 +2266,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
