@@ -833,7 +833,7 @@
     analyze(buf) {
       const sr = this.sr;
       const x = buf.length > this.needed ? buf.subarray(buf.length - this.needed) : buf;
-      const out = { kind: 'silence', rms: 0, f0: 0, formants: null, cog: 0, spec: null };
+      const out = { kind: 'silence', rms: 0, f0: 0, formants: null, cog: 0, spec: null, fsd: this.fsd };
 
       // level over the last ~30 ms
       const nr = Math.min(x.length, Math.round(sr * 0.03));
@@ -876,6 +876,7 @@
       }
       const hfRatio = tot > 0 ? hi / tot : 0;
       out.hfRatio = hfRatio;
+      out.wide = wideColumn(ps, binHz); // 0-12 kHz, for a hiss's spectrogram (spec stops near 5.5 kHz)
       out.cog = cs > 0 ? cw / cs : 0;
 
       if (voiced) {
@@ -1265,6 +1266,68 @@
     const top = sample.length ? quantile(sample, 0.995) : 0, v = new Uint8Array(cols * rows);
     for (let i = 0; i < db.length; i++) v[i] = Math.max(0, Math.min(255, Math.round((db[i] - top + 65) / 65 * 255)));
     return { hop, rows, cols, fmax, v };
+  }
+  // A full-rate power spectrum as WIDE_ROWS rows of WIDE_HZ / WIDE_ROWS Hz each (dB, loudest bin in the row), so a
+  // sibilant's hiss (centred at 3.5-8 kHz) can be drawn; the analyzer's own column stops near 5.5 kHz.
+  const WIDE_HZ = 12000, WIDE_ROWS = 96;
+  function wideColumn(ps, binHz) {
+    const col = new Float32Array(WIDE_ROWS).fill(-120), rh = WIDE_HZ / WIDE_ROWS;
+    for (let k = 1; k < ps.length; k++) {
+      const r = Math.floor(k * binHz / rh); if (r >= WIDE_ROWS) break;
+      const v = 10 * Math.log10(ps[k] + 1e-12); if (v > col[r]) col[r] = v;
+    }
+    return col;
+  }
+  // Target vs you: a short spectrogram made from analyzer frames (live or offline, ~60 a second), so a reference
+  // sound and your own are drawn the same way. fmax: top of the chart; wide: use the 0-12 kHz column (for hiss).
+  // Each cell is 0..255 over the strip's loudest 60 dB (the 99th percentile is the top, so a pop doesn't wash it out);
+  // silent frames are blank. fm per column: F1-F3 read on a voiced frame, [null, F2, F3] from a whisper, else null;
+  // cog per column: a hiss's centre of gravity. trim drops the silence before and after the sound.
+  function specStrip(frames, { fmax = 5000, rows = 80, wide = false, trim = false, fps = 60 } = {}) {
+    let a = 0, b = frames.length;
+    const sounding = (f) => f && f.kind && f.kind !== 'silence';
+    if (trim) {
+      while (a < b && !sounding(frames[a])) a++;
+      while (b > a && !sounding(frames[b - 1])) b--;
+      a = Math.max(0, a - 3); b = Math.min(frames.length, b + 3);
+    }
+    const fr = frames.slice(a, b), cols = fr.length, db = new Float32Array(cols * rows).fill(-200);
+    const fm = [], cog = [], sample = [];
+    fr.forEach((f, c) => {
+      fm.push(f.kind === 'voiced' && f.formants ? f.formants.slice(0, 3) : f.whisperF ? [null, f.whisperF[1], f.whisperF[2]] : null);
+      cog.push(f.kind === 'fricative' && f.cog > 0 ? f.cog : null);
+      const col = wide ? f.wide : f.spec;
+      if (!sounding(f) || !col) return;
+      const top = wide ? WIDE_HZ : (f.fsd || 11025) / 2, bin = top / (wide ? col.length : col.length - 1);
+      for (let r = 0; r < rows; r++) {
+        const lo = r * fmax / rows, hi = (r + 1) * fmax / rows;
+        if (lo >= top) break;
+        let i0 = wide ? Math.floor(lo / bin) : Math.round(lo / bin), i1 = Math.max(i0, wide ? Math.ceil(hi / bin) - 1 : Math.round(hi / bin));
+        i1 = Math.min(i1, col.length - 1);
+        let p = -200; for (let i = i0; i <= i1; i++) if (col[i] > p) p = col[i];
+        db[c * rows + r] = p; sample.push(p);
+      }
+    });
+    const top = sample.length ? quantile(sample, 0.99) : 0, v = new Uint8Array(cols * rows);
+    for (let i = 0; i < db.length; i++) v[i] = db[i] <= -199 ? 0 : Math.max(0, Math.min(255, Math.round((db[i] - top + 60) / 60 * 255)));
+    return { rows, cols, fmax, wide, v, fm, cog, dur: cols * 1000 / fps };
+  }
+  // What a strip read: median F1-F3 over its marked columns (null with fewer than 5) and the hiss's median centre.
+  function stripReads(st) {
+    const F = [0, 1, 2].map(i => { const a = st.fm.filter(f => f && f[i] > 0).map(f => f[i]); return a.length >= 5 ? median(a) : null; });
+    const c = st.cog.filter(x => x > 0);
+    return { F, cog: c.length >= 5 ? median(c) : null };
+  }
+  // Target vs you in numbers: each formant (and the hiss) yours against the target's, as a ratio, and the one that
+  // differs most (gaps under 4% don't count; in a vowel that is about one tenth of the way from a typical man to a
+  // typical woman). Returns { rows: [{ k: 'F1'|'F2'|'F3'|'cog', t, y, r }], big }.
+  function compareStrips(tgt, you) {
+    const a = stripReads(tgt), b = stripReads(you), rows = [];
+    [0, 1, 2].forEach(i => { if (a.F[i] && b.F[i]) rows.push({ k: 'F' + (i + 1), t: a.F[i], y: b.F[i], r: b.F[i] / a.F[i] }); });
+    if (a.cog && b.cog) rows.push({ k: 'cog', t: a.cog, y: b.cog, r: b.cog / a.cog });
+    let big = null;
+    for (const x of rows) if (Math.abs(Math.log(x.r)) >= Math.log(1.04) && (!big || Math.abs(Math.log(x.r)) > Math.abs(Math.log(big.r)))) big = x;
+    return { rows, big };
   }
   // Shorter vowels: in a reading, a frame whose formants didn't hold still is still read on its own (its own 30 ms,
   // not smoothed across the consonant next to it) when it fits one of the word's vowels. One such frame is noisy,
@@ -2282,7 +2345,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
