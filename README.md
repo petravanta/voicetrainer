@@ -76,6 +76,20 @@ node test/build.test.js     # build stamp: commit and time reach the page, foote
 node test/sing.test.js      # lyrics parsing (plain and LRC), lyrics search results, the LRCLIB to lyrics.ovh fallback (with a fake network), the saved-lyrics list and the per-line sing-along summary
 ```
 
+## The neural voice
+
+Each built-in reading passage comes with two pre-made readings by a neural text-to-speech voice ([Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), Apache-2.0): `af_heart` (feminine) and `am_puck` (masculine), in [`refclips/`](refclips/) as MP3 (about 3 MB for all of them, each loaded only when used). The model gives each phoneme's length, so each word's start and end in a clip is known, not guessed. The app plays them as the reading voice and measures them exactly as it measures you, as the dashed reference on your readings. Your own passages, and copies of the page that cannot load the clips (the standalone file, the Artifact), use the synthetic demo voice instead.
+
+Measured by the app (`test/refclips.test.js`): the feminine voice reads 196-223 Hz and resonance 55-70 across the passages, the masculine one 108-132 Hz and resonance 38-47 (the top of the masculine band). To remake them after changing a passage, or with other voices:
+
+```
+pip install kokoro-onnx soundfile onnx      # and ffmpeg on PATH
+# kokoro-v1.0.onnx and voices-v1.0.bin from https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0
+python3 scripts/make-refclips.py --model <folder with those two files> [--only b-rainbow] [--fem af_heart] [--masc am_puck]
+```
+
+A passage changed without remaking its clips falls back to the demo voice (the test warns).
+
 ## Extending the app
 
 Practice content lives in plain JSON files under [`data/`](data/), separate from the code, so you can read it, review it and add to it in a pull request without touching JavaScript. `build.js` inlines them into the page. Each file has a schema that explains every field, and a check runs on every pull request.

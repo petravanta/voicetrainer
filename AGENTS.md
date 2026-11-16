@@ -8,3 +8,4 @@ Follow the shared standards in https://github.com/petravanta/general/blob/main/S
 - Canvas drawing reads the color tokens and redraws when `data-theme` changes; keep that working when adding new charts.
 
 - `pwa/` holds the install files (manifest, `sw.js`, icons); the Pages workflow copies them next to `index.html`, and only the standalone page links them (see general/STANDARDS.md, "Installing on a phone").
+- `refclips/` holds the neural voice's readings of the built-in passages (made by `scripts/make-refclips.py`, see README "The neural voice"); the Pages workflow copies it next to `index.html`. Changing a passage's text makes its clips stale (the app falls back to the demo voice); remake them if you can.

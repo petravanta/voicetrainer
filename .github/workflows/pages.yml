@@ -47,10 +47,11 @@ jobs:
       - run: node test/readcheck.test.js
       - run: node test/missed.test.js
       - run: node test/refread.test.js
+      - run: node test/refclips.test.js
       - run: node test/natural.test.js
       - run: node test/build.test.js
       - run: node build.js
-      - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp dist/version.json site/ && cp pwa/* site/
+      - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp dist/version.json site/ && cp pwa/* site/ && cp -r refclips site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
