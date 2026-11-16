@@ -46,6 +46,7 @@ jobs:
       - run: node test/miccheck.test.js
       - run: node test/readcheck.test.js
       - run: node test/missed.test.js
+      - run: node test/heardwords.test.js
       - run: node test/refread.test.js
       - run: node test/refclips.test.js
       - run: node test/natural.test.js

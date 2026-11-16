@@ -448,7 +448,7 @@
       if (!reading) this.readerIdx = -1;
       if (!this.on) this.setNote('');
       else if (reading) this.setNote('In reading practice the words come from the passage as the highlight moves.');
-      else if (!this.supported()) this.setNote('This browser cannot recognise speech, so words only appear during reading practice.');
+      else if (!this.supported()) this.setNote('This browser can\'t recognise speech (Chrome, Edge and Safari can; Firefox can\'t), so no words show here.');
       else if (state.running !== 'mic') this.setNote('Words appear while the microphone is on.');
     },
     start() {
@@ -462,25 +462,65 @@
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const res = e.results[i], text = res[0].transcript.trim();
           if (reading) { if (!Run.on) continue; this.ran = true; if (res.isFinal) this.heard.push(text); else interim += ' ' + text; continue; }
-          if (res.isFinal) this.place(text); else interim += ' ' + text;
+          if (res.isFinal) this.place(text, res[0].confidence); else interim += ' ' + text;
         }
         if (reading) { this.heardLive = interim.trim(); return; }
         // words still being recognised show straight away (faded) and firm up when final
         this.interim = D.placeWords(interim.trim().split(/\s+/).filter(Boolean), this.voicedSince(this.lastT));
+        if (this.tail) this.tail.interim = this.interim;
       };
       r.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { this.setNote('Speech recognition was blocked, so no words are shown.'); this.on = false; const b = $('pitch-words'); if (b) b.checked = false; }
         else if (e.error === 'network') this.setNote('Speech recognition needs an internet connection in this browser.');
       };
       r.onend = () => { if (this.rec === r) { if (this.on && state.running === 'mic') { try { r.start(); } catch (err) { this.rec = null; } } else this.rec = null; } };
-      try { r.start(); this.setNote(''); if (Run.on) this.ran = true; } catch (err) { this.rec = null; }
+      try { r.start(); this.setNote(''); if (Run.on) this.ran = true; if (this.take) this.take.ran = true; } catch (err) { this.rec = null; }
     },
-    stop() { const r = this.rec; this.rec = null; this.interim = []; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
+    stop() {
+      const r = this.rec; this.rec = null; this.interim = [];
+      if (!r) return;
+      // a Freestyle take just ended: let the recogniser finish its last words rather than throwing them away
+      const tail = this.tail;
+      if (tail) { r.onend = () => tail.done(); try { r.stop(); } catch (e) { tail.done(); } return; }
+      r.onend = null; try { r.abort(); } catch (e) {}
+    },
+    // ---- a Freestyle take's words, for its timeline ----
+    // take: the words heard since the take began ({ w, t0, t1, conf }, page clock), or null outside a take.
+    take: null, tail: null,
+    beginTake() { this.take = []; this.take.ran = !!this.rec; },
+    // The take is over: resolves with its words (null when recognition never ran during it) once the last result
+    // is in, or after 1.5 s; words still unconfirmed by then are kept, marked tentative.
+    endTake(quiet) {
+      const list = this.take; this.take = null;
+      if (!list || quiet) return Promise.resolve(null);
+      if (!list.ran) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        let tm = 0;
+        const tail = {
+          list, interim: this.interim.slice(), fin: false,
+          done: () => {
+            if (tail.fin) return; tail.fin = true; clearTimeout(tm);
+            if (this.tail === tail) this.tail = null;
+            for (const L of tail.interim) list.push(Object.assign({}, L, { tent: 1 }));
+            resolve(list);
+          },
+        };
+        this.tail = tail;
+        tm = setTimeout(tail.done, 1500);
+        if (!this.rec) tail.done();
+      });
+    },
     voicedSince(t) { const times = []; for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > t) times.push(pitchT[i]); return times; },
     // Final result: spread its words over the voiced frames since the previous result.
-    place(text) {
+    place(text, conf) {
       const now = performance.now();
-      for (const p of D.placeWords(text.split(/\s+/).filter(Boolean), this.voicedSince(this.lastT))) this.labels.push(p);
+      for (const p of D.placeWords(text.split(/\s+/).filter(Boolean), this.voicedSince(this.lastT))) {
+        this.labels.push(p);
+        const h = Object.assign({}, p, { conf: Number.isFinite(conf) ? conf : 0 });
+        if (this.take) this.take.push(h);
+        if (this.tail) { this.tail.list.push(h); }
+      }
+      if (this.tail) this.tail.interim = [];
       this.lastT = now; this.interim = [];
       while (this.labels.length > 60) this.labels.shift();
     },
@@ -3352,6 +3392,7 @@
     start(kind) {
       this.end(true);
       Object.assign(this, { on: true, kind, frames: [], chunks: [], mr: null, full: false, buf: kind !== 'mic' ? this.pendingBuf : null, pendingBuf: null, t0: performance.now() });
+      if (kind === 'mic') Words.beginTake(); // words the recogniser hears (Show words on) go on the take's timeline
       if (kind === 'mic' && stream && window.MediaRecorder) {
         try {
           // its own copy of the stream, so the last second still reaches the recording after the microphone is stopped
@@ -3371,16 +3412,27 @@
     end(quiet) {
       if (!this.on) return;
       this.on = false;
-      const frames = this.frames, mr = this.mr, chunks = this.chunks, buf = this.buf;
+      const frames = this.frames, mr = this.mr, chunks = this.chunks, buf = this.buf, t0 = this.t0, lag = FRAME_LAG_MS();
       this.frames = []; this.mr = null; this.chunks = []; this.buf = null;
-      if (quiet || frames.filter(f => f.f0 > 0).length < 20) { // under about a third of a second of voice
+      const thin = frames.filter(f => f.f0 > 0).length < 20; // under about a third of a second of voice
+      const heard = Words.endTake(quiet || thin);
+      if (quiet || thin) {
         if (mr && mr.state !== 'inactive') { mr.ondataavailable = null; try { mr.stop(); } catch (e) {} }
         return;
       }
-      const tk = { id: 'free' + (++this.n), tl: D.readingTimeline(frames, this.t0, 0), kind: this.kind, at: new Date().toISOString(), full: this.full, buf, blob: null };
-      if (!mr) return showFreeReview(tk);
-      const done = () => { tk.blob = chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null; showFreeReview(tk); };
-      if (mr.state === 'inactive') done(); else { mr.addEventListener('stop', done); try { mr.stop(); } catch (e) { done(); } }
+      const tk = { id: 'free' + (++this.n), tl: D.readingTimeline(frames, t0, 0), kind: this.kind, at: new Date().toISOString(), full: this.full, buf, blob: null, heard: null };
+      const rec = !mr ? Promise.resolve(null) : new Promise((res) => {
+        const done = () => res(chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null);
+        if (mr.state === 'inactive') done(); else { mr.addEventListener('stop', done); try { mr.stop(); } catch (e) { done(); } }
+      });
+      Promise.all([heard, rec]).then(([list, blob]) => {
+        tk.blob = blob;
+        if (list) { // the words heard, each over its own stretch of the take
+          const h = D.heardWords(frames, t0, tk.tl.dur, list, lag);
+          tk.heard = h; tk.tl.ws = h.ws; tk.tl.we = h.we;
+        }
+        showFreeReview(tk);
+      });
     },
   };
   function showFreeLive() {
@@ -3396,16 +3448,24 @@
     Free.cur = tk;
     $('ftl-live').hidden = true; el.hidden = false;
     const audio = !!(tk.blob || tk.buf), src = tk.kind === 'mic' ? 'take' : tk.kind === 'demo' ? 'demo voice' : 'recording';
+    const H = tk.heard && tk.heard.words.length ? tk.heard : null;
+    const wordsAbout = H ? ' Words: what your browser\'s speech recognition heard, its guess and not a checked transcript. It gives no timings, so each word is spread over the stretch of voice just before it came back, and can sit a word or so off. Words it was unsure of are dotted and slanted. Each word shows its pitch as a level and its resonance as a bar.' : '';
     mountTimeline(el, {
-      id: tk.id, tl: tk.tl, words: null, blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
+      id: tk.id, tl: tk.tl, words: H ? H.words : null, unsure: H ? (i) => H.unsure[i] : null, gone: () => null,
+      wordInfo: (i) => freeWordInfo(H, i), blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
       heading: tk.kind === 'mic' ? 'Your last take' : tk.kind === 'demo' ? 'The demo voice' : 'The recording',
-      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ' Tap anywhere to hear it from there.' : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
+      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap anywhere to hear it from there${H ? ', or tap a word to hear just that word' : ''}.` : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
       noAudio: "This browser couldn't record the take, so no spectrogram",
-      hint: audio ? 'Tap the timeline to play from that moment.' : 'Tap the timeline for the numbers there.',
+      hint: (tk.heard && !H ? 'Show words was on, but the speech recognition heard no words in this take. ' : '') + (audio ? `Tap the timeline to play from that moment${H ? ', or a word to hear it' : ''}.` : 'Tap the timeline for the numbers there.'),
       extraBtns: `${tk.blob ? '<button type="button" class="btn sm ghost" id="ftl-save">Save audio</button>' : ''}<button type="button" class="btn sm ghost" id="ftl-back">Live view</button>`,
     });
     $('ftl-back').onclick = () => showFreeLive();
     const sv = $('ftl-save'); if (sv) sv.onclick = () => saveRunAudio({ title: 'freestyle', at: tk.at }, tk.blob);
+  }
+  // the line under a take's timeline for one heard word
+  function freeWordInfo(H, i) {
+    const [t, p, r, s, rough] = H.words[i];
+    return `heard as <b>“${escapeHtml(t)}”</b>${H.unsure[i] ? ' (unsure)' : ''}: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
   }
   // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
   // (a browser's own recordings often can't be seeked in an audio element).
@@ -3477,7 +3537,7 @@
   // stretch of time with its pitch and resonance. words is the reading's byWord, or null for a Freestyle take.
   // pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
   // ref: the demo voice laid on this clock (D.warpTimeline, plus its words' byWord), drawn dashed.
-  function timelineSvg(words, tl, pxs, spec, note, gone, ref) { // gone(i): 'miss' for a word the word check didn't hear
+  function timelineSvg(words, tl, pxs, spec, note, gone, ref, unsure) { // gone(i): 'miss' for a word the word check didn't hear; unsure(i): a heard word the recogniser wasn't sure of
     const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = words ? TL_LANES : tlLanes(false);
     const L = 6, W = Math.ceil(L + tl.dur / 1000 * pxs + 40), x = (ms) => L + ms / 1000 * pxs;
     const ps = tl.f0.filter(v => v > 0);
@@ -3526,13 +3586,14 @@
     // words, each across its own stretch: its pitch as a level, its resonance as a bar, its name under them.
     // Names go on two rows, and one is left out when it would overlap (zoom in to see them all).
     if (words) {
-      const end = [-1e9, -1e9], spans = D.wordSpans(tl.ws, tl.dur);
+      const end = [-1e9, -1e9], spans = D.wordSpans(tl.ws, tl.dur, tl.we);
       const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
       spans.forEach((sp, k) => {
         if (!sp || !words[k]) return;
         let [t, p, r, , rough] = words[k]; const x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2, miss = !!gone && gone(k) === 'miss';
         if (miss) p = r = null;
-        const tip = miss ? `${t}: ${noResWhy(t, p, 'miss')}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, gone && gone(k))}`;
+        const un = !!unsure && unsure(k), heardAs = unsure ? `heard as “${t}”${un ? ' (unsure)' : ''}` : t;
+        const tip = !miss && unsure ? `${heardAs}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : 'no resonance reading: ' + noResWhy(t, p)}` : miss ? `${t}: ${noResWhy(t, p, 'miss')}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, gone && gone(k))}`;
         g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
           + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
           + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
@@ -3543,7 +3604,7 @@
           + (ref && ref.words[k] && ref.words[k][2] != null ? `<line class="tl-ref" x1="${f1(x0 + 0.5)}" x2="${f1(x0 + wd)}" y1="${f1(wry(ref.words[k][2]))}" y2="${f1(wry(ref.words[k][2]))}"/>` : '')
           + '</g>';
         const row = k % 2, lw = t.length * 6.6 + 6;
-        if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
+        if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}${un ? ' unsure' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
       });
     }
     g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
@@ -3612,23 +3673,23 @@
     const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
     const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
     el.innerHTML = `<div class="section-head"><h4>${o.heading}${infoHtml('About the timeline', o.about)}</h4>
-        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.unsure ? '<span><u class="unsure-key">word</u>unsure</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
       <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}
         <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
-        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', 'Each word: pitch') + lab('wr', 'Each word: resonance') : ''}
+        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance' : 'Each word: resonance') : ''}
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
       <p class="small" id="tl-read" aria-live="polite">${o.hint}</p>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
     let svg = null, head = null;
     const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
-    const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
+    const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k >= 0 && tl.we && tl.we[k] != null && ms > tl.we[k] + 60 ? -1 : k; };
     const say = (ms) => {
       const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = words && words[k];
       // the nearest pitch and resonance within a tenth of a second, so a tap between dots still reads
       let f = 0, r = null;
       for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
-      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · “${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
+      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · ${o.unsure ? 'heard as ' : ''}“${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
     };
     const mark = (cls, k) => { svg.querySelectorAll(`.tl-w.${cls}`).forEach(x => x.classList.remove(cls)); const g = k >= 0 && svg.querySelector(`.tl-w[data-i="${k}"]`); if (g) g.classList.add(cls); };
     const place = (ms, follow) => {
@@ -3637,7 +3698,7 @@
       if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
     };
     const draw = () => {
-      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref);
+      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref, o.unsure);
       scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head');
       if (V.head != null) place(V.head, false);
       mark('sel', V.sel); mark('on', V.on);
@@ -3695,7 +3756,7 @@
     const pickWord = (i) => {
       if (!words) return;
       V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = o.wordInfo(i);
-      const sp = D.wordSpans(tl.ws, tl.dur)[i];
+      const sp = D.wordSpans(tl.ws, tl.dur, tl.we)[i];
       if (playable && Player.id === o.id) {
         hook();
         Player.play(Math.max(0, sp[0] - 150) / 1000, (sp[1] + 250) / 1000);
