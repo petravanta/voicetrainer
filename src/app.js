@@ -3855,9 +3855,11 @@
     const sv = $('ftl-save'); if (sv) sv.onclick = () => saveRunAudio({ title: 'freestyle', at: tk.at }, tk.blob);
   }
   // the line under a take's timeline for one heard word
+  // a heard word's numbers for the timeline readout's slots (mountTimeline's cue line)
   function freeWordInfo(H, i) {
     const [t, p, r, s, rough] = H.words[i];
-    return `heard as <b>“${escapeHtml(t)}”</b>${H.unsure[i] ? ' (unsure)' : ''}: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
+    const note = [H.unsure[i] ? 'Heard as this word, unsure.' : '', r == null ? `No resonance reading: ${noResWhy(t, p)}.` : rough ? 'Resonance from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''];
+    return { word: t, unsure: !!H.unsure[i], f0: p, res: r, rough, note: note.filter(Boolean).join(' ') };
   }
   // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
   // (a browser's own recordings often can't be seeked in an audio element).
@@ -4005,11 +4007,15 @@
     return { svg: `<svg class="tl-svg" width="${W}" height="${Y.H}" viewBox="0 0 ${W} ${Y.H}" role="img" aria-label="Pitch, resonance, spectrogram${words ? ' and each word' : ''} through the ${words ? 'reading' : 'take'}, on one time line">${g}</svg>`, x, L, W };
   }
   // The numbers for one word of a reading, for the line under a chart.
+  // a passage word's numbers for the timeline readout's slots (mountTimeline's cue line), with the reference's when one is laid over
   function wordReadout(rec, i, ref) {
     const [t, p, r, s, rough] = rec.byWord[i], gone = wordGone(rec, i), rw = ref && ref.byWord[i];
-    const demo = rw ? ` · <span class="ref-num">${RefRead.who(ref)}: ${rw[1] != null ? rw[1] + ' Hz' : 'no pitch'}, ${rw[2] != null ? 'resonance ' + (rw[4] ? '≈' : '') + Math.round(rw[2]) : 'no resonance reading'}</span>` : '';
-    if (gone === 'miss' || gone === 'end') return `<b>${escapeHtml(t)}</b>: ${noResWhy(t, p, gone)}${demo}`;
-    return `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${rec.ref ? noResWhy(t, p, gone).replace('your voice', 'the voice') : noResWhy(t, p, gone)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}${demo}`;
+    const refN = ref ? { f0: rw ? rw[1] : null, res: rw ? rw[2] : null, rough: !!(rw && rw[4]) } : null;
+    const off = gone === 'miss' || gone === 'end';
+    const why = () => { const w = noResWhy(t, p, gone); return rec.ref ? w.replace('your voice', 'the voice') : w; };
+    const note = off ? why()[0].toUpperCase() + why().slice(1) + '.'
+      : [r == null ? `No resonance reading: ${why()}.` : rough ? 'Resonance from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''].filter(Boolean).join(' ');
+    return { word: t, miss: gone === 'miss', f0: off ? null : p, res: off ? null : r, rough, ref: refN, note };
   }
   const TLSpec = { id: null, spec: null }; // the last recording's spectrogram, so reopening it is instant
   // Fills the reading's timeline once its stored data is found, and the player and spectrogram when the recording is there too.
@@ -4061,6 +4067,23 @@
   // recording, if any), alive() (false once el's owner has moved on), heading, about (the info text), noAudio
   // (said in the spectrogram lane without a recording), hint, wordInfo(i), gone(i) (a word's wordGone), extraBtns }.
   // Returns { ready: a promise of whether it can play, pickWord(i) }.
+  // The timeline's cue readout: every number in a slot of its own that keeps its place whatever the values
+  // (a grid: one line on wide screens, two fixed rows on a phone), "–" where nothing was read. The reference's
+  // row, when one is laid over, lines its pitch and resonance up under yours. The note line is always there.
+  // c: { t, word, unsure, miss, f0, res, rough, F, ref: { f0, res, rough }, refWho, note }
+  function cueHtml(c) {
+    const v = (x, w) => `<b class="tr-v" style="--w:${w}ch">${x != null && x !== 0 && !Number.isNaN(x) ? x : '–'}</b>`;
+    const res = (r, rough) => r != null ? (rough ? '≈' : '') + Math.round(r) : null;
+    const word = c.word != null ? `“${escapeHtml(c.word)}”` : '–';
+    const fm = [0, 1, 2].map(k => `<span class="tr-f tr-f${k + 1}"><span class="k f${k + 1}">F${k + 1}</span>${v(c.F && c.F[k], 4)}${k === 2 ? '<small>Hz</small>' : ''}</span>`).join('');
+    const ref = c.refWho ? `<span class="tr-rl ref-num" title="${escapeHtml(c.refWho)}">${escapeHtml(c.refWho)}</span>`
+      + `<span class="tr-rp">${v(c.ref && c.ref.f0, 4)}<small>Hz</small></span><span class="tr-rr"><small>resonance</small>${v(res(c.ref && c.ref.res, c.ref && c.ref.rough), 3)}</span>` : '';
+    return `<span class="tr-t">${c.t || '–:–'}</span>`
+      + `<span class="tr-w${c.unsure ? ' unsure' : ''}${c.miss ? ' miss' : ''}" title="${c.word != null ? escapeHtml(c.word) : ''}">${word}</span>`
+      + `<span class="tr-p">${v(c.f0, 4)}<small>Hz</small></span>`
+      + `<span class="tr-r"><small>resonance</small>${v(res(c.res, c.rough), 3)}</span>`
+      + `<span class="tr-fm">${fm}</span>${ref}<span class="tr-n">${c.note || ''}</span>`;
+  }
   function mountTimeline(el, o) {
     const tl = o.tl, words = o.words || null, Y = words ? TL_LANES : tlLanes(false), [lo, hi] = target(), [plo, phi] = pitchBand();
     const hasAudio = !!(o.blob || o.buf), live = () => el.isConnected && o.alive();
@@ -4073,7 +4096,7 @@
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
         <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance' : 'Each word: resonance') : ''}
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
-      <p class="small" id="tl-read" aria-live="polite">${o.hint}</p>`;
+      <div class="tl-readbox"><div class="tl-read${o.ref ? ' has-ref' : ''}${words ? '' : ' no-words'}" id="tl-read" aria-live="polite">${cueHtml({ note: o.hint, refWho: o.ref ? (o.refWho || 'demo voice') : null })}</div></div>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
     let svg = null, head = null, cueG = null, playable = false, drag = null, grab = null, noClick = false;
     const btn = el.querySelector('#tl-play');
@@ -4081,13 +4104,13 @@
     const msAt = (ev) => msAtX(ev.clientX);
     const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k >= 0 && tl.we && tl.we[k] != null && ms > tl.we[k] + 60 ? -1 : k; };
     const clockMs = (ms) => { const s = Math.max(0, ms) / 1000; return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
-    // the line under the timeline for one moment: the word there, pitch, resonance, F1-F3, and the reference's numbers when one is laid over it
+    const refWho = o.ref ? (o.refWho || 'demo voice') : null;
+    // the readout under the timeline for one moment: the word there, pitch, resonance, F1-F3, and the reference's numbers when one is laid over it
     const say = (ms) => {
-      const k = wordAt(ms), w = words && words[k], a = D.timelineAt(tl, ms, o.ref);
-      const word = w ? ` · ${o.unsure ? 'heard as ' : ''}“${escapeHtml(w[0])}”${o.unsure && o.unsure(k) ? ' (unsure)' : ''}${o.gone && o.gone(k) === 'miss' ? ' (possibly missed)' : ''}` : '';
-      const fm = a.F ? ` · <span class="tl-fmt"><span class="k f1">F1</span> ${a.F[0]} <span class="k f2">F2</span> ${a.F[1]} <span class="k f3">F3</span> ${a.F[2]} Hz</span>` : '';
-      const ref = a.ref ? ` · <span class="ref-num">${o.refWho || 'demo voice'}: ${a.ref.f0 ? a.ref.f0 + ' Hz' : 'no pitch'}, ${a.ref.res != null ? 'resonance ' + Math.round(a.ref.res) : 'no vowel read'}</span>` : '';
-      return `<b>${clockMs(ms)}</b>${word} · ${a.f0 ? a.f0 + ' Hz' : 'no pitch'} · ${a.res != null ? 'resonance ' + Math.round(a.res) : 'no vowel read'}${fm}${ref}`;
+      const k = wordAt(ms), w = words && words[k], a = D.timelineAt(tl, ms, o.ref), miss = !!(w && o.gone && o.gone(k) === 'miss');
+      const none = [!a.f0 ? 'no pitch' : '', a.res == null ? 'no vowel read' : ''].filter(Boolean).join(', ');
+      return cueHtml({ t: clockMs(ms), word: w ? w[0] : null, unsure: !!(w && o.unsure && o.unsure(k)), miss, f0: a.f0 || null, res: a.res, F: a.F, ref: a.ref, refWho,
+        note: [miss ? 'Possibly missed.' : '', w && o.unsure && o.unsure(k) ? 'Heard as this word, unsure.' : '', none ? `Here: ${none}.` : ''].filter(Boolean).join(' ') });
     };
     const mark = (cls, k) => { svg.querySelectorAll(`.tl-w.${cls}`).forEach(x => x.classList.remove(cls)); const g = k >= 0 && svg.querySelector(`.tl-w[data-i="${k}"]`); if (g) g.classList.add(cls); };
     // keep a spot in view: scroll when it's near or past an edge
@@ -4166,7 +4189,7 @@
       unplace(); if (V.on !== -1) { V.on = -1; mark('on', -1); }
       V.lastS = null; V.hold = false;
       if (mine()) Player.off = (V.cue || 0) / 1000;
-      read.innerHTML = V.info || o.hint; restClock();
+      read.innerHTML = V.info || cueHtml({ note: o.hint, refWho }); restClock();
     };
     const hook = () => {
       Player.onTick = (s) => {
@@ -4184,7 +4207,7 @@
       const sp = D.wordSpans(tl.ws, tl.dur, tl.we)[i];
       V.sel = i; mark('sel', i);
       const at = sp ? Math.max(0, sp[0] - 150) : (V.cue || 0);
-      setCue(at, `<b>${clockMs(sp ? sp[0] : at)}</b> · ${o.wordInfo(i)}`);
+      setCue(at, cueHtml(Object.assign({ t: clockMs(sp ? sp[0] : at), F: sp ? D.spanFormants(tl, sp[0], sp[1]) : null, refWho }, o.wordInfo(i))));
       if (sp) follow(V.view.x(sp[0]));
       if (play && sp && mine()) { hook(); V.hold = true; Player.play(at / 1000, (sp[1] + 250) / 1000); }
       paint();

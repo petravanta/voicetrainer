@@ -20,5 +20,9 @@ check(a.ref.f0 === 230 && a.ref.res === 71, 'the reference value nearest the cue
 a = D.timelineAt(tl, 250, ref);
 check(a.ref.f0 == null && a.ref.res == null, 'no reference value more than 100 ms away');
 
+check(JSON.stringify(D.spanFormants(tl, 50, 150)) === '[510,2025,2925]', 'a word\'s formants: the median over its bins');
+check(D.spanFormants(tl, 150, 450) === null, 'no formants read in a stretch, none given');
+check(D.spanFormants({ bin: 50, f0: [1] }, 0, 50) === null, 'a timeline without formants gives none');
+
 if (fails) { console.log(`${fails} failed`); process.exit(1); }
 console.log('all passed');
