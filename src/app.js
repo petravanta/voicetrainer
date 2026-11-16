@@ -94,6 +94,7 @@
     C.font = cs.getPropertyValue('--font-mono').trim();
     buildLut();
     clearSpec();
+    paintSpecSwatches(); SpecPreview.draw();
     for (const f of [...tlRedraws]) f();
     drawVowelChart(); drawPitch(); drawRes(); drawHistory(); renderTractLive();
     Sing.cols = null; Sing.draw();
@@ -107,14 +108,42 @@
     return [d[0], d[1], d[2]];
   }
   let LUT = null;
-  function buildLut() {
-    const a = parseColor(C.panel), b = parseColor(C['spec-mid']), c = parseColor(C.ink);
-    LUT = new Uint8ClampedArray(256 * 3);
-    for (let i = 0; i < 256; i++) {
-      const t = i / 255, [p, q, u] = t < 0.55 ? [a, b, t / 0.55] : [b, c, (t - 0.55) / 0.45];
-      for (let k = 0; k < 3; k++) LUT[i * 3 + k] = p[k] + (q[k] - p[k]) * u;
+  // Spectrogram colours (Settings › Spectrogram colours). Classic follows the app theme: background, teal, ink.
+  // The others are fixed colour ramps that start from the background, so silence still matches the page. Ember and
+  // Colour-blind safe run dark to bright, so on a light page they run the other way and loud stays the strongest
+  // contrast. Colour-blind safe is viridis, which keeps its order in lightness for every kind of colour vision.
+  const SPEC_THEMES = {
+    classic: { name: 'Classic' },
+    rainbow: { name: 'Rainbow', stops: ['#4b2a9a', '#2f63d8', '#1aa3c8', '#2fb35f', '#e6cf2e', '#f0882a', '#e2304a'] },
+    viridis: { name: 'Colour-blind safe', stops: ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'], flip: true },
+    ember: { name: 'Ember', stops: ['#2a0b4a', '#7a1e6c', '#c73e4c', '#f2842a', '#fbe08a'], flip: true },
+    mono: { name: 'Mono' },
+  };
+  const SPEC_FADE = 0.16; // the quietest share of the ramp, faded in from the background
+  const specThemeKey = () => (SPEC_THEMES[state.specTheme] ? state.specTheme : 'classic');
+  const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  function specLut(key) {
+    const bg = parseColor(C.panel), ink = parseColor(C.ink), out = new Uint8ClampedArray(256 * 3);
+    let stops, at;
+    if (key === 'classic') { stops = [bg, parseColor(C['spec-mid']), ink]; at = [0, 0.55, 1]; }
+    else if (key === 'mono') { stops = [bg, ink]; at = [0, 1]; }
+    else {
+      const th = SPEC_THEMES[key], light = lum(bg) > 0.5;
+      const cols = th.stops.map(parseColor); if (th.flip && light) cols.reverse();
+      stops = [bg].concat(cols); at = [0].concat(cols.map((_, i) => SPEC_FADE + (1 - SPEC_FADE) * i / (cols.length - 1)));
     }
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255; let j = 0;
+      while (j < at.length - 2 && t > at[j + 1]) j++;
+      const u = Math.min(1, Math.max(0, (t - at[j]) / (at[j + 1] - at[j]))), p = stops[j], q = stops[j + 1];
+      for (let k = 0; k < 3; k++) out[i * 3 + k] = p[k] + (q[k] - p[k]) * u;
+    }
+    return out;
   }
+  function buildLut() { LUT = specLut(specThemeKey()); }
+  // The F1-F3 marks get a thin outline on the colourful ramps, dark round the dark theme's light marks and light
+  // round the light theme's dark ones, so they stand out from whatever colour is under them.
+  const fmHalo = () => (specThemeKey() === 'classic' ? null : lum(parseColor(C.f1)) > 0.45 ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)');
 
   // ---------------- canvas helpers ----------------
   function fitCanvas(cv) {
@@ -236,9 +265,11 @@
     g.putImageData(col, w - step, 0);
     if (tick) { g.fillStyle = C.line; g.globalAlpha = 0.7; g.fillRect(w - step, 0, Math.max(1, Math.round(dpr / 2)), h); g.globalAlpha = 1; }
     if (fr.formants) {
+      const halo = fmHalo();
       ['f1', 'f2', 'f3'].forEach((k, i) => {
-        g.fillStyle = C[k];
         const y = (1 - fr.formants[i] / fmax) * h;
+        if (halo) { g.fillStyle = halo; g.fillRect(w - step, y - 2.5 * dpr, step, 5 * dpr); }
+        g.fillStyle = C[k];
         g.fillRect(w - step, y - 1.5 * dpr, step, 3 * dpr);
       });
     }
@@ -2986,6 +3017,7 @@
   });
   function onDataChanged() {
     applyTheme(themeChoice());
+    if ((Data.setting('specTheme') || 'classic') !== state.specTheme) applySpecTheme(Data.setting('specTheme'));
     const g = Data.setting('goal'); if (g && g !== state.goal) setGoal(g, true);
     renderPitchTarget();
     Texts.sync();
@@ -3006,6 +3038,63 @@
     for (const k of ['system', 'light', 'dark']) { const b = $('theme-' + k); if (b) b.setAttribute('aria-checked', String(k === t)); }
     // The key is shared by all of petravanta's apps; the head snippet applies it before Drive loads on the next visit
     try { localStorage.setItem('petravanta.theme', t); } catch (e) {}
+  }
+
+  // ---------------- spectrogram colours ----------------
+  // Saved with the other settings (so in Drive once it's connected); every spectrogram redraws when it changes.
+  function applySpecTheme(k) {
+    state.specTheme = SPEC_THEMES[k] ? k : 'classic';
+    document.documentElement.dataset.spec = state.specTheme;
+    for (const b of document.querySelectorAll('#spec-pick [data-spec]')) b.setAttribute('aria-checked', String(b.dataset.spec === state.specTheme));
+    if (C.panel) readTheme();
+  }
+  // Settings: one button per theme with its ramp as a swatch, and a short sample (a hiss, then "ee", "ah", "oo" on a
+  // rising note) drawn with the chosen colours and the formant marks, made once from the synthetic voice.
+  const SpecPreview = {
+    spec: null, fm: null,
+    make() {
+      const fs = 11025, V = (k) => D.VOWEL_BY_KEY[k].W, parts = [Synth.silence(fs, 0.08), Synth.sibilant(fs, 0.28, 3900, { seed: 4 }), Synth.silence(fs, 0.1)];
+      const marks = [], at = () => parts.reduce((n, p) => n + p.length, 0) / fs * 1000;
+      [['i', 190, 205], ['a', 205, 225], ['u', 225, 245]].forEach(([k, a, b], j) => {
+        const t0 = at(); parts.push(Synth.voiced(fs, 0.55, a, b, V(k), { seed: 7 + j, classic: true }));
+        marks.push([t0 + 60, at() - 60, V(k)]); parts.push(Synth.silence(fs, 0.1));
+      });
+      this.spec = D.spectrogram(Synth.concat(parts), fs); this.fm = marks;
+    },
+    draw() {
+      const cv = $('spec-preview'); if (!cv || !cv.clientWidth || !C.panel) return;
+      if (!this.spec) { try { this.make(); } catch (e) { return; } }
+      fitCanvas(cv);
+      const g = cv.getContext('2d'), sp = this.spec, W = cv.width, H = cv.height, dpr = dprOf();
+      const tmp = document.createElement('canvas'); tmp.width = sp.cols; tmp.height = sp.rows;
+      const tg = tmp.getContext('2d'), im = tg.createImageData(sp.cols, sp.rows);
+      for (let c = 0; c < sp.cols; c++) for (let r = 0; r < sp.rows; r++) {
+        // the synthetic voice has no room noise, so show its top 40 dB (of 65) to look like a real recording
+        const v = clamp(Math.round((sp.v[c * sp.rows + r] - 98) * 255 / 157), 0, 255), o = ((sp.rows - 1 - r) * sp.cols + c) * 4;
+        im.data[o] = LUT[v * 3]; im.data[o + 1] = LUT[v * 3 + 1]; im.data[o + 2] = LUT[v * 3 + 2]; im.data[o + 3] = 255;
+      }
+      tg.putImageData(im, 0, 0);
+      g.imageSmoothingEnabled = true; g.drawImage(tmp, 0, 0, W, H);
+      const dur = sp.cols * sp.hop, fmax = sp.fmax || 5000, halo = fmHalo();
+      for (const [a, b, F] of this.fm) ['f1', 'f2', 'f3'].forEach((k, i) => {
+        const x0 = a / dur * W, x1 = b / dur * W, y = (1 - F[i] / fmax) * H;
+        if (halo) { g.fillStyle = halo; g.fillRect(x0 - dpr, y - 2.5 * dpr, x1 - x0 + 2 * dpr, 5 * dpr); }
+        g.fillStyle = C[k]; g.fillRect(x0, y - 1.5 * dpr, x1 - x0, 3 * dpr);
+      });
+    },
+  };
+  function initSpecPick() {
+    const box = $('spec-pick'); if (!box) return;
+    box.innerHTML = Object.entries(SPEC_THEMES).map(([k, t]) => `<button type="button" role="radio" data-spec="${k}" aria-checked="false"><i class="spec-sw" data-sw="${k}"></i>${t.name}</button>`).join('');
+    box.addEventListener('click', (e) => { const b = e.target.closest('[data-spec]'); if (b) { applySpecTheme(b.dataset.spec); Data.setting('specTheme', state.specTheme); } });
+  }
+  // the swatches show each ramp on the current page colours
+  function paintSpecSwatches() {
+    for (const el of document.querySelectorAll('.spec-sw[data-sw]')) {
+      const L = specLut(el.dataset.sw), stops = [];
+      for (let i = 0; i <= 8; i++) { const v = Math.round(i / 8 * 255); stops.push(`rgb(${L[v * 3]},${L[v * 3 + 1]},${L[v * 3 + 2]}) ${i * 12.5}%`); }
+      el.style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+    }
   }
 
   // ---------------- practice history ----------------
@@ -5410,7 +5499,7 @@
     for (const b of document.querySelectorAll('#modes [data-mode]')) b.setAttribute('aria-selected', String(b.dataset.mode === m));
     if (m !== 'readings' && Reader.open) { cancelRun(); Reader.hide(); }
     if (m === 'home') renderHome();
-    if (m === 'settings') { paintDrive(); paintPitchRange(); }
+    if (m === 'settings') { paintDrive(); paintPitchRange(); requestAnimationFrame(() => SpecPreview.draw()); }
     window.scrollTo(0, 0);
     // canvases in a section that was hidden have no size until now
     requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
@@ -6123,6 +6212,7 @@
     applyTheme(th);
     Data.init();
     applyTheme(themeChoice());
+    initSpecPick(); applySpecTheme(Data.setting('specTheme') || 'classic');
     const g = Data.setting('goal') || 'fem';
     $('goal-fem').addEventListener('click', () => setGoal('fem'));
     $('goal-masc').addEventListener('click', () => setGoal('masc'));
@@ -6162,7 +6252,7 @@
     new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
     let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); Sing.draw(); if (state.coach) renderCoach(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); SpecPreview.draw(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); Sing.draw(); if (state.coach) renderCoach(); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
     Reader.init();
     Sing.init();

@@ -425,6 +425,12 @@
         <button type="button" id="theme-dark" role="radio" aria-checked="false">Dark</button>
       </div>
     </div>
+    <div class="panel set-card" id="spec-card">
+      <h3>Spectrogram colours</h3>
+      <p class="vd-note">How loud each pitch is, from quiet to loud, in every spectrogram.<button type="button" class="info-btn inline" data-info aria-controls="info-spec-col" aria-describedby="info-spec-col" aria-expanded="false" aria-label="About the spectrogram colours">i</button><span class="info-pop" id="info-spec-col" role="note" hidden>Classic follows the app's light or dark look. Rainbow runs violet to red, for the Rainbow Passage. Colour-blind safe (viridis) and Mono get brighter in an even order that reads the same with any kind of colour vision, and Ember runs from deep purple to gold. On a light page Ember and Colour-blind safe run the other way, so the loudest sound is still the strongest. The formant marks (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>) get a thin outline on the colourful ones. Saved with your other settings.</span></p>
+      <div class="vd-type spec-pick" id="spec-pick" role="radiogroup" aria-label="Spectrogram colours"></div>
+      <canvas id="spec-preview" class="spec-preview" height="96" role="img" aria-label="Sample spectrogram in the chosen colours: a hiss, then ee, ah and oo with their formants marked"></canvas>
+    </div>
     <div class="panel set-card">
       <h3>Google Drive</h3>
       <div id="drive-panel" class="drive-panel"></div>
