@@ -585,7 +585,9 @@
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) {}
         const type = saved && (saved.type === 'masc' || saved.type === 'fem') ? saved.type : state.goal;
-        this.v = Object.assign({ type, rate: 0.95, read: 'demo', style: 'natural' }, DEMO_PRESETS[type], saved || {});
+        // rv 2 added the neural voice; it replaces the demo voice as the reading voice once (speech stays speech)
+        if (saved && !saved.rv && saved.read === 'demo') saved.read = 'neural';
+        this.v = Object.assign({ type, rate: 0.95, read: 'neural', style: 'natural', rv: 2 }, DEMO_PRESETS[type], saved || {});
         Synth.setStyle(this.v.style);
       }
       return this.v;
@@ -600,9 +602,12 @@
       $('vd-res').value = v.res; $('vd-res-out').textContent = Math.round(D.resScore(v.res / 100)); // stored as alpha x 100, shown on the meter's scale
       $('vd-bright').value = v.bright; $('vd-bright-out').textContent = v.bright;
       $('vd-rate').value = v.rate; $('vd-rate-out').textContent = (+v.rate).toFixed(2) + '×';
-      for (const t of ['demo', 'speech']) $('vd-read-' + t).setAttribute('aria-checked', String(v.read === t));
+      for (const t of ['neural', 'demo', 'speech']) $('vd-read-' + t).setAttribute('aria-checked', String(v.read === t));
       $('reader-voice-wrap').hidden = v.read !== 'speech' || this.voiceCount < 2;
-      $('vd-read-note').textContent = v.read === 'speech'
+      const nv = Clips.idx && Clips.idx.voices && Clips.idx.voices[v.type];
+      $('vd-read-note').textContent = v.read === 'neural'
+        ? `The built-in passages are read by a neural voice (${nv ? nv.voice + ', ' : ''}Kokoro), made ahead of time in the ${v.type === 'fem' ? 'feminine' : 'masculine'} voice type above. It sounds far more human than the demo voice, and the app measures it the same way it measures you: the meters follow it live, Reference under Readings shows its pitch and resonance word by word, and your readings can show it as a dashed line. Its pitch, resonance and speed are its own, so the sliders above don't change it. Your own passages${Clips.idx ? '' : ', and this copy of the page (it cannot load the neural voice),'} use the demo voice instead. It never counts toward your progress.`
+        : v.read === 'speech'
         ? "Passages are read by your browser's own speech voice, following the voice type, pitch and speed. Browsers do not let apps measure that voice, so it does not appear on the pitch chart or meters, and it never counts toward your progress."
         : 'Passages are read by the demo voice above, at its pitch, resonance and brightness. It sounds more like a machine than the speech voice, but the app can measure it: the meters follow it live, Demo voice under Readings shows its pitch and resonance word by word, and your own readings can show it as a dashed reference line. It never counts toward your progress.';
     },
@@ -610,7 +615,7 @@
     init() {
       for (const t of ['fem', 'masc']) $('vd-' + t).addEventListener('click', () => this.setType(t));
       for (const t of ['natural', 'classic']) $('vd-' + t).addEventListener('click', () => { this.get().style = t; Synth.setStyle(t); this.save(); this.paint(); });
-      for (const t of ['demo', 'speech']) $('vd-read-' + t).addEventListener('click', () => { Reader.stopListen(); this.get().read = t; this.save(); this.paint(); });
+      for (const t of ['neural', 'demo', 'speech']) $('vd-read-' + t).addEventListener('click', () => { Reader.stopListen(); this.get().read = t; this.save(); this.paint(); });
       this.get(); // sets the synth style before anything is played or graded
       for (const k of ['pitch', 'res', 'bright', 'rate']) {
         $('vd-' + k).addEventListener('input', (e) => { this.get()[k] = +e.target.value; this.save(); this.paint(); });
@@ -3144,23 +3149,62 @@
   // The audio is made here (Synth.readText, with each word's vowels from the pronunciation dictionary), so each
   // word's timing is known exactly; it is analysed offline the same way a live reading is (D.analyzeReadingSteps).
   // Kept in this page only and made again from the passage and the voice settings: nothing is saved.
-  const RefRead = {
-    cache: [], // the last two passages' { k, words, fs, x, starts, ends, rec (a promise of the measured reading) }
-    key(t, fs) { const v = DemoVoice.get(); return JSON.stringify([t.id, t.body, v.pitch, v.res, v.bright, v.rate, Synth.getStyle(), fs]); },
-    audio(t, fs) {
-      const k = this.key(t, fs);
-      let c = this.cache.find(x => x.k === k);
-      if (c) return c;
-      const words = t.body.split(/\s+/).filter(Boolean), v = DemoVoice.get();
-      const r = Synth.readText(fs, words, D.VOWELS, { pitch: v.pitch, res: v.res, bright: v.bright, rate: v.rate, vowelsOf: (w) => D.wordVowelSeq(w, PRON) });
-      c = { k, t, words, fs, x: r.x, starts: r.starts, ends: r.ends, voice: { pitch: v.pitch, res: v.res, bright: v.bright, style: Synth.getStyle() } };
-      this.cache = [c].concat(this.cache).slice(0, 2);
-      return c;
+  // The neural voice: each built-in passage read by Kokoro-82M ahead of time (scripts/make-refclips.py), in a
+  // feminine and a masculine voice, with each word's start and end from the model itself. Served next to the page
+  // (refclips/), so the standalone file and the Artifact, which can't fetch them, keep the demo voice.
+  const Clips = {
+    idx: undefined, // refclips/clips.json once asked for; null where there is none
+    ask: null,
+    index() {
+      if (!this.ask) {
+        this.ask = (/^https?:$/.test(location.protocol) && window.fetch ? fetch('refclips/clips.json', { cache: 'no-cache' }).then(r => (r.ok ? r.json() : null)) : Promise.resolve(null))
+          .catch(() => null).then(ix => (this.idx = ix && ix.clips ? ix : null));
+      }
+      return this.ask;
     },
-    // a promise of the demo voice's reading of passage t, measured; onStep(share done) while it works
-    measure(t, onStep) {
+    // the clip for passage t in the voice type set, when it still reads the passage's words (null: none)
+    pickNow(t) {
+      const ix = this.idx, c = ix && t && ix.clips[t.id + '.' + DemoVoice.get().type];
+      return c && c.hash === D.textHash(t.body) && c.words.length === t.body.split(/\s+/).filter(Boolean).length ? c : null;
+    },
+    async pick(t) { await this.index(); return this.pickNow(t); },
+    // the clip decoded at fs, its word times moved by however much the decoder delayed the sound
+    async decode(c, fs) {
+      const ab = await (await fetch('refclips/' + c.file)).arrayBuffer();
+      const oc = new OfflineAudioContext(1, 1, fs);
+      const buf = await new Promise((ok, no) => { const p = oc.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); });
+      const x = buf.getChannelData(0), shift = Math.max(-0.3, Math.min(0.3, D.soundOnset(x, buf.sampleRate) - c.onset));
+      return { x, fs: buf.sampleRate, starts: c.words.map(w => w[0] + shift), ends: c.words.map(w => w[1] + shift) };
+    },
+  };
+  const RefRead = {
+    cache: [], // the last two passages' promises of { k, words, fs, x, starts, ends, voice, rec (a promise of the measured reading) }
+    key(t, fs) { const v = DemoVoice.get(); return JSON.stringify([t.id, t.body, v.pitch, v.res, v.bright, v.rate, Synth.getStyle(), fs]); },
+    // the neural voice reads it unless the demo voice is chosen, or there is no neural reading of these words
+    useClip() { return DemoVoice.get().read !== 'demo'; },
+    // who reads passage t as the reference, as far as is known now: 'neural voice' or 'demo voice'
+    whoFor(t) { return this.useClip() && Clips.pickNow(t) ? 'neural voice' : 'demo voice'; },
+    who(ref) { return ref && ref.voice && ref.voice.clip ? 'neural voice' : 'demo voice'; },
+    // a promise of the reference audio of passage t at sample rate fs
+    async audio(t, fs) {
+      const clip = this.useClip() ? await Clips.pick(t) : null;
+      const k = clip ? JSON.stringify(['clip', clip.file, clip.hash, fs]) : this.key(t, fs);
+      const hit = this.cache.find(x => x.k === k);
+      if (hit) return hit.p;
+      const words = t.body.split(/\s+/).filter(Boolean), v = DemoVoice.get();
+      const synth = () => {
+        const r = Synth.readText(fs, words, D.VOWELS, { pitch: v.pitch, res: v.res, bright: v.bright, rate: v.rate, vowelsOf: (w) => D.wordVowelSeq(w, PRON) });
+        return { k, t, words, fs, x: r.x, starts: r.starts, ends: r.ends, voice: { pitch: v.pitch, res: v.res, bright: v.bright, style: Synth.getStyle() } };
+      };
+      const e = { k, p: clip ? Clips.decode(clip, fs).then(d => ({ k, t, words, fs: d.fs, x: d.x, starts: d.starts, ends: d.ends, voice: { clip: true, name: clip.voice, type: v.type } }), () => { this.cache = this.cache.filter(x => x !== e); return synth(); })
+        : Promise.resolve().then(synth) };
+      this.cache = [e].concat(this.cache).slice(0, 2);
+      return e.p;
+    },
+    // a promise of the reference voice's reading of passage t, measured; onStep(share done) while it works
+    async measure(t, onStep) {
       ensureCtx();
-      const c = this.audio(t, ctx.sampleRate);
+      const c = await this.audio(t, ctx.sampleRate);
       if (!c.rec) {
         c.rec = new Promise((done) => {
           const it = D.analyzeReadingSteps(c.x, c.fs, c.words, c.starts.map((a, i) => [a, c.ends[i]]), PRON, 300);
@@ -3203,11 +3247,11 @@
   function showRefResult(t) {
     const box = $('rd-result'); box.hidden = false; box.rec = null; box.cue = null;
     Player.stop();
-    const v = DemoVoice.get();
-    box.innerHTML = `<div class="section-head"><h3>${escapeHtml(t.title)}: the demo voice</h3></div><p class="small" id="ref-prog" role="status">Making and measuring the demo voice (${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))})…</p>`;
+    const v = DemoVoice.get(), who = RefRead.whoFor(t);
+    box.innerHTML = `<div class="section-head"><h3>${escapeHtml(t.title)}: the ${who}</h3></div><p class="small" id="ref-prog" role="status">${who === 'neural voice' ? 'Loading and measuring the neural voice' : `Making and measuring the demo voice (${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))})`}…</p>`;
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const token = box.refToken = {};
-    setTimeout(() => RefRead.measure(t, (f) => { const el = $('ref-prog'); if (el && box.refToken === token) el.textContent = `Measuring the demo voice… ${Math.round(f * 100)}%`; })
+    setTimeout(() => RefRead.measure(t, (f) => { const el = $('ref-prog'); if (el && box.refToken === token) el.textContent = `Measuring the ${who}… ${Math.round(f * 100)}%`; })
       .then(ref => { if (box.refToken === token && !box.hidden) showReadingResult(ref); }), 30);
   }
   // ---- Freestyle takes: what you just did, replayable on the tall timeline ----
@@ -3419,7 +3463,7 @@
   // The numbers for one word of a reading, for the line under a chart.
   function wordReadout(rec, i, ref) {
     const [t, p, r, s, rough] = rec.byWord[i], gone = wordGone(rec, i), rw = ref && ref.byWord[i];
-    const demo = rw ? ` · <span class="ref-num">demo voice: ${rw[1] != null ? rw[1] + ' Hz' : 'no pitch'}, ${rw[2] != null ? 'resonance ' + (rw[4] ? '≈' : '') + Math.round(rw[2]) : 'no resonance reading'}</span>` : '';
+    const demo = rw ? ` · <span class="ref-num">${RefRead.who(ref)}: ${rw[1] != null ? rw[1] + ' Hz' : 'no pitch'}, ${rw[2] != null ? 'resonance ' + (rw[4] ? '≈' : '') + Math.round(rw[2]) : 'no resonance reading'}</span>` : '';
     if (gone === 'miss' || gone === 'end') return `<b>${escapeHtml(t)}</b>: ${noResWhy(t, p, gone)}${demo}`;
     return `<b>${escapeHtml(t)}</b>: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${rec.ref ? noResWhy(t, p, gone).replace('your voice', 'the voice') : noResWhy(t, p, gone)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}${demo}`;
   }
@@ -3458,8 +3502,8 @@
     const T = mountTimeline(el, {
       id: rec.id, tl: rec.tl, words: rec.byWord, buf, alive: () => box.rec === rec,
       heading: 'Timeline',
-      about: 'The demo voice reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap anywhere to hear it from there, or tap a word to hear just that word. Zoom with −, + or by pinching.',
-      noAudio: "This browser couldn't hold the demo voice's audio, so no spectrogram",
+      about: `The ${RefRead.who(rec)} reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap anywhere to hear it from there, or tap a word to hear just that word. Zoom with −, + or by pinching.`,
+      noAudio: `This browser couldn't hold the ${RefRead.who(rec)}'s audio, so no spectrogram`,
       hint: buf ? 'Tap the timeline to play from that moment, or a word to hear it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i), gone: () => null,
     });
@@ -3701,18 +3745,23 @@
     const weak = isRef ? [] : Object.entries(rec.vowels || {}).filter(([, s]) => !onTarget(Math.round(s))).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
     const spots = isRef ? [] : spotsFor(rec);
     const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
-    const vv = rec.voice, setRes = vv ? Math.round(D.resScore(vv.res / 100)) : null;
-    const refLine = isRef ? '' : `<div class="ref-line"><button type="button" class="btn sm ${ref ? '' : 'ghost'}" id="rd-ref" aria-pressed="${!!ref}">${ref ? 'Hide the demo voice' : 'Compare with the demo voice'}</button>`
-      + `<span class="small" id="rd-ref-say">${ref ? `<i class="ref-key"></i>Demo voice (dashed): resonance ${ref.resonance != null ? Math.round(ref.resonance) : '--'}, pitch ${ref.pitchMedian != null ? ref.pitchMedian + ' Hz' : '--'}, set to ${ref.voice.pitch} Hz and resonance ${Math.round(D.resScore(ref.voice.res / 100))} in Voice settings.` : ''}</span>`
-      + infoHtml('About the demo voice reference', "The app's demo voice reads the same passage at the pitch, resonance and brightness set in Voice settings, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. Use it as a target to aim at, and as a check: where the demo voice reads close to what it was set to, the measuring works for that bit of the passage. It is a machine voice, so its melody is simpler than real speech.") + '</div>';
-    box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}${isRef ? ': the demo voice' : ''}</h3><span class="muted small">${isRef ? `Not saved · ${clockOf(rec.seconds)} long` : rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
+    const vv = rec.voice, clip = !!(vv && vv.clip), setRes = vv && !clip ? Math.round(D.resScore(vv.res / 100)) : null;
+    const text = Texts.all().find(x => x.id === rec.text), refWho = ref ? RefRead.who(ref) : RefRead.whoFor(text);
+    const refSet = !ref ? '' : ref.voice.clip ? ` A neural voice (${ref.voice.name}) made ahead of time; Voice settings picks feminine or masculine.` : `, set to ${ref.voice.pitch} Hz and resonance ${Math.round(D.resScore(ref.voice.res / 100))} in Voice settings.`;
+    const refLine = isRef ? '' : `<div class="ref-line"><button type="button" class="btn sm ${ref ? '' : 'ghost'}" id="rd-ref" aria-pressed="${!!ref}">${ref ? `Hide the ${refWho}` : `Compare with the ${refWho}`}</button>`
+      + `<span class="small" id="rd-ref-say">${ref ? `<i class="ref-key"></i>${refWho.charAt(0).toUpperCase() + refWho.slice(1)} (dashed): resonance ${ref.resonance != null ? Math.round(ref.resonance) : '--'}, pitch ${ref.pitchMedian != null ? ref.pitchMedian + ' Hz' : '--'}${ref.voice.clip ? '.' : ''}${refSet}` : ''}</span>`
+      + infoHtml('About the reference voice', refWho === 'neural voice'
+        ? "A neural text-to-speech voice (Kokoro) read this passage ahead of time, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. It sounds like a person, with a person's melody, so it is a good target to aim at. It is one voice, though, not the only way to sound feminine or masculine. Pick Demo voice under Voice settings for the app's own synthetic voice, whose pitch and resonance you can set."
+        : "The app's demo voice reads the same passage at the pitch, resonance and brightness set in Voice settings, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. Use it as a target to aim at, and as a check: where the demo voice reads close to what it was set to, the measuring works for that bit of the passage. It is a machine voice, so its melody is simpler than real speech.") + '</div>';
+    box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}${isRef ? `: the ${RefRead.who(rec)}` : ''}</h3><span class="muted small">${isRef ? `Not saved · ${clockOf(rec.seconds)} long` : rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
       <div class="stats">
-        ${stat('Resonance', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + (isRef ? `<small>set to ${setRes}</small>` : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">demo ${Math.round(ref.resonance)}</small>` : '')))}
+        ${stat('Resonance', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + (isRef ? (clip ? '' : `<small>set to ${setRes}</small>`) : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${Math.round(ref.resonance)}</small>` : '')))}
         ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', isRef ? '' : delta(rec.sibS, last && last.sibS))}
-        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}${isRef ? `<small>set to ${vv.pitch} Hz</small>` : `<small>target ${pitchBand().join('-')} Hz</small>`}${ref && ref.pitchMedian != null ? `<small class="ref-num">demo ${ref.pitchMedian} Hz</small>` : ''}`)}
+        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}${isRef ? (clip ? '' : `<small>set to ${vv.pitch} Hz</small>`) : `<small>target ${pitchBand().join('-')} Hz</small>`}${ref && ref.pitchMedian != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${ref.pitchMedian} Hz</small>` : ''}`)}
         ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
       </div>
-      ${isRef ? `<p class="small">The demo voice reading this passage at ${vv.pitch} Hz, resonance ${setRes} and brightness ${vv.bright} (${vv.style === 'natural' ? 'Natural' : 'Classic'}), measured exactly the way your readings are. Where a word reads far from what the voice was set to, the measuring falls short there, not the voice. Your own readings of this passage can show it as a dashed line: Compare with the demo voice.${infoHtml('About the demo voice reading', "The app makes this voice itself, from the passage's spelling and a pronunciation dictionary, so it knows exactly when each word starts and which vowels it should have. It is not a real speaker: its melody is simple and its consonants are rough, but its pitch and resonance are exactly what Voice settings asks for. Change those there and open this again to hear and measure another voice. Nothing here is saved.")}</p>`
+      ${isRef && clip ? `<p class="small">A neural voice (${escapeHtml(vv.name)}, Kokoro) reading this passage, made ahead of time and measured exactly the way your readings are. It sounds like a person, so its pitch moves and its vowels vary the way real speech does. Your own readings of this passage can show it as a dashed line: Compare with the neural voice.${infoHtml('About the neural voice reading', "Kokoro-82M, an open text-to-speech model, read each built-in passage once, and the model itself gave the moment each word starts, so the app knows where every word is. It reads in a feminine or a masculine voice, following the voice type in Voice settings; its pitch and resonance are its own. Your own passages use the demo voice, whose pitch and resonance you can set. Nothing here is saved.")}</p>`
+        : isRef ? `<p class="small">The demo voice reading this passage at ${vv.pitch} Hz, resonance ${setRes} and brightness ${vv.bright} (${vv.style === 'natural' ? 'Natural' : 'Classic'}), measured exactly the way your readings are. Where a word reads far from what the voice was set to, the measuring falls short there, not the voice. Your own readings of this passage can show it as a dashed line: Compare with the demo voice.${infoHtml('About the demo voice reading', "The app makes this voice itself, from the passage's spelling and a pronunciation dictionary, so it knows exactly when each word starts and which vowels it should have. It is not a real speaker: its melody is simple and its consonants are rough, but its pitch and resonance are exactly what Voice settings asks for. Change those there and open this again to hear and measure another voice. Nothing here is saved.")}</p>`
         : `<p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>`}
       ${refLine}
       ${weak.length ? `<p class="small"><b>Furthest from your target:</b> ${weak.map(([k, s]) => `<button type="button" class="chip" data-weak="${k}">${D.VOWEL_BY_KEY[k].cue.split(' ')[0]} ${Math.round(s)}</button>`).join(' ')} <span class="muted">Tap one to practise it.</span></p>` : ''}
@@ -3734,13 +3783,13 @@
     };
     const rb = $('rd-ref');
     if (rb) {
-      const t = Texts.all().find(x => x.id === rec.text);
+      const t = text;
       const fetchRef = () => {
         const say = $('rd-ref-say'), token = box.refToken = {};
-        rb.disabled = true; say.textContent = 'Measuring the demo voice…';
-        RefRead.measure(t, (f) => { if (box.refToken === token) say.textContent = `Measuring the demo voice… ${Math.round(f * 100)}%`; }).then(r => {
+        rb.disabled = true; say.textContent = `Measuring the ${refWho}…`;
+        RefRead.measure(t, (f) => { if (box.refToken === token) say.textContent = `Measuring the ${refWho}… ${Math.round(f * 100)}%`; }).then(r => {
           if (box.refToken !== token || box.rec !== rec || box.hidden) return;
-          if (!RefRead.fits(r, rec)) { rb.disabled = false; say.textContent = 'This passage has been edited since this reading, so the demo voice reads different words.'; return; }
+          if (!RefRead.fits(r, rec)) { rb.disabled = false; say.textContent = `This passage has been edited since this reading, so the ${RefRead.who(r)} reads different words.`; return; }
           showReadingResult(rec, null, { ref: r, keep: true });
         });
       };
@@ -3768,7 +3817,8 @@
   }
   // items: [{ k, F: [F1, F2, F3], s: score, n, words? }]
   // refItems: the demo voice's vowels, drawn as rings (same form as items)
-  function vowelMapSvg(items, refItems, youLabel = 'you') {
+  function vowelMapSvg(items, refItems, youLabel = 'you', refName = 'demo voice') {
+    const refWho = refName.charAt(0).toUpperCase() + refName.slice(1);
     const W = 360, H = 250, L = 38, R = 12, T = 12, B = 26;
     const x = (f2) => L + (Math.log(VC.f2[1]) - Math.log(clamp(f2, VC.f2[0], VC.f2[1]))) / (Math.log(VC.f2[1]) - Math.log(VC.f2[0])) * (W - L - R);
     const y = (f1) => T + (Math.log(clamp(f1, VC.f1[0], VC.f1[1])) - Math.log(VC.f1[0])) / (Math.log(VC.f1[1]) - Math.log(VC.f1[0])) * (H - T - B);
@@ -3796,11 +3846,11 @@
     let demo = '';
     for (const it of refItems || []) {
       const v = D.VOWEL_BY_KEY[it.k]; if (!v || !it.F) continue;
-      const tip = `Demo voice ${v.cue.split(' ')[0]} (${v.word}): resonance ${Math.round(it.s)}, F1 ${Math.round(it.F[0])} Hz, F2 ${Math.round(it.F[1])} Hz`;
+      const tip = `${refWho} ${v.cue.split(' ')[0]} (${v.word}): resonance ${Math.round(it.s)}, F1 ${Math.round(it.F[0])} Hz, F2 ${Math.round(it.F[1])} Hz`;
       demo += `<circle class="vm-ref" cx="${f1(x(it.F[1]))}" cy="${f1(y(it.F[0]))}" r="7"><title>${escapeHtml(tip)}</title></circle>`;
     }
     return `<svg class="vm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Your vowels on the vowel chart: tongue front to back across, jaw closed to open down">${g}<text class="vm-tick" x="${W - R}" y="${T + 10}" text-anchor="end">F2 (tongue front ← back)</text><text class="vm-tick" x="${L + 4}" y="${H - B - 4}">F1 (jaw) ↓</text>${refs}${demo}${you}</svg>
-      <p class="small muted vm-key"><span class="dot masc"></span>typical masculine <span class="dot fem"></span>typical feminine <span class="vm-key-goal"></span>your goal zone <span class="vm-key-you"></span>${youLabel}${refItems && refItems.length ? ' <span class="vm-key-ref"></span>demo voice' : ''}</p>`;
+      <p class="small muted vm-key"><span class="dot masc"></span>typical masculine <span class="dot fem"></span>typical feminine <span class="vm-key-goal"></span>your goal zone <span class="vm-key-you"></span>${youLabel}${refItems && refItems.length ? ' <span class="vm-key-ref"></span>' + refName : ''}</p>`;
   }
   // the vowel section of a reading result: map plus one row per vowel, weakest first
   function vowelMapHtml(rec, ref) {
@@ -3816,8 +3866,8 @@
         + `<span class="track"><span class="mark" style="left:${clamp(r.s, 0, 100)}%"></span></span><span class="val">${Math.round(r.s)}</span>`
         + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
     }).join('');
-    return `<div class="vm"><div class="section-head"><h4>${rec.ref ? "The demo voice's vowels" : 'Your vowels'}${infoHtml('How your vowels are scored', `${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}`)}</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
-      ${vm ? `<div class="vm-chart">${vowelMapSvg(rows, refRows, rec.ref ? 'demo voice' : 'you')}</div>` : ''}
+    return `<div class="vm"><div class="section-head"><h4>${rec.ref ? `The ${RefRead.who(rec)}'s vowels` : 'Your vowels'}${infoHtml('How your vowels are scored', `${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}`)}</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
+      ${vm ? `<div class="vm-chart">${vowelMapSvg(rows, refRows, rec.ref ? RefRead.who(rec) : 'you', ref ? RefRead.who(ref) : '')}</div>` : ''}
       <ul class="vm-list">${list}</ul>
       <p class="small muted">Tap a vowel to practise it.${infoHtml('Why some vowels are missing', 'Short vowels in quick speech are rarely held long enough to score, so some may be missing.')}</p></div>`;
   }
@@ -3909,8 +3959,8 @@
         + `<text class="wr-word${resOff(r) ? ' off' : ''}${gone === 'miss' ? ' miss' : r == null && (gone === 'end' || D.wordVowels(t, PRON).why === 'function') ? ' fn' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${rec.miss && rec.miss.length ? ` ${MISS_KEY}possibly missed` : ''}${ws.some((w, i) => w[2] == null && !['miss', 'end'].includes(wordGone(rec, i)) && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}${ref ? ' <i class="ref-key"></i>demo voice' : ''}</span></div>
-      <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.${ref ? ' Dashed: the demo voice on the same words.' : ''}</p>${missLineHtml(rec)}
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "The highlight follows your voice by counting syllables, so a word's numbers can spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${rec.miss && rec.miss.length ? ` ${MISS_KEY}possibly missed` : ''}${ws.some((w, i) => w[2] == null && !['miss', 'end'].includes(wordGone(rec, i)) && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}${ref ? ` <i class="ref-key"></i>${RefRead.who(ref)}` : ''}</span></div>
+      <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.${ref ? ` Dashed: the ${RefRead.who(ref)} on the same words.` : ''}</p>${missLineHtml(rec)}
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
   }
@@ -4104,8 +4154,8 @@
       li.querySelector('b').textContent = t.title;
       li.querySelector('.small').textContent = list.length ? `${list.length} reading${list.length > 1 ? 's' : ''} · last ${last.resonance != null ? Math.round(last.resonance) : '--'} on ${new Date(last.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : `${t.body.split(/\s+/).length} words · not read yet`;
       li.querySelector('.btn').addEventListener('click', () => startReading(t.id));
-      const dv = document.createElement('button'); dv.type = 'button'; dv.className = 'btn sm ghost'; dv.textContent = 'Demo voice';
-      dv.title = 'Hear the demo voice read it, and see what the app measures';
+      const dv = document.createElement('button'); dv.type = 'button'; dv.className = 'btn sm ghost'; dv.textContent = 'Reference';
+      dv.title = `Hear the ${RefRead.whoFor(t)} read it, and see what the app measures`;
       dv.addEventListener('click', () => showRefResult(t));
       li.querySelector('.rd-actions').appendChild(dv);
       if (t.id.startsWith('u-')) {
@@ -5733,7 +5783,8 @@
           stage.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
         }
       }
-      $('rh-hint').textContent = this.synth ? (state.running === 'mic' ? 'The demo voice is reading. The microphone hears it from the speakers, so the meters show it; it does not count toward your progress.' : 'The demo voice is reading, and the meters are measuring it live. It does not count toward your progress. Demo voice under Readings shows its pitch and resonance word by word.')
+      const who = this.synth && this.synth.who || 'demo voice';
+      $('rh-hint').textContent = this.synth ? (!this.synth.src ? `Getting the ${RefRead.whoFor(this.current)} ready…` : state.running === 'mic' ? `The ${who} is reading. The microphone hears it from the speakers, so the meters show it; it does not count toward your progress.` : `The ${who} is reading, and the meters are measuring it live. It does not count toward your progress. Reference under Readings shows its pitch and resonance word by word.`)
         : this.tts ? (state.running === 'mic' ? 'The speech voice is reading. The microphone picks it up, so the meters show it (use speakers, not headphones); it does not count toward your progress.' : 'The speech voice is reading. Start the microphone too if you want the meters to follow it through your speakers.') : this.idx >= els.length - 1 ? 'Last word. Back to start to read it again.' : this.mode === 'tap' ? 'Space or tap the text to move on. Backspace goes back.' : this.mode === 'pace' ? 'The highlight moves at a steady pace. Click any word to jump there.' : state.running === 'mic' ? 'Read aloud. The highlight follows your syllables; click a word if it drifts.' : 'Start the microphone and read aloud.';
     },
     // the single focus line: words left to right, the current one centred and highlighted
@@ -5878,22 +5929,24 @@
       const start = this.idx >= this.words.length - 1 ? 0 : this.idx;
       const sy = this.synth = { src: null, room: null, raf: 0 };
       this.setListenButton(true);
-      $('rh-hint').textContent = 'Getting the demo voice ready…';
+      $('rh-hint').textContent = `Getting the ${RefRead.whoFor(t)} ready…`;
       if (state.running !== 'mic') { $('ro-pitch').textContent = '--'; $('ro-vowel').textContent = '--'; state.meter = NaN; }
       setTimeout(() => { // let the hint show: making a long passage takes about a second
         if (this.synth !== sy) return;
-        const c = RefRead.audio(t, ctx.sampleRate);
+        RefRead.audio(t, ctx.sampleRate).then(c => {
         if (this.synth !== sy) return;
         const ab = ctx.createBuffer(1, c.x.length, c.fs); ab.copyToChannel(c.x, 0);
         const src = ctx.createBufferSource(); src.buffer = ab; sy.src = src;
         src.connect(ctx.destination);
         if (state.running !== 'mic') { src.connect(analyser); an.reset(); }
-        if (Synth.getStyle() === 'natural') { const r = roomFor(ctx.sampleRate); src.connect(r.input); r.output.connect(ctx.destination); sy.room = r; }
+        if (!c.voice.clip && Synth.getStyle() === 'natural') { const r = roomFor(ctx.sampleRate); src.connect(r.input); r.output.connect(ctx.destination); sy.room = r; }
         const off = Math.max(0, c.starts[start] - 0.1), t0 = ctx.currentTime - off;
         src.onended = () => { if (this.synth === sy) this.stopListen(true); };
         if (ctx.state === 'suspended') ctx.resume();
         src.start(0, off);
-        if (!state.running) setStatus('Demo voice reading ' + t.title, true);
+        sy.who = RefRead.who(c);
+        if (!state.running) setStatus((c.voice.clip ? 'Neural voice' : 'Demo voice') + ' reading ' + t.title, true);
+        this.paint();
         this.go(start, false);
         const follow = () => {
           if (this.synth !== sy) return;
@@ -5905,6 +5958,7 @@
         };
         follow();
         ensureLoop();
+        });
       }, 30);
     },
     stopListen(finished) {
@@ -5914,7 +5968,7 @@
         cancelAnimationFrame(sy.raf);
         if (sy.src) { try { sy.src.onended = null; sy.src.stop(); } catch (e) {} try { sy.src.disconnect(); } catch (e) {} }
         if (sy.room) setTimeout(() => { try { sy.room.output.disconnect(); } catch (e) {} }, 600);
-        if (!state.running) setStatus(finished ? 'Demo voice finished' : 'Not listening');
+        if (!state.running) setStatus(finished ? (sy.who === 'neural voice' ? 'Neural voice finished' : 'Demo voice finished') : 'Not listening');
         if (an && state.running !== 'mic') an.reset();
       }
       this.tts = null;
@@ -6149,6 +6203,7 @@
     $('btn-mic').addEventListener('click', () => (state.running === 'mic' ? stop() : (Reader.synth && Reader.stopListen(), startMic())));
     $('btn-demo').addEventListener('click', () => playDemo(false));
     DemoVoice.init(); DemoVoice.paint();
+    Clips.index().then(ix => { if (ix) { renderReadings(); DemoVoice.paint(); } }); // the neural voice, where this copy of the page can load it
     $('btn-stop').addEventListener('click', stop);
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
