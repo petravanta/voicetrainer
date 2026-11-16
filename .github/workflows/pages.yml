@@ -49,6 +49,7 @@ jobs:
       - run: node test/refread.test.js
       - run: node test/refclips.test.js
       - run: node test/natural.test.js
+      - run: node test/formants.test.js
       - run: node test/build.test.js
       - run: node build.js
       - run: mkdir -p site && cp dist/VoiceTrainer.html site/index.html && cp dist/version.json site/ && cp pwa/* site/ && cp -r refclips site/

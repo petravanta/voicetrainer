@@ -140,6 +140,13 @@
       <p class="tract-note spec-help" id="tract-help" role="note" hidden>Solid: the shape your formants suggest. Dashed: the typical shape for that vowel at your goal. Differences are drawn twice as large so they are easy to see. The app reads jaw opening from F1, tongue front/back from F2, lips from F3, and throat length (larynx height) from how all three shift together. Many shapes can make the same sound, so treat it as a guide, not an X-ray.</p>
     </figure>
 
+    <figure class="chart fo-fig">
+      <figcaption>Formant by formant <small id="fo-vowel"></small>
+        <button type="button" class="info-btn inline" data-info aria-controls="info-fo-live" aria-describedby="info-fo-live" aria-expanded="false" aria-label="How to read the formant bars">i</button><span class="info-pop" id="info-fo-live" role="note" hidden></span>
+      </figcaption>
+      <div class="fo" id="fo-live" data-live></div>
+    </figure>
+
   </section>
 
   <div class="dial-dots" id="dial-dots" data-for="freestyle" aria-hidden="true"></div>
@@ -211,6 +218,7 @@
       <div>
         <h3>Resonance by vowel<button type="button" class="info-btn inline" data-info aria-controls="info-sess-vowels" aria-describedby="info-sess-vowels" aria-expanded="false" aria-label="How vowels are recognised here">i</button><span class="info-pop" id="info-sess-vowels" role="note" hidden>Without a text, each vowel is recognised by sound alone, so one can land under the wrong vowel. A reading checks every vowel against the word you're on.</span></h3>
         <div id="sess-vmap" class="vm-chart" hidden></div>
+        <div id="sess-fo"></div>
         <div id="sess-vowels" class="bars"><p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p></div>
       </div>
       <div>

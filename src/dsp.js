@@ -587,6 +587,83 @@
     return { dev, semis, moved, ok };
   }
 
+  // ---------- one formant at a time ----------
+  // Where each of F1, F2 and F3 sits on its own, on the resonance scale people see (0..100, average man 37.5,
+  // average woman 62.5 for that vowel), and how far it is from its goal zone: direction, score points, and the change
+  // in Hz and % that would bring it to the zone's near edge. The zones and the "which one first" pick are the live
+  // coach's (coachVowel), so the gauges, the tips and the vocal tract sketch always agree. F1 is not judged when the
+  // score itself sets it aside (high pitch, an F1 on the pitch, or F1 alone off while F2 and F3 agree), and a formant
+  // whose own position is outside anything a real voice does reads "couldn't measure" instead of being clamped.
+  // opt: { f0 (Hz, 0 = unknown), f1Off (the score set F1 aside) }
+  // -> { rows: [{ i, hz, score, zone: [lo, hi] score points, need: 1 | -1 | 0, pts, toHz, dHz, pct, skip }],
+  //      worst (index of the formant furthest off, weighted as the coach weighs them, or null), focus (coach-style:
+  //      { formant: 0..2 | 'all', dir }), onTarget, aside ('pitch' | 'f1off' | null) }; unsure: F1 set aside by the score
+  //      but still shown (see below)
+  const FORMANT_SLACK_A = F1_SLACK / 100; // F1's wider zone, in alpha
+  function formantOffsets(F, v, goal, opt = {}) {
+    const g = goal === 'masc' ? 'masc' : 'fem', f0 = opt.f0 || 0;
+    const c = coachVowel(F, v, g), fit = scoreVowel(F, v, f0);
+    const aside = fit.pitchLimited ? 'pitch' : fit.f1Off || opt.f1Off ? 'f1off' : null;
+    const rows = [0, 1, 2].map(i => {
+      const sl = i === 0 ? FORMANT_SLACK_A : 0, a = c.pos[i] / 100;
+      const zA = [COACH_BAND[g][0] / 100 - sl, COACH_BAND[g][1] / 100 + sl];
+      const row = { i, hz: F[i], score: resScore(a), zone: zA.map(resScore), need: 0, pts: 0, toHz: null, dHz: 0, pct: 0, skip: null };
+      if (!(F[i] > 0) || !Number.isFinite(a)) row.skip = 'range';
+      else if (i === 0 && aside === 'pitch') row.skip = 'pitch';
+      else if (a < SCORE_RANGE[0] - sl || a > SCORE_RANGE[1] + sl) row.skip = 'range';
+      // F1 alone disagreeing with F2 and F3 is still shown (it may be a real jaw or throat difference, the one thing
+      // to dial in), but marked unsure and never picked as the one to fix first, since it is as likely a misreading
+      if (i === 0 && aside === 'f1off') row.unsure = true;
+      if (row.skip) { row.score = null; return row; }
+      row.need = c.need[i];
+      if (row.need) {
+        const edge = row.need > 0 ? zA[0] : zA[1];
+        row.toHz = v.M[i] * Math.pow(v.W[i] / v.M[i], edge);
+        row.dHz = row.toHz - F[i]; row.pct = row.toHz / F[i] - 1;
+        row.pts = Math.abs(resScore(edge) - row.score);
+      }
+      return row;
+    });
+    const w = rows.map(r => (r.skip || r.unsure ? 0 : r.pts * COACH_WEIGHT[r.i]));
+    const top = Math.max(...w), worst = top > 0 ? w.indexOf(top) : null;
+    let focus = null;
+    if (worst != null) {
+      const n = rows.map(r => r.need), m = w;
+      const same = n[1] === n[2] && n[1] !== 0 && n[0] !== -n[1] && Math.min(m[1], m[2]) > 0.45 * Math.max(m[1], m[2]);
+      focus = same ? { formant: 'all', dir: n[1] } : { formant: worst, dir: n[worst] };
+    }
+    return { rows, worst, focus, onTarget: worst == null && rows.some(r => !r.skip), aside };
+  }
+  // The same over a whole reading or session: items [{ k (vowel key), F: [F1, F2, F3], n (frames) }], f0 the median pitch.
+  // Each formant's position is the frame-weighted mean of its per-vowel positions (each already relative to its own
+  // vowel's averages, so they can be pooled); pct is the mean change asked for over the vowels where it is off.
+  // -> { rows: [{ i, score, zone, need, pts, pct, nOff, nVowels, skip }], worst, together (1 | -1 | 0), byVowel: { k: formantOffsets } }
+  function formantSummary(items, goal, f0 = 0) {
+    const byVowel = {};
+    for (const it of items || []) { const v = VOWEL_BY_KEY[it.k]; if (v && it.F && it.F.every(f => f > 0)) byVowel[it.k] = formantOffsets(it.F, v, goal, { f0 }); }
+    const ks = Object.keys(byVowel), wOf = (k) => Math.max(1, (items.find(it => it.k === k) || {}).n || 1);
+    const rows = [0, 1, 2].map(i => {
+      const use = ks.filter(k => !byVowel[k].rows[i].skip && !byVowel[k].rows[i].unsure);
+      const g = goal === 'masc' ? 'masc' : 'fem', sl = i === 0 ? FORMANT_SLACK_A : 0;
+      const zone = [COACH_BAND[g][0] / 100 - sl, COACH_BAND[g][1] / 100 + sl].map(resScore);
+      if (!use.length) {
+        const why = ks.map(k => byVowel[k].rows[i].skip || (byVowel[k].rows[i].unsure ? 'f1off' : null));
+        return { i, score: null, zone, need: 0, pts: 0, pct: 0, nOff: 0, nVowels: 0, skip: why.find(x => x === 'pitch') || why[0] || 'none' };
+      }
+      let sw = 0, ss = 0, sp = 0, spw = 0, sn = 0, nOff = 0;
+      for (const k of use) {
+        const r = byVowel[k].rows[i], wt = wOf(k);
+        sw += wt; ss += wt * r.score; sn += wt * r.pts * (r.need || 0);
+        if (r.need) { nOff++; sp += wt * r.pct; spw += wt; }
+      }
+      const signed = sn / sw, need = Math.abs(signed) >= 0.5 ? Math.sign(signed) : 0;
+      return { i, score: ss / sw, zone, need, pts: Math.abs(signed), pct: spw ? sp / spw : 0, nOff, nVowels: use.length, skip: null };
+    });
+    const w = rows.map(r => r.pts * COACH_WEIGHT[r.i] * (r.need ? 1 : 0)), top = Math.max(...w);
+    // F2 and F3 off the same way by a similar amount: a whole-tract (larynx) change, as the live coach reads it
+    const together = rows[1].need && rows[1].need === rows[2].need && Math.min(w[1], w[2]) > 0.45 * Math.max(w[1], w[2]) ? rows[1].need : 0;
+    return { rows, worst: top > 0 ? w.indexOf(top) : null, together, byVowel };
+  }
   function coachSibilant(cog, sib, goal) {
     const [lo, hi] = COACH_BAND[goal];
     const pos = sibilantAlpha(cog, sib) * 100;
@@ -2282,7 +2359,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, spectrogram, analyzeReading, analyzeReadingSteps, warpTimeline, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

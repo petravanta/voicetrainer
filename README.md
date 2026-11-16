@@ -38,6 +38,7 @@ Readings, practice history, settings, your own texts and Your songs (lyrics plus
 - **Guided exercises** built from your weakest vowels and sibilants, with synthesized reference examples and before/after scores.
 - **Live spectrogram** with goal markers for the current vowel.
 - **Live drill coach**: one concrete adjustment at a time (jaw, tongue, lips/larynx) with per-formant gauges.
+- **Formant by formant**: F1 (jaw), F2 (tongue) and F3 (lips, larynx) each on the resonance scale with its goal zone, and how far and which way each must move (in % and Hz), live in Freestyle and the vowel and word drills, and pooled over the vowels in reading results, History reports, drill results and the Freestyle session (with the formant furthest off called out, and F2 and F3 low together read as throat length). **Focus** (All, F1, F2, F3 or Worst) narrows the bars and the coach's tip to one formant so you can dial them in one at a time. F1 is set aside at high pitch, marked "?" when it alone disagrees with F2 and F3, and a formant outside anything a voice does reads "couldn't measure". Zones are the live coach's (`D.formantOffsets`, `test/formants.test.js`).
 - **Vocal tract sketch**: a side view of one plausible tract shape for your formants (jaw from F1, tongue from F2, lips from F3, larynx height from the shared shift), with the goal shape and the recommended change drawn on top.
 - **Reading practice**: the reader behind Readings, with the highlight following your voice, a single-line focus track, steady-pace and tap modes, and your own texts.
 - **Demo voice settings**: voice type, pitch, resonance and brightness for the synthetic demo voice; type, pitch and speed for the reading voice.
@@ -65,6 +66,7 @@ node test/dsp.test.js       # pitch/formant/scoring checks on synthetic voices
 node test/natural.test.js   # the same analyzer tests with the natural practice voice
 node test/examples.test.js  # every reference example scores on target
 node test/coach.test.js     # live coaching cues point the right way
+node test/formants.test.js  # F1, F2, F3 each against the goal, live and pooled
 node test/reading.test.js   # syllable counting and tracking for reading along
 node test/heldnotes.test.js   # Notes you held: semitone binning, vibrato across a bin edge, slides, short notes, gaps and pauses
 node test/singfollow.test.js # Follow my singing: a synthetic singer (detached and legato notes, held notes, a breath, a break, room hum) moves the lyrics once per line, and timed-lyrics drift correction
