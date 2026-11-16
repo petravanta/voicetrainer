@@ -1000,3 +1000,36 @@ a { color: var(--accent); }
 .tl-fmt { white-space: nowrap; }
 .tl-fmt .k { font-weight: 600; }
 .tvy-btns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Rainbow resonance: with Settings › Spectrogram colours on Rainbow, every resonance bar or mark that is on
+   target for the goal (past the far end counts) is filled with the rainbow; off-target ones keep their colours.
+   Numbers, ✓ marks and the green/amber text stay, so colour is never the only signal. SVG bars use the
+   gradients in #vt-rainbow-defs (index.html). */
+:root {
+  --rb-stops: #5b36b8, #2f63d8, #1aa3c8, #2fb35f, #e6cf2e, #f0882a, #e2304a;
+  --rb-h: linear-gradient(90deg, var(--rb-stops));
+  --rb-v: linear-gradient(0deg, var(--rb-stops));
+  --rb-edge: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rb-stops: #8a63ee, #4d82f2, #2bbde0, #43c873, #f0dc4a, #f79a42, #f04d64; --rb-edge: color-mix(in srgb, #000 55%, transparent); } }
+:root[data-theme="dark"] { --rb-stops: #8a63ee, #4d82f2, #2bbde0, #43c873, #f0dc4a, #f79a42, #f04d64; --rb-edge: color-mix(in srgb, #000 55%, transparent); }
+.rb-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+:root[data-spec="rainbow"] :is(.bar.in .mark, .vm-row:not(.off) .mark, .fo-row.ok .fo-mark, .gauge:not(.breath-gauge) .g-mark.ok) {
+  background: var(--rb-v); box-shadow: 0 0 0 1px var(--rb-edge), 0 0 8px color-mix(in srgb, #f0dc4a 35%, transparent); width: 12px; margin-left: -6px;
+}
+:root[data-spec="rainbow"] .fo.fo-one .fo-row.ok .fo-mark { width: 14px; margin-left: -7px; }
+:root[data-spec="rainbow"] :is(.meter.in .meter-target, .sg-meter.in .sg-band) { opacity: 1; background: var(--rb-h); border-style: solid; border-color: var(--rb-edge); }
+:root[data-spec="rainbow"] .sg-bar i.in { background: var(--rb-h); box-shadow: inset 0 0 0 1px var(--rb-edge); }
+:root[data-spec="rainbow"] .wr-bar:not(.off) { fill: url(#vt-rb-v); stroke: var(--rb-edge); stroke-width: 0.75; }
+:root[data-spec="rainbow"] .rs-check { fill: url(#vt-rb-h); stroke: var(--rb-edge); stroke-width: 0.5; }
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-spec="rainbow"] :is(.meter.in .meter-target, .sg-meter.in .sg-band, .sg-bar i.in) {
+    background: linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, 0.45) 50%, transparent 58%) no-repeat, var(--rb-h);
+    background-size: 300% 100%, 100% 100%; animation: rb-shimmer 4.5s ease-in-out infinite;
+  }
+}
+@keyframes rb-shimmer { 0% { background-position: 120% 0, 0 0; } 60%, 100% { background-position: -20% 0, 0 0; } }
+.rb-defs .rb0 { stop-color: #5b36b8; } .rb-defs .rb1 { stop-color: #2f63d8; } .rb-defs .rb2 { stop-color: #1aa3c8; } .rb-defs .rb3 { stop-color: #2fb35f; }
+.rb-defs .rb4 { stop-color: #e6cf2e; } .rb-defs .rb5 { stop-color: #f0882a; } .rb-defs .rb6 { stop-color: #e2304a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rb-defs .rb0 { stop-color: #8a63ee; } :root:not([data-theme="light"]) .rb-defs .rb1 { stop-color: #4d82f2; } :root:not([data-theme="light"]) .rb-defs .rb2 { stop-color: #2bbde0; } :root:not([data-theme="light"]) .rb-defs .rb3 { stop-color: #43c873; } :root:not([data-theme="light"]) .rb-defs .rb4 { stop-color: #f0dc4a; } :root:not([data-theme="light"]) .rb-defs .rb5 { stop-color: #f79a42; } :root:not([data-theme="light"]) .rb-defs .rb6 { stop-color: #f04d64; } }
+:root[data-theme="dark"] .rb-defs .rb0 { stop-color: #8a63ee; } :root[data-theme="dark"] .rb-defs .rb1 { stop-color: #4d82f2; } :root[data-theme="dark"] .rb-defs .rb2 { stop-color: #2bbde0; } :root[data-theme="dark"] .rb-defs .rb3 { stop-color: #43c873; } :root[data-theme="dark"] .rb-defs .rb4 { stop-color: #f0dc4a; } :root[data-theme="dark"] .rb-defs .rb5 { stop-color: #f79a42; } :root[data-theme="dark"] .rb-defs .rb6 { stop-color: #f04d64; }
