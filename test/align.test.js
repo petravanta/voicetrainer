@@ -56,6 +56,20 @@ for (const [style, pitch, res] of [['natural', 205, 100], ['classic', 115, 0]]) 
   check(med(e) <= 70 && e.filter(v => v <= 150).length >= 0.75 * e.length, `${style} demo voice, North Wind: median ${Math.round(med(e))} ms off, ${Math.round(100 * e.filter(v => v <= 150).length / e.length)}% within 150 ms`);
 }
 
+// ---- where the reading stopped isn't known: the live highlight fell far behind (as on a real reading of the
+// Rainbow passage, where it was on word 80 of about 140 read), so the alignment finds the end and the pace itself ----
+{
+  S.setStyle('natural');
+  const all = texts.find(t => t.id === 'b-rainbow').body.split(/\s+/).filter(Boolean), said = all.slice(0, all.indexOf('end.') + 1); // to "...at one end."
+  const r = S.readText(fs, said, D.VOWELS, { pitch: 205, res: 100, bright: 50, rate: 0.85, vowelsOf: (w) => D.wordVowelSeq(w, PRON) });
+  const st = r.starts.map(s => s * 1000), fr = frames(r.x, () => 0);
+  const fixed = D.alignWords(fr, all.slice(0, 30)), al = D.alignWords(fr, all, { free: true, guess: 30 });
+  const ef = errs(fixed.ws, st), e = errs(al.ws.slice(0, said.length), st);
+  check(med(ef) > 500, `taking the highlight's 30 words as all that was read puts them ${Math.round(med(ef))} ms off`);
+  check(Math.abs(al.last - (said.length - 1)) <= 1, `free: stops at "${all[al.last]}" (word ${al.last + 1}; read to word ${said.length})`);
+  check(med(e) <= 70, `free: median ${Math.round(med(e))} ms off`);
+}
+
 // ---- the neural voice (where ffmpeg can decode it), with and without its own timing as the template ----
 let ff = true; try { cp.execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch (e) { ff = false; }
 if (!ff) console.log('skip the neural voice: no ffmpeg here to decode the clips');

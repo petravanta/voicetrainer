@@ -4314,18 +4314,23 @@
     if (!Run.on) return;
     if (Spot.cur) return finishSpot();
     const t = Run.text, st = sessionStats(session), pool = D.pooledResonance(Run.frames);
-    const cover = Reader.words.length ? clamp((Run.maxIdx + 1) / Reader.words.length, 0, 1) : 0;
     const round = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
     const live = D.missedWords(Run.frames, Reader.words.length), said = Words.said();
-    const sm = said ? D.matchScript(Reader.words.map(w => w.text), said) : null, reach = Math.max(live.reach, sm ? sm.last : -1);
+    const sm = said ? D.matchScript(Reader.words.map(w => w.text), said) : null;
     // the timeline counts from the recording's start, on the frames' clock moved back by the analysis lag
     const t0 = RunAudio.mr && RunAudio.t0 != null ? RunAudio.t0 : (Run.frames.length ? Run.frames[0].t : 0);
     let fl = Run.frames.map(f => (f.t != null ? Object.assign({}, f, { t: f.t - FRAME_LAG_MS() }) : f));
     // word edges placed again from the sound now the whole reading is there (see D.alignWords); the neural voice's
-    // reading of the passage, when there is one, is a light template
-    const clip = Clips.pickNow(t), al = reach >= 0 ? D.alignWords(fl.filter(f => f.t >= t0), Reader.words.slice(0, reach + 1).map(w => w.text), { ref: clip ? clip.words : null }) : null;
+    // reading of the passage, when there is one, is a light template. The words read are the ones the speech check
+    // heard up to, when it's on; otherwise the alignment finds where you stopped too, since the live highlight can
+    // fall well behind (its last word is only a first guess). Coverage follows whichever reached further.
+    const clip = Clips.pickNow(t), heardTo = sm && !sm.lost && sm.last >= 0 ? sm.last : -1, script = Reader.words.map(w => w.text);
+    const al = live.reach >= 0 || heardTo >= 0 ? D.alignWords(fl.filter(f => f.t >= t0), heardTo >= 0 ? script.slice(0, heardTo + 1) : script,
+      { ref: clip ? clip.words : null, free: heardTo < 0, guess: live.reach + 1 }) : null;
     if (al) fl = D.retagFrames(fl, al.ws);
-    const mw = al ? Object.assign(D.missedWords(fl, Reader.words.length), { reach: live.reach }) : live;
+    const reach = al ? Math.max(al.last, heardTo) : Math.max(live.reach, sm ? sm.last : -1);
+    const mw = al ? Object.assign(D.missedWords(fl, Reader.words.length), { reach }) : live;
+    const cover = Reader.words.length ? clamp((Math.max(Run.maxIdx, reach) + 1) / Reader.words.length, 0, 1) : 0;
     const rec = {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       at: new Date().toISOString(), goal: state.goal, text: t.id, title: t.title, rs: D.RES_SCALE, bs: D.BREATH_SCALE, // resonance and breathiness scale versions

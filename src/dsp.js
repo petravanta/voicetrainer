@@ -1085,7 +1085,7 @@
   // the same words; when given, their lengths are the expected lengths (a template), so it breaks ties.
   // Returns { ws, we } in the frames' ms (we[i]: where word i stops sounding before a pause, else null), or null
   // when the frames have no loudness or the words can't be fitted (then the highlight's edges stay).
-  const ALIGN_PAUSE = 180, ALIGN_REF_MIX = 0.25;
+  const ALIGN_PAUSE = 180, ALIGN_REF_MIX = 0.25, ALIGN_SYL_RATE = 5;
   const isFnWord = (w) => FUNCTION_WORDS.has(String(w).toLowerCase().replace(/[^a-z']/g, ''));
   function wordWeight(w) {
     const t = String(w).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1142,7 +1142,7 @@
   }
   function alignWords(frames, words, opt = {}) {
     const fr = (frames || []).filter(f => Number.isFinite(f.t) && Number.isFinite(f.e));
-    const W = words.length;
+    let W = words.length;
     if (!W || fr.length < 20 || fr.length < 0.8 * (frames || []).length) return null;
     const st = speechStretches(fr), C = st.length;
     if (!C) return null;
@@ -1158,29 +1158,49 @@
     }
     const punct = words.map(w => (/[.!?]["'”’)]*$/.test(w) ? 2 : /[,;:]["'”’)]*$/.test(w) ? 1 : 0));
     const refPause = ref && !opt.noRefPause ? words.map((_, w) => w + 1 < ref.length && ref[w + 1][0] - ref[w][1] >= 0.15) : null;
-    const len = st.map(s => s.t1 - s.t0), rate = len.reduce((x, y) => x + y, 0) / d.reduce((x, y) => x + y, 0);
-    // 2. words to stretches
-    const INF = 1e18, cost = Array.from({ length: C + 1 }, () => new Float64Array(W + 1).fill(INF)), back = Array.from({ length: C + 1 }, () => new Int32Array(W + 1).fill(-1));
-    cost[0][0] = 0;
-    for (let c = 0; c < C; c++) for (let w = 0; w <= W; w++) {
-      const base = cost[c][w]; if (base >= INF) continue;
-      // a stretch with no words: a cough, an "um", a word said again
-      const skip = base + 1.5 + Math.min(2, len[c] / 400);
-      if (skip < cost[c + 1][w]) { cost[c + 1][w] = skip; back[c + 1][w] = w; }
-      let sum = 0, inner = 0;
-      for (let m = 1; w + m <= W && m <= 40; m++) {
-        const k = w + m - 1; sum += d[k];
-        if (m > 1) { const p = punct[k - 1]; inner += p === 2 ? 1.2 : p === 1 ? 0.25 : 0; if (refPause && refPause[k - 1]) inner += 0.4; }
-        const r = Math.log(len[c] / (sum * rate));
-        let v = base + 3 * r * r + inner;
-        if (c + 1 < C && w + m < W) v -= (punct[k] === 2 ? 1 : punct[k] === 1 ? 0.6 : 0) + (refPause && refPause[k] ? 0.6 : 0);
-        if (v < cost[c + 1][w + m]) { cost[c + 1][w + m] = v; back[c + 1][w + m] = w; }
-        if (sum * rate > 4 * len[c] + 400) break;
+    const len = st.map(s => s.t1 - s.t0), total = len.reduce((x, y) => x + y, 0);
+    // 2. words to stretches. With opt.free the reading may have stopped at any word (the live highlight's last word
+    // is only a guess: it can fall far behind), so the pace isn't known either: several paces are tried, and the
+    // one whose stretches fit their words best (with sentence ends at pauses) wins, along with where it stopped.
+    const INF = 1e18, free = !!opt.free;
+    const fit = (rate) => {
+      const cost = Array.from({ length: C + 1 }, () => new Float64Array(W + 1).fill(INF)), back = Array.from({ length: C + 1 }, () => new Int32Array(W + 1).fill(-1));
+      cost[0][0] = 0;
+      for (let c = 0; c < C; c++) for (let w = 0; w <= W; w++) {
+        const base = cost[c][w]; if (base >= INF) continue;
+        // a stretch with no words: a cough, an "um", a word said again
+        const skip = base + 1.5 + Math.min(2, len[c] / 400);
+        if (skip < cost[c + 1][w]) { cost[c + 1][w] = skip; back[c + 1][w] = w; }
+        let sum = 0, inner = 0;
+        for (let m = 1; w + m <= W && m <= 40; m++) {
+          const k = w + m - 1; sum += d[k];
+          if (m > 1) { const p = punct[k - 1]; inner += p === 2 ? 1.2 : p === 1 ? 0.25 : 0; if (refPause && refPause[k - 1]) inner += 0.4; }
+          const r = Math.log(len[c] / (sum * rate));
+          let v = base + 3 * r * r + inner;
+          if ((c + 1 < C || free) && w + m < W) v -= (punct[k] === 2 ? 1 : punct[k] === 1 ? 0.6 : 0) + (refPause && refPause[k] ? 0.6 : 0);
+          if (v < cost[c + 1][w + m]) { cost[c + 1][w + m] = v; back[c + 1][w + m] = w; }
+          if (sum * rate > 4 * len[c] + 400) break;
+        }
       }
-    }
-    if (cost[C][W] >= INF) return null;
+      let end = W;
+      if (free) for (let w = 1; w <= W; w++) if (cost[C][w] < cost[C][end]) end = w;
+      return { c: cost[C][end], end, back };
+    };
+    let best = null;
+    if (free) {
+      const n0 = Math.min(W, Math.max(1, opt.guess || W)), base = total / d.slice(0, n0).reduce((x, y) => x + y, 0);
+      // read speech runs at about ALIGN_SYL_RATE syllables a second of sound; a pace far from that costs more
+      const sylAt = [0]; for (let w = 0; w < W; w++) sylAt.push(sylAt[w] + Math.max(1, countSyllables(words[w])));
+      for (let k = -12; k <= 12; k++) {
+        const f = fit(base * Math.pow(1.07, k)), sr = sylAt[f.end] / (total / 1000), z = Math.log(sr / ALIGN_SYL_RATE);
+        f.c += 2 * C * z * z;
+        if (!best || f.c < best.c) best = f;
+      }
+    } else best = fit(total / d.reduce((x, y) => x + y, 0));
+    if (best.c >= INF) return null;
     const groups = Array(C);
-    for (let c = C, w = W; c > 0; c--) { const p = back[c][w]; groups[c - 1] = [p, w]; w = p; }
+    for (let c = C, w = best.end; c > 0; c--) { const p = best.back[c][w]; groups[c - 1] = [p, w]; w = p; }
+    W = best.end;
     // 3. edges inside each stretch
     const ws = Array(W).fill(null), we = Array(W).fill(null);
     for (let c = 0; c < C; c++) {
@@ -1222,7 +1242,7 @@
     // words in no stretch (skipped, or said too quickly to find): squeezed in where they belong
     for (let w = 0; w < W; w++) if (ws[w] == null) ws[w] = w > 0 ? (we[w - 1] != null ? we[w - 1] : ws[w - 1] + 40) : fr[0].t;
     for (let w = 1; w < W; w++) if (ws[w] < ws[w - 1]) ws[w] = ws[w - 1];
-    return { ws: ws.map(Math.round), we: we.map(x => (x == null ? null : Math.round(x))), stretches: C };
+    return { ws: ws.map(Math.round), we: we.map(x => (x == null ? null : Math.round(x))), stretches: C, last: W - 1 };
   }
   // Tag each frame with the word whose stretch it falls in (the realigned edges), for the word by word report.
   function retagFrames(frames, ws) {
