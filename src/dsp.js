@@ -2197,11 +2197,26 @@
   const APP_BUILT = /*BUILT*/'';
   // Footer line for the build: 'Build 3f2a9c1 · 4 Nov 2026 10:52 UTC', or 'dev' for an unbuilt page.
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  function buildLabel(build, built) {
+  // The build time is stamped in UTC; show it in the viewer's own time zone (PST/PDT handled by the browser)
+  // with UTC alongside, e.g. 'Build 3f2a9c1 · 15 Nov 2026 17:42 PST (01:42 UTC)'. timeZone is for tests.
+  function buildLabel(build, built, timeZone) {
     if (!build || build === 'dev') return 'dev build';
     const sha = build.split('+')[1] || build;
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(built || '');
-    return 'Build ' + sha + (m ? ` · ${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]} ${m[4]} UTC` : '');
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(built || '');
+    if (!m) return 'Build ' + sha;
+    const utc = `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]} ${m[4]}:${m[5]} UTC`;
+    let p = null;
+    try {
+      const f = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
+      p = {};
+      for (const x of f.formatToParts(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]))) p[x.type] = x.value;
+    } catch (e) { p = null; }
+    const zone = p && p.timeZoneName;
+    if (!zone || /^(UTC|GMT)$/.test(zone) || !p.day) return 'Build ' + sha + ' · ' + utc;
+    const sameDay = +p.day === +m[3];
+    const local = `${+p.day} ${MONTHS[+p.month - 1]} ${p.year} ${p.hour}:${p.minute} ${zone}`;
+    return 'Build ' + sha + ` · ${local} (${sameDay ? '' : `${+m[3]} ${MONTHS[+m[2] - 1]} `}${m[4]}:${m[5]} UTC)`;
   }
   // version.json from the server names a different build than the running page: a newer deploy is out.
   function newerBuild(current, remote) {

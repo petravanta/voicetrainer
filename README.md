@@ -57,7 +57,7 @@ node build.js            # writes dist/VoiceTrainer.html (standalone) and dist/a
 
 Open `dist/VoiceTrainer.html` in a browser and allow microphone access, or use the hosted version above. Every push to `main` rebuilds and redeploys the hosted version via GitHub Actions.
 
-The footer shows which build you are running (commit and UTC build time, or `dev build` for the unbuilt source); tap it to copy the id into a bug report. The hosted page checks `version.json` (never from cache) when it opens or comes back to the front, and offers a reload when a newer deploy is out.
+The footer shows which build you are running (commit and build time in your own time zone with UTC alongside, or `dev build` for the unbuilt source); tap it to copy the id into a bug report. The hosted page checks `version.json` (never from cache) when it opens or comes back to the front, and offers a reload when a newer deploy is out.
 
 ## Tests
 

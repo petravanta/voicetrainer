@@ -8,7 +8,7 @@ const data = {};
 for (const n of ['texts', 'words', 'breath', 'control', 'whisper', 'embody', 'emotions', 'pron']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
 page = page.split('/*DATA*/').join(JSON.stringify(data).replace(/<\/script/gi, '<\\/script'));
 // Version stamp: build = date of the build and the commit (sent to LRCLIB in the Lrclib-Client header),
-// built = UTC time of the build. Both show in the footer; a page that wasn't built (src/ as is) says 'dev'.
+// built = UTC time of the build (the footer shows it in the viewer's time zone, UTC alongside). Both show in the footer; a page that wasn't built (src/ as is) says 'dev'.
 function stamp(sha, now) {
   const iso = now.toISOString();
   return { build: iso.slice(0, 10).replace(/-/g, '.') + (sha ? '+' + sha : ''), sha: sha || '', built: iso.slice(0, 16) + 'Z' };
