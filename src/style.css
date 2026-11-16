@@ -918,6 +918,43 @@ a { color: var(--accent); }
 .rd-result .stat small.ref-num, .ref-num { color: var(--muted); }
 .rd-result .stat small.ref-num::before { content: ""; display: inline-block; width: 12px; border-top: 2px dashed currentColor; vertical-align: 3px; margin-right: 4px; }
 
+/* one formant at a time: F1-F3 each on the resonance scale, goal zone dashed */
+.fo-fig { grid-column: 1 / -1; }
+.fo { display: grid; gap: 10px; }
+.fo-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.fo-say { margin: 0; font-size: 0.92rem; flex: 1 1 18em; }
+.fo-pick button { padding: 5px 10px; font-size: 0.82rem; }
+.fo-rows { display: grid; gap: 9px; }
+.fo-row { display: grid; grid-template-columns: 7.2em minmax(0, 1fr) 10em; gap: 10px; align-items: center; font-size: 0.88rem; }
+.fo-row[hidden] { display: none; }
+.fo-lab { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fo-lab small { color: var(--muted); }
+.fo-track { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, color-mix(in srgb, var(--masc) 28%, transparent), color-mix(in srgb, var(--fem) 28%, transparent)); }
+.fo-avg { position: absolute; top: 1px; bottom: 1px; width: 2px; margin-left: -1px; border-radius: 1px; opacity: 0.8; }
+.fo-avg.m { left: 37.5%; background: var(--masc); } .fo-avg.w { left: 62.5%; background: var(--fem); }
+.fo-zone { position: absolute; top: -3px; bottom: -3px; border: 2px dashed var(--ink); border-radius: 5px; opacity: 0.5; }
+.fo-mark { position: absolute; top: -4px; width: 8px; height: 18px; margin-left: -4px; border-radius: 3px; background: var(--good); transition: left 0.4s ease-out; }
+.fo-row.off .fo-mark { background: var(--warn); }
+.fo-row.unsure .fo-mark { background: var(--muted); }
+.fo-val { font-family: var(--font-mono); font-size: 0.8rem; text-align: right; white-space: nowrap; }
+.fo-row.ok .fo-val { color: var(--good); } .fo-row.off .fo-val { color: var(--warn); } .fo-row.na .fo-val, .fo-row.unsure .fo-val { color: var(--muted); }
+.fo-row.na .fo-lab { color: var(--muted); }
+.fo-row.worst .fo-lab b { text-decoration: underline; text-decoration-color: var(--warn); text-underline-offset: 3px; }
+.fo.fo-one .fo-row { font-size: 1rem; }
+.fo.fo-one .fo-track { height: 16px; border-radius: 8px; }
+.fo.fo-one .fo-mark { height: 26px; width: 10px; margin-left: -5px; }
+.fo.fo-idle .fo-track { opacity: 0.5; }
+.fo-sum { margin-top: 14px; }
+.fo-sum .fo-say { font-size: 0.88rem; }
+.coach .fo { margin-top: 10px; }
+.vm-fo { font-family: var(--font-mono); margin-right: 8px; }
+.vm-fo.off { color: var(--warn); } .vm-fo.ok { color: var(--good); }
+.formant-table tr.off td:last-child { color: var(--warn); } .formant-table tr.ok td:last-child { color: var(--good); }
+.formant-table tr.na td:last-child { color: var(--muted); } .formant-table tr.worst td:first-child { font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .fo-mark { transition: none; } }
+@media (max-width: 480px) { .fo-row { grid-template-columns: 2.2em minmax(0, 1fr) 8.2em; gap: 8px; } .fo-val { font-size: 0.74rem; } .fo-lab small { display: none; } }
+.fo { align-content: start; }
+.fo-fig { align-self: start; }
 /* Target vs you: the exercise's target sound and you, side by side on one frequency scale */
 .tvy { margin: 12px 0 0; display: grid; gap: 4px; }
 .tvy:empty { display: none; }

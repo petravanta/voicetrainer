@@ -931,7 +931,7 @@
           fit = D.scoreVowel(F, v, fr.f0);
           vowel = v; score = score100(fit.alpha);
           ok = fit.ok && (fit.rms < 0.085 || cls.vowel.key === v.key);
-          if (ok) d.vowelFr.push({ F, alpha: fit.alpha, per: fit.per });
+          if (ok) d.vowelFr.push({ F, alpha: fit.alpha, per: fit.per, f0: fr.f0 });
           else if (fit.ok) d.offTarget = { key: cls.vowel.key, n: (d.offTarget && d.offTarget.n || 0) + 1 };
           else unmeasured = true;
         } else if (wv && wv.why === 'ok') {
@@ -966,9 +966,10 @@
           $('ro-vowel').textContent = `${vowel.cue.split(' ')[0]} (${vowel.word})`;
           state.lastVowel = { v: vowel, at: Date.now() };
           if (!gated || exSrc) {
-            if (tractLive.v !== vowel || tractLive.demo !== gated) tractLive.hist = [];
+            if (tractLive.v !== vowel || tractLive.demo !== gated) tractLive.hist = tractLive.f0s = [];
             tractLive.demo = gated;
             tractLive.hist = (tractLive.hist || []).concat([F]).slice(-90); // ~1.5 s
+            tractLive.f0s = (tractLive.f0s || []).concat([fr.f0]).slice(-90);
             tractLive.F = [0, 1, 2].map(i => D.median(tractLive.hist.map(f => f[i])));
             tractLive.v = vowel; tractLive.at = performance.now();
           }
@@ -1190,6 +1191,7 @@
         <p class="coach-why" id="coach-why"></p>
         <details class="how" id="coach-how" hidden><summary>How do I do that?</summary><div class="how-body"></div></details>
         <div class="gauges" id="coach-gauges"></div>
+        <div class="fo" id="fo-coach" data-live hidden></div>
         <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas>
           <figcaption class="tract-key"><span><i class="ln you"></i>you</span><span><i class="ln goal"></i>goal</span><span><i class="ln arrow"></i>change</span></figcaption></figure>
       </div>
@@ -1304,6 +1306,7 @@
       keep(co.vf, co.vft || (co.vft = []), fr.formants); co.vt = now;
       // the jaw reading (F1) is the noisiest, so it gets a longer, 3-second window
       keep(co.f1 || (co.f1 = []), co.f1t || (co.f1t = []), fr.formants[0], 3000);
+      keep(co.f0 || (co.f0 = []), co.f0t || (co.f0t = []), fr.f0);
     }
     if (d.def.sib && fr.kind === 'fricative') { keep(co.sf, co.sft || (co.sft = []), fr.cog); co.st = now; }
   }
@@ -1322,6 +1325,118 @@
       <span class="g-need ${need ? 'off' : 'ok'}">${mark}</span></div>`;
   }
   const COACH_HOLD_MS = 3500, COACH_MIN_SHOW_MS = 2500;
+
+  // ---------------- one formant at a time ----------------
+  // F1, F2 and F3 each on the resonance scale (0..100, average man 37.5, average woman 62.5 for the vowel), with the
+  // goal zone, and which way and how far each one must move (D.formantOffsets). The focus pick lets feedback
+  // concentrate on one formant (F1, F2, F3, or whichever is furthest off), so they can be dialled in one at a time.
+  const FO_KEY = 'voicetrainer.formantfocus';
+  const FO_PICKS = [['all', 'All'], ['0', 'F1'], ['1', 'F2'], ['2', 'F3'], ['worst', 'Worst']];
+  const FO_ROLE = ['jaw', 'tongue', 'lips, larynx'];
+  const FO_MOVE = [['open the jaw a little', 'close the jaw slightly, or open the throat'], ['tongue further forward', 'tongue further back'],
+    ['less lip rounding, larynx up', 'round the lips slightly, larynx lower']];
+  const FO_HELP = 'Each bar is one formant on the same 0-100 scale as the resonance score, read against the averages for the vowel you are on: the dashed box is your goal zone and the marker is you. F1 follows mostly the jaw and throat, F2 the tongue (front or back), F3 the lips and larynx height. The numbers say how much that formant would need to move to reach the zone, in % and Hz. F1 gets a wider zone because it swings with jaw opening and is the hardest to measure: above about 200 Hz of pitch it is set aside, and when it alone disagrees with F2 and F3 it is marked with a ? and never picked first. Pick F1, F2 or F3 to work on just that one; Worst follows whichever is furthest off.';
+  let foFocus = 'all';
+  try { const f = localStorage.getItem(FO_KEY); if (FO_PICKS.some(p => p[0] === f)) foFocus = f; } catch (e) {}
+  // the formant the feedback is about: one picked, the worst when asked for, or null for all three
+  function foChosen(off) {
+    if (foFocus === 'worst') return off ? off.worst : null;
+    return foFocus === 'all' ? null : +foFocus;
+  }
+  const foPctN = (r) => Math.max(1, Math.round(Math.abs(r.pct) * 100));
+  const foHz = (r) => `${r.dHz > 0 ? '+' : '−'}${Math.round(Math.abs(r.dHz))} Hz`;
+  function foVal(r, live) {
+    if (r.skip === 'pitch') return 'set aside (pitch)';
+    if (r.skip) return r.skip === 'none' ? '--' : "couldn't measure";
+    if (!r.need) return live ? `✓ ${Math.round(r.hz)} Hz` : '✓ in zone';
+    const q = r.unsure ? '?' : '';
+    return `${r.need > 0 ? '↑' : '↓'} ${foPctN(r)}%${q}${live ? ' · ' + foHz(r) : r.nVowels ? ` · ${r.nOff} of ${r.nVowels}` : ''}`;
+  }
+  const foName = (i) => `F${i + 1} (${FO_ROLE[i]})`;
+  // one sentence on what to change, for the chosen formant (or the furthest off, or the whole tract)
+  function foSay(off, live) {
+    if (!off || off.rows.every(r => r.skip)) return live ? 'Hold a vowel to see F1, F2 and F3 one by one.' : '';
+    const one = (r) => r.skip === 'pitch' ? `${foName(r.i)} is set aside: at this pitch it can't be read reliably.`
+      : r.skip ? `${foName(r.i)} couldn't be measured${live ? ' on this vowel' : ''}.`
+      : !r.need ? `${foName(r.i)} is in the goal zone${live ? '. Keep it there' : ''}.`
+      : `${foName(r.i)} needs to go ${r.need > 0 ? 'up' : 'down'} about ${foPctN(r)}%${live ? ` (${foHz(r)})` : ''}: ${FO_MOVE[r.i][r.need > 0 ? 0 : 1]}.${r.unsure ? ' F1 alone disagrees with F2 and F3, so this may be a misreading.' : ''}`;
+    const ch = foChosen(off);
+    if (ch != null) return one(off.rows[ch]);
+    if (foFocus === 'worst') return 'Every formant measured is in the goal zone.';
+    if (off.focus && off.focus.formant === 'all') return `F2 and F3 are both ${off.focus.dir > 0 ? 'low' : 'high'} by a similar amount: that is throat length, so ${off.focus.dir > 0 ? 'raise the larynx a little' : 'let the larynx drop a little'}.`;
+    if (off.worst != null) return 'Furthest off: ' + one(off.rows[off.worst]);
+    const u = off.rows.find(r => r.unsure && r.need);
+    return u ? one(u) : 'All the formants measured are in the goal zone.';
+  }
+  function foRowHtml(r) {
+    return `<div class="fo-row" data-i="${r.i}"><span class="fo-lab"><b>F${r.i + 1}</b> <small>${FO_ROLE[r.i]}</small></span>`
+      + '<span class="fo-track"><i class="fo-avg m"></i><i class="fo-avg w"></i><span class="fo-zone"></span><span class="fo-mark"></span></span><span class="fo-val"></span></div>';
+  }
+  function foPaintRow(el, r, live, hide) {
+    el.hidden = !!hide;
+    el.className = 'fo-row ' + (r.skip ? 'na' : r.need ? (r.unsure ? 'off unsure' : 'off') : 'ok');
+    const z = el.querySelector('.fo-zone'), m = el.querySelector('.fo-mark');
+    const a = clamp(r.zone[0], 0, 100), b = clamp(r.zone[1], 0, 100);
+    z.style.left = a + '%'; z.style.width = (b - a) + '%';
+    m.hidden = r.score == null;
+    if (r.score != null) m.style.left = clamp(r.score, 0, 100) + '%';
+    el.querySelector('.fo-val').textContent = foVal(r, live);
+    el.title = r.skip ? '' : `${foName(r.i)}${live ? ' ' + Math.round(r.hz) + ' Hz' : ''}, ${Math.round(r.score)} on the scale (goal zone ${Math.round(r.zone[0])}-${Math.round(r.zone[1])})`;
+  }
+  // A live panel: off from D.formantOffsets (null while nothing is heard). Built once, then only updated, so the
+  // markers glide.
+  function paintFo(el, off, opt = {}) {
+    if (!el) return;
+    el._fo = off; el._foOpt = opt;
+    if (!el.firstChild) {
+      el.innerHTML = `<div class="fo-top"><p class="fo-say"></p><div class="seg fo-pick" role="radiogroup" aria-label="Focus on one formant">${FO_PICKS.map(([k, l]) => `<button type="button" role="radio" data-fo="${k}" aria-checked="false">${l}</button>`).join('')}</div></div>`
+        + `<div class="fo-rows">${[0, 1, 2].map(i => foRowHtml({ i })).join('')}</div>`;
+    }
+    for (const b of el.querySelectorAll('[data-fo]')) b.setAttribute('aria-checked', String(b.dataset.fo === foFocus));
+    el.querySelector('.fo-say').textContent = opt.demo && off ? 'Demo voice: ' + foSay(off, true) : foSay(off, true);
+    const ch = foChosen(off), rows = el.querySelectorAll('.fo-row');
+    const blank = (i) => ({ i, skip: 'none', score: null, zone: zoneOf(i), need: 0 });
+    rows.forEach((row, i) => foPaintRow(row, off ? off.rows[i] : blank(i), true, ch != null && i !== ch));
+    el.classList.toggle('fo-one', ch != null);
+    el.classList.toggle('fo-idle', !off);
+  }
+  // goal zone of formant i on the score scale, with nothing heard yet
+  function zoneOf(i) { const [a, b] = D.COACH_BAND[state.goal], s = i === 0 ? D.F1_SLACK : 0; return [D.resScore((a - s) / 100), D.resScore((b + s) / 100)]; }
+  function foRefresh() { for (const el of document.querySelectorAll('.fo[data-live]')) if (el.firstChild) paintFo(el, el._fo, el._foOpt); }
+  function setFoFocus(k) {
+    foFocus = k;
+    try { localStorage.setItem(FO_KEY, k); } catch (e) {}
+    foRefresh();
+    if (state.coach) { state.coach.key = null; renderCoach(); }
+  }
+  // the summary of a reading or a session: sum from D.formantSummary, nV vowels heard
+  function foSummaryHtml(sum, title = 'Formant by formant') {
+    if (!sum || sum.rows.every(r => r.score == null)) return '';
+    const w = sum.worst, r = w != null ? sum.rows[w] : null;
+    let say = r ? `Furthest off: ${foName(w)}, ${r.need > 0 ? 'low' : 'high'} on ${r.nOff} of ${r.nVowels} vowel${r.nVowels > 1 ? 's' : ''}, about ${foPctN(r)}% from the goal zone where it is off: ${FO_MOVE[w][r.need > 0 ? 0 : 1]}.`
+      : 'All three formants sit in the goal zone on average.';
+    const tg = '';
+    if (sum.together) {
+      const [a, b] = [sum.rows[1], sum.rows[2]];
+      say = `F2 and F3 are both ${sum.together > 0 ? 'low' : 'high'} (about ${foPctN(a)}% and ${foPctN(b)}%): that points to throat length, so ${sum.together > 0 ? 'a slightly higher larynx' : 'a slightly lower larynx'} moves both at once.`;
+    }
+    const aside = sum.rows[0].skip === 'pitch' ? ' F1 was set aside: your pitch was too high to read it reliably.' : '';
+    const rows = sum.rows.map(x => {
+      const cls = x.skip ? 'na' : x.need ? 'off' : 'ok';
+      const a = clamp(x.zone[0], 0, 100), b = clamp(x.zone[1], 0, 100);
+      return `<div class="fo-row ${cls}${x.i === w ? ' worst' : ''}"><span class="fo-lab"><b>F${x.i + 1}</b> <small>${FO_ROLE[x.i]}</small></span>`
+        + `<span class="fo-track"><i class="fo-avg m"></i><i class="fo-avg w"></i><span class="fo-zone" style="left:${a}%;width:${b - a}%"></span>${x.score != null ? `<span class="fo-mark" style="left:${clamp(x.score, 0, 100)}%"></span>` : ''}</span>`
+        + `<span class="fo-val">${foVal(x, false)}</span></div>`;
+    }).join('');
+    return `<div class="fo fo-sum"><div class="section-head"><h4>${title}${infoHtml('How the formants are compared', FO_HELP + ' Here each vowel is compared with its own averages, then the vowels are pooled, weighted by how long each was heard; "3 of 5" counts the vowels where that formant was off.')}</h4></div>
+      <p class="fo-say">${say}${tg}${aside}</p><div class="fo-rows">${rows}</div></div>`;
+  }
+  // the off formants of one vowel, as a short line for its row in the vowel list
+  function foVowelLine(off) {
+    if (!off) return '';
+    const parts = off.rows.filter(r => r.need && !r.skip).map(r => `F${r.i + 1} ${r.need > 0 ? '↑' : '↓'}${foPctN(r)}%${r.unsure ? '?' : ''}`);
+    return parts.length ? `<span class="vm-fo${off.worst != null ? ' off' : ''}">${parts.join(' · ')}</span>` : '<span class="vm-fo ok">F1-F3 ✓</span>';
+  }
 
   // ---------------- vocal tract sketch ----------------
   // Side view (facing left) of one plausible tract shape for the measured formants, with the goal
@@ -1505,6 +1620,11 @@
     const rows = drawTract($('cv-tract'), fresh ? t.F : null, fresh ? t.v : null, t.key, null, demo ? 'Solid line: the demo voice (estimated)' : '');
     renderTractRead($('tract-read'), demo ? null : rows); // the adjustment tips are for your voice, not a demo
     const cap = $('tract-vowel'); if (cap) cap.textContent = fresh ? `${demo ? 'demo voice, ' : ''}vowel "${t.v.cue}" as in ${t.v.word}` : '';
+    const fo = $('fo-live');
+    if (fo) {
+      paintFo(fo, fresh ? D.formantOffsets(t.F, t.v, state.goal, { f0: D.median(t.f0s || [0]) }) : null, { demo });
+      const fc = $('fo-vowel'); if (fc) fc.textContent = cap ? cap.textContent : '';
+    }
   }
   // smooth a gauge position so the marker glides instead of jumping
   function ease(co, k, v, rate = 0.2) {
@@ -1518,7 +1638,7 @@
     // keep the last reading on screen for a few seconds after the sound stops
     const vRecent = def.vowel && co.vf.length && now - co.vt < COACH_HOLD_MS;
     const sRecent = def.sib && co.sf.length && now - co.st < COACH_HOLD_MS;
-    let key = 'idle', cue, why = '', dist = null, rows = '';
+    let key = 'idle', cue, why = '', dist = null, rows = '', off = null;
     if (vRecent) {
       const v = D.VOWEL_BY_KEY[def.vowel];
       const F = [0, 1, 2].map(i => D.median(co.vf.map(f => f[i])));
@@ -1533,18 +1653,26 @@
         const rest = [1, 2].filter(i => c.need[i]).sort((a, b) => c.miss[b] - c.miss[a]);
         c.focus = rest.length ? { formant: rest[0], dir: c.need[rest[0]] } : null;
       }
-      // when all three are off together the fix is the larynx, so say that on each gauge it explains
-      const allDir = c.focus && c.focus.formant === 'all' ? c.focus.dir : 0;
-      rows += c.pos.map((p, i) => gaugeRow(FORMANT_ROLE[i][0], FORMANT_ROLE[i][1], ease(co, 'f' + i, p, i === 0 ? 0.1 : 0.2), c.need[i], i === 0 ? D.F1_SLACK : 0,
-        allDir && c.need[i] === allDir ? 'larynx' : ['jaw', 'tongue', 'lips'][i])).join('');
+      // F1, F2 and F3 each against the goal (the panel below); the jaw keeps the coach's steadier reading
+      off = D.formantOffsets(F, v, state.goal, { f0: co.f0 && co.f0.length ? D.median(co.f0) : 0 });
+      if (!off.rows[0].skip) { off.rows[0].need = c.need[0]; if (!c.need[0]) { off.rows[0].pts = 0; off.rows[0].dHz = 0; off.rows[0].pct = 0; } }
       dist = c.distance;
       key = c.focus ? `${c.focus.formant}:${c.focus.dir}` : 'ok';
+      // one formant picked (or the worst): the tip is about that one only
+      const ch = foChosen(off);
+      if (ch != null) {
+        const r = off.rows[ch];
+        key = r.skip ? 'skip:' + ch : r.need ? `${ch}:${r.need}` : 'one-ok:' + ch;
+        dist = r.pts;
+      } else if (foFocus === 'worst') key = 'ok';
     }
     if (sRecent) {
       const cog = D.median(co.sf), c = D.coachSibilant(cog, D.SIBILANTS[def.sib], state.goal);
       rows += gaugeRow(def.sib === 's' ? '/s/' : '/ʃ/', `hiss ${(cog / 1000).toFixed(1)} kHz`, ease(co, 'sib', c.pos), c.dir);
       if (!vRecent || co.st > co.vt) { key = c.onTarget ? 'ok' : 'sib:' + c.dir; dist = c.distance; }
     }
+    const foEl = $('fo-coach');
+    if (foEl) { foEl.hidden = !def.vowel; if (def.vowel) paintFo(foEl, off, { demo: co.demo }); }
     if (co.demo) return renderCoachDemo(co, def, key, rows, vRecent);
     // switch the tip only when the new one has held steadily, and leave each tip up long
     // enough to read and try; reaching the target is shown sooner than leaving it
@@ -1561,11 +1689,15 @@
       cue = 'On target. Hold this shape and notice how it feels.';
     } else if (k.startsWith('sib:')) {
       [cue, why] = SIB_CUES[k.slice(4)];
+    } else if (k.startsWith('one-ok:')) {
+      cue = `${foName(+k.slice(7))} is in the goal zone. Hold it there and notice how it feels.`;
+    } else if (k.startsWith('skip:')) {
+      cue = `${foName(+k.slice(5))} can't be read right now${+k.slice(5) === 0 ? ' (your pitch is too high for F1)' : ''}. Pick another formant to work on.`;
     } else {
       [cue, why] = COACH_CUES[state.goal][k] || ['', ''];
     }
     cueEl.textContent = cue;
-    cueEl.classList.toggle('ok', k === 'ok');
+    cueEl.classList.toggle('ok', k === 'ok' || k.startsWith('one-ok:'));
     $('coach-why').textContent = why;
     renderHowto(k);
     $('coach-gauges').innerHTML = rows;
@@ -2481,6 +2613,7 @@
       res.vowelScore = score100(D.median(d.vowelFr.map(f => f.alpha)));
       res.F = [0, 1, 2].map(i => D.median(d.vowelFr.map(f => f.F[i])));
       res.per = [0, 1, 2].map(i => D.median(d.vowelFr.map(f => f.per[i])) * 100);
+      res.f0 = D.median(d.vowelFr.map(f => f.f0 || 0));
       res.vowel = v.key;
     }
     if (d.sibFr.length) {
@@ -2682,12 +2815,13 @@
     const parts = [];
     const pill = (s) => `<span class="pill ${onTarget(s) ? 'good' : 'warn'}">${onTarget(s) ? 'on target' : 'off target'}</span>`;
     if (res.vowelScore != null) {
-      const v = D.VOWEL_BY_KEY[res.vowel];
+      const v = D.VOWEL_BY_KEY[res.vowel], fo = D.formantOffsets(res.F, v, state.goal, { f0: res.f0 || 0 });
       parts.push(`<div class="result">
         <div class="result-score"><strong>${Math.round(res.vowelScore)}</strong><span>vowel "${v.cue}" resonance</span>${pill(res.vowelScore)}</div>
-        <table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th><th>Position</th></tr></thead><tbody>
-        ${[0, 1, 2].map(i => `<tr><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${Math.round(res.per[i])}</td></tr>`).join('')}
+        <table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th><th>Scale</th><th>To goal</th></tr></thead><tbody>
+        ${fo.rows.map((r, i) => `<tr class="${r.skip ? 'na' : r.need ? 'off' : 'ok'}${i === fo.worst ? ' worst' : ''}"><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${r.score == null ? '--' : Math.round(r.score)}</td><td>${foVal(r, true)}</td></tr>`).join('')}
         </tbody></table>
+        ${fo.worst != null ? `<p class="fo-say small">Furthest off: ${foName(fo.worst)}, ${FO_MOVE[fo.worst][fo.rows[fo.worst].need > 0 ? 0 : 1]}.${infoHtml('How the formants are compared', FO_HELP)}</p>` : ''}
         <p class="tip">${vowelTip(res)}</p></div>`);
     }
     if (res.sibScore != null) {
@@ -2921,6 +3055,8 @@
     }
     const vm = $('sess-vmap');
     if (vm) { vm.hidden = !st.map.length; if (st.map.length) vm.innerHTML = vowelMapSvg(st.map.map(m => ({ k: m.k, F: m.F, s: m.s, n: m.n }))); }
+    const sf = $('sess-fo');
+    if (sf) sf.innerHTML = st.map.length ? foSummaryHtml(D.formantSummary(st.map, state.goal, st.pitch ? st.pitch.median : 0)) : '';
     const sb = $('sess-sibs');
     if (Object.keys(st.sib).length) {
       sb.innerHTML = '';
@@ -4211,15 +4347,17 @@
       : Object.entries(rec.vowels || {}).map(([k, s]) => ({ k, s, words: [] }));
     if (!rows.length) return '';
     rows.sort((a, b) => gapOf(b.s) - gapOf(a.s) || a.s - b.s);
+    const fsum = vm ? D.formantSummary(rows, state.goal, rec.pitchMedian || 0) : null;
     const list = rows.map(r => {
       const v = D.VOWEL_BY_KEY[r.k], off = !onTarget(Math.round(r.s));
       return `<li><button type="button" class="vm-row${off ? ' off' : ''}" data-vm="${r.k}"><span class="vm-cue"><b>${escapeHtml(v.cue.split(' ')[0])}</b> <small class="muted">${escapeHtml(v.word)}</small></span>`
         + `<span class="track"><span class="mark" style="left:${clamp(r.s, 0, 100)}%"></span></span><span class="val">${Math.round(r.s)}</span>`
-        + `<span class="vm-words small muted">${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
+        + `<span class="vm-words small muted">${fsum ? foVowelLine(fsum.byVowel[r.k]) : ''}${r.words.length ? 'in ' + r.words.map(escapeHtml).join(', ') : ''}</span></button></li>`;
     }).join('');
     return `<div class="vm"><div class="section-head"><h4>${rec.ref ? `The ${RefRead.who(rec)}'s vowels` : 'Your vowels'}${infoHtml('How your vowels are scored', `${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}`)}</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
       ${vm ? `<div class="vm-chart">${vowelMapSvg(rows, refRows, rec.ref ? RefRead.who(rec) : 'you', ref ? RefRead.who(ref) : '')}</div>` : ''}
       <ul class="vm-list">${list}</ul>
+      ${fsum ? foSummaryHtml(fsum) : ''}
       <p class="small muted">Tap a vowel to practise it.${infoHtml('Why some vowels are missing', 'Short vowels in quick speech are rarely held long enough to score, so some may be missing.')}</p></div>`;
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
@@ -6566,6 +6704,9 @@
     $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
     for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp(); initInfoBadges(); initBuildLine();
+    { const h = $('info-fo-live'); if (h) h.textContent = FO_HELP; }
+    document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-fo]'); if (b) setFoFocus(b.dataset.fo); });
+    paintFo($('fo-live'), null);
     readTheme();
     setGoal(g === 'masc' ? 'masc' : 'fem', true);
     renderDrillGrid();
