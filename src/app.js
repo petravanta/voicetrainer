@@ -1194,13 +1194,30 @@
     return `Say "${def.cue}" naturally, a few times in a row, stretching the vowel slightly.`;
   }
   function renderDrillPanel() {
-    const p = $('drill-panel'), d = state.drill;
+    const d = state.drill;
     if (!d) return;
-    if (d.def.type === 'breath') return renderBreathPanel(d);
-    if (d.def.type === 'iso') return renderIsoPanel(d);
-    if (d.def.type === 'whisper') return renderWhisperPanel(d);
-    if (d.def.type === 'embody') return renderEmbodyPanel(d);
-    if (d.def.type === 'prosody') return renderProsodyPanel(d);
+    const t = d.def.type;
+    (t === 'breath' ? renderBreathPanel : t === 'iso' ? renderIsoPanel : t === 'whisper' ? renderWhisperPanel
+      : t === 'embody' ? renderEmbodyPanel : t === 'prosody' ? renderProsodyPanel : renderSoundPanel)(d);
+    arrangeDrillPanel($('drill-panel'));
+  }
+  // Wide screens show a drill in columns: the title across the top, then what to do (steps, demo, checker,
+  // progress, result) | the live coach | Target vs you. The wrappers are display:contents on narrow screens,
+  // where --o puts every part back in the order the panel was written, one under the other.
+  function arrangeDrillPanel(p) {
+    const kids = [...p.children], col = (c) => Object.assign(document.createElement('div'), { className: 'dp-col ' + c });
+    const head = col('dp-head'), a = col('dp-a'), b = col('dp-b'), c = col('dp-c');
+    kids.forEach((el, i) => {
+      el.style.setProperty('--o', i);
+      (el.matches('.eyebrow, .drill-title') ? head : el.matches('.coach') && !b.children.length ? b : el.matches('.tvy') && el.childElementCount ? c : a).append(el);
+    });
+    p.append(head, a, b, c);
+    p.classList.add('dp');
+    // canvases were sized where they were first drawn; redraw them at their column's width
+    window.dispatchEvent(new Event('resize'));
+  }
+  function renderSoundPanel(d) {
+    const p = $('drill-panel');
     p.innerHTML = `
       <p class="eyebrow"><span>Drill</span><span>${d.def.type === 'word' ? 'consonant + vowel' : d.def.type === 'sib' ? 'sibilant' : 'vowel'}</span></p>
       <p class="drill-title"></p>

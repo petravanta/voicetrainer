@@ -190,8 +190,35 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .tabs > button { flex: none; }
 .tabs button { border: 0; background: none; color: var(--muted); font-weight: 600; padding: 8px 12px 9px; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
-.practice-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* the sound picker sits on top and the drill gets the full width under it */
+.practice-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; }
+/* drill panel columns (arrangeDrillPanel in app.js): narrow screens keep one column in the written order */
+.dp-col { display: contents; }
+.drill-panel.dp > .dp-col > * { order: var(--o, 0); }
+@media (min-width: 861px) {
+  /* Practice uses more of a wide screen than the other modes */
+  body[data-mode="practice"] .wrap { max-width: 1440px; }
+  .drill-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+  .drill-grid .drill { padding: 6px 10px; gap: 0; }
+  .drill-grid .drill .cue { font-size: 1rem; margin-bottom: 1px; }
+  .drill-grid .drill .sub, .drill-grid .drill .last { font-size: 0.74rem; }
+  .drill-panel.dp { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); grid-template-areas: "head head" "a b" "c c"; gap: 12px 22px; align-items: start; }
+  .drill-panel.dp > .dp-col > * { order: 0; }
+  .drill-panel.dp > .dp-col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  .dp-head { grid-area: head; gap: 4px !important; }
+  .dp-a { grid-area: a; } .dp-b { grid-area: b; } .dp-c { grid-area: c; }
+  .drill-panel.dp > .dp-col:empty { display: none; }
+  .dp-c .tvy { margin-top: 0; }
+  /* panels without a live coach: what to do and the rest side by side */
+  .drill-panel.dp:has(> .dp-b:empty) { grid-template-areas: "head head" "a c"; }
+}
+@media (min-width: 1200px) {
+  /* what to do | live coach | Target vs you */
+  .drill-panel.dp { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr); grid-template-areas: "head head head" "a b c"; }
+  .drill-panel.dp:has(> .dp-c:empty) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: "head head" "a b"; }
+  .drill-panel.dp:has(> .dp-b:empty) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "head head" "a c"; }
+}
 /* tiles grow taller for long names; long words wrap (hyphenated where the browser can) and never spill out */
 .drill { min-width: 0; overflow: hidden; align-content: start; text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; display: grid; gap: 2px; }
 .drill:hover { border-color: var(--accent); }
