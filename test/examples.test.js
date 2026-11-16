@@ -46,6 +46,23 @@ for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50],
   const m = D.median(sc);
   check(sc.length > 20 && Math.abs(m - res) < 25, `demo voice pitch ${pitch} res ${res} bright ${bright}: measured ${Math.round(m)} (${sc.length} fr)`);
 }
+// The natural demo says "see, spa, sue, said": each word's vowel must read as that vowel, at the set
+// pitch and resonance, and the sweep must climb from masculine to feminine.
+{
+  const was = S.getStyle(); S.setStyle('natural');
+  const seqOf = (fr) => fr.filter(f => f.formants && f.stable).map(f => D.classifyVowel(f.formants, four));
+  for (const [pitch, res, bright] of [[115, 0, 40], [205, 100, 65], [160, 50, 50], [250, 100, 65], [95, 0, 30]]) {
+    const fr = run(S.demoVoice(fs, D.VOWELS, { pitch, res, bright }), fs), sc = seqOf(fr);
+    const order = sc.map(c => c.vowel.key).filter((k, i, a) => k !== a[i - 1]).join('');
+    const m = D.median(sc.map(c => c.alpha * 100)), f0 = D.median(fr.filter(f => f.kind === 'voiced').map(f => f.f0));
+    check(order === 'iauE' && sc.length > 50 && Math.abs(m - res) < 20 && Math.abs(f0 / pitch - 1) < 0.06,
+      `natural demo pitch ${pitch} res ${res}: vowels ${order}, measured ${Math.round(m)} at ${Math.round(f0)} Hz (${sc.length} fr)`);
+  }
+  const sw = seqOf(run(S.demo(fs, D.VOWELS), fs)), third = Math.floor(sw.length / 3);
+  const parts = [0, 1, 2].map(k => Math.round(D.median(sw.slice(k * third, (k + 1) * third).map(c => c.alpha * 100))));
+  check(parts[0] < 20 && Math.abs(parts[1] - 50) < 20 && parts[2] > 80, `natural sweep climbs: ${parts.join(' -> ')}`);
+  S.setStyle(was);
+}
 // Intonation: a synthesized question rises at the end, a statement falls, through the real analyser.
 {
   const contour = (x) => run(x, fs).map((f, i) => ({ t: i * 1000 / 60, f0: f.kind === 'voiced' ? f.f0 : 0 }));

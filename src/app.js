@@ -543,6 +543,11 @@
     src.buffer = audioBuf;
     src.connect(analyser);
     src.connect(ctx.destination);
+    // the natural demo voice gets the same soft room as the examples, on the speakers only
+    if (kind === 'demo' && Synth.getStyle() === 'natural') {
+      const r = roomFor(ctx.sampleRate); src.connect(r.input); r.output.connect(ctx.destination);
+      setTimeout(() => { try { r.output.disconnect(); } catch (e) {} }, audioBuf.duration * 1000 + 1500);
+    }
     src.onended = () => { if (node === src) { stop(); setStatus(kind === 'demo' ? 'Demo finished' : 'Recording finished'); } };
     node = src;
     src.start();
@@ -566,8 +571,9 @@
     const x = sweep ? Synth.demo(ctx.sampleRate, D.VOWELS) : Synth.demoVoice(ctx.sampleRate, D.VOWELS, v);
     const ab = ctx.createBuffer(1, x.length, ctx.sampleRate);
     ab.copyToChannel(x, 0);
-    playBuffer(ab, 'demo', sweep ? 'Demo voice: sibilant and vowels, moving from masculine to feminine resonance'
-      : `Demo voice: s and four vowels at ${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))}, brightness ${v.bright}`);
+    const said = Synth.getStyle() === 'natural' ? '"see, spa, sue, said"' : 's and four vowels';
+    playBuffer(ab, 'demo', sweep ? `Demo voice: ${said}, moving from masculine to feminine resonance`
+      : `Demo voice: ${said} at ${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))}, brightness ${v.bright}`);
   }
 
   // Demo voice settings, shared by the synthetic demo and the reading voice.
