@@ -198,6 +198,10 @@
     for (let wi = 0; wi < words.length; wi++) {
       if (sentPos === 0) sentLen = sentLenFrom(wi);
       const units = wordUnits(words[wi]);
+      // o.vowelsOf(word): the word's full vowels from a dictionary ('x' gliding, keep the spelling's guess), so a
+      // passage is said with the vowels a reading expects; a syllable past them is unstressed and said as a schwa
+      const seq = o.vowelsOf && o.vowelsOf(words[wi]);
+      if (seq && seq.length) units.filter(u => u.v).forEach((u, j) => { if (j >= seq.length) u.v = 'V'; else if (seq[j] !== 'x' && mixV[seq[j]]) u.v = seq[j]; });
       const nv = units.filter(u => u.v).length;
       // o.f0At(wordIndex, fractionThroughWord) gives a pitch multiplier for set intonation patterns
       const f0w = o.f0At ? o.pitch * o.f0At(wi, 0) : o.pitch * (1.12 - 0.24 * sentPos / Math.max(1, sentLen - 1 || 1));
