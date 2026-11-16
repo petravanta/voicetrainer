@@ -100,6 +100,7 @@
     Sing.cols = null; Sing.draw();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
     if (state.drill && state.drill.def.type === 'embody') drawEmbody(state.drill);
+    if (typeof TvY !== 'undefined') { tvyDraw(TvY.drill); tvyDraw(TvY.spot); }
   }
   function parseColor(s) {
     const c = document.createElement('canvas').getContext('2d');
@@ -448,7 +449,7 @@
       if (!reading) this.readerIdx = -1;
       if (!this.on) this.setNote('');
       else if (reading) this.setNote('In reading practice the words come from the passage as the highlight moves.');
-      else if (!this.supported()) this.setNote('This browser cannot recognise speech, so words only appear during reading practice.');
+      else if (!this.supported()) this.setNote('This browser can\'t recognise speech (Chrome, Edge and Safari can; Firefox can\'t), so no words show here.');
       else if (state.running !== 'mic') this.setNote('Words appear while the microphone is on.');
     },
     start() {
@@ -462,25 +463,65 @@
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const res = e.results[i], text = res[0].transcript.trim();
           if (reading) { if (!Run.on) continue; this.ran = true; if (res.isFinal) this.heard.push(text); else interim += ' ' + text; continue; }
-          if (res.isFinal) this.place(text); else interim += ' ' + text;
+          if (res.isFinal) this.place(text, res[0].confidence); else interim += ' ' + text;
         }
         if (reading) { this.heardLive = interim.trim(); return; }
         // words still being recognised show straight away (faded) and firm up when final
         this.interim = D.placeWords(interim.trim().split(/\s+/).filter(Boolean), this.voicedSince(this.lastT));
+        if (this.tail) this.tail.interim = this.interim;
       };
       r.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { this.setNote('Speech recognition was blocked, so no words are shown.'); this.on = false; const b = $('pitch-words'); if (b) b.checked = false; }
         else if (e.error === 'network') this.setNote('Speech recognition needs an internet connection in this browser.');
       };
       r.onend = () => { if (this.rec === r) { if (this.on && state.running === 'mic') { try { r.start(); } catch (err) { this.rec = null; } } else this.rec = null; } };
-      try { r.start(); this.setNote(''); if (Run.on) this.ran = true; } catch (err) { this.rec = null; }
+      try { r.start(); this.setNote(''); if (Run.on) this.ran = true; if (this.take) this.take.ran = true; } catch (err) { this.rec = null; }
     },
-    stop() { const r = this.rec; this.rec = null; this.interim = []; if (r) { r.onend = null; try { r.abort(); } catch (e) {} } },
+    stop() {
+      const r = this.rec; this.rec = null; this.interim = [];
+      if (!r) return;
+      // a Freestyle take just ended: let the recogniser finish its last words rather than throwing them away
+      const tail = this.tail;
+      if (tail) { r.onend = () => tail.done(); try { r.stop(); } catch (e) { tail.done(); } return; }
+      r.onend = null; try { r.abort(); } catch (e) {}
+    },
+    // ---- a Freestyle take's words, for its timeline ----
+    // take: the words heard since the take began ({ w, t0, t1, conf }, page clock), or null outside a take.
+    take: null, tail: null,
+    beginTake() { this.take = []; this.take.ran = !!this.rec; },
+    // The take is over: resolves with its words (null when recognition never ran during it) once the last result
+    // is in, or after 1.5 s; words still unconfirmed by then are kept, marked tentative.
+    endTake(quiet) {
+      const list = this.take; this.take = null;
+      if (!list || quiet) return Promise.resolve(null);
+      if (!list.ran) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        let tm = 0;
+        const tail = {
+          list, interim: this.interim.slice(), fin: false,
+          done: () => {
+            if (tail.fin) return; tail.fin = true; clearTimeout(tm);
+            if (this.tail === tail) this.tail = null;
+            for (const L of tail.interim) list.push(Object.assign({}, L, { tent: 1 }));
+            resolve(list);
+          },
+        };
+        this.tail = tail;
+        tm = setTimeout(tail.done, 1500);
+        if (!this.rec) tail.done();
+      });
+    },
     voicedSince(t) { const times = []; for (let i = 0; i < pitchT.length; i++) if (pitchBuf[i] && pitchT[i] > t) times.push(pitchT[i]); return times; },
     // Final result: spread its words over the voiced frames since the previous result.
-    place(text) {
+    place(text, conf) {
       const now = performance.now();
-      for (const p of D.placeWords(text.split(/\s+/).filter(Boolean), this.voicedSince(this.lastT))) this.labels.push(p);
+      for (const p of D.placeWords(text.split(/\s+/).filter(Boolean), this.voicedSince(this.lastT))) {
+        this.labels.push(p);
+        const h = Object.assign({}, p, { conf: Number.isFinite(conf) ? conf : 0 });
+        if (this.take) this.take.push(h);
+        if (this.tail) { this.tail.list.push(h); }
+      }
+      if (this.tail) this.tail.interim = [];
       this.lastT = now; this.interim = [];
       while (this.labels.length > 60) this.labels.shift();
     },
@@ -1017,6 +1058,8 @@
       if (fr.kind === 'voiced' && fr.formants) { g.formants++; if (fr.steady) g.steady++; }
       if (Number.isFinite(frRes)) g[frLoose ? 'loose' : 'scored']++; else if (frMiss) g.refused++;
     }
+    if (!gated && Run.on && Spot.cur) tvyPush(TvY.spot, fr);
+    else if (d && TvY.drill.el) tvyPush(TvY.drill, fr);
     if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, loose: frLoose || undefined, sib: frSib, k: Reader.idx === frWord ? frVowel : null,
       t: performance.now(), F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: frWord });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
@@ -1108,6 +1151,7 @@
     }
     state.drill = { def, vowelFr: [], sibFr: [], breathFr: [], breathLog: [], isoFr: [], pts: [], inZone: 0, offTarget: null, result: null };
     meterFrames = []; state.meter = NaN;
+    TvY.drill.el = null; TvY.drill.cfg = null;
     renderDrillGrid();
     renderDrillPanel();
     drawVowelChart();
@@ -1151,6 +1195,7 @@
         <figure class="tract-coach" hidden><canvas id="cv-tract-coach" height="230"></canvas>
           <figcaption class="tract-key"><span><i class="ln you"></i>you</span><span><i class="ln goal"></i>goal</span><span><i class="ln arrow"></i>change</span></figcaption></figure>
       </div>
+      <figure class="tvy" id="tvy"></figure>
       <div id="drill-result"></div>
       <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
     p.querySelector('.drill-title').textContent = d.def.title;
@@ -1162,6 +1207,7 @@
     renderExampleNote();
     state.coach = { vf: [], vt: -1e9, sf: [], st: -1e9, hist: [], key: null, pendingKey: null, pendingAt: 0, shownAt: 0, eased: {}, trendAt: 0 };
     renderCoach();
+    tvyMountDrill($('tvy'), d.def);
   }
 
   // ---------------- live coach ----------------
@@ -2106,6 +2152,7 @@
         <figure class="tract-coach"><canvas id="cv-tract-iso" height="230"></canvas><ul class="tract-read" id="tract-read-iso"></ul>
           <figcaption class="tract-key"><span><i class="ln you"></i>your shape now (estimated)</span><span><i class="ln start"></i>where you started</span></figcaption></figure>
       </div>
+      <figure class="tvy" id="tvy"></figure>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
       <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
@@ -2115,9 +2162,10 @@
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('drill-again').addEventListener('click', () => selectDrill(def));
-    $('iso-reset').addEventListener('click', () => { d.base = null; d.isoFr = []; d.inZone = 0; d.best = 0; d.eased = {}; updateIso(d, true); });
+    $('iso-reset').addEventListener('click', () => { d.base = null; d.isoFr = []; d.inZone = 0; d.best = 0; d.eased = {}; tvyReset(TvY.drill); updateIso(d, true); });
     d.base = null; d.best = 0; d.eased = {};
     renderProof($('proof'), def);
+    tvyMountDrill($('tvy'), def);
     updateIso(d, true);
   }
   function updateIso(d, force) {
@@ -2190,6 +2238,7 @@
   function finishIso(d) {
     const def = d.def, pct = def.kind === 'pitch' ? null : Math.round(d.best * 100);
     d.result = { id: def.id, at: Date.now() };
+    tvyFreeze(TvY.drill);
     state.lastScores[def.id] = def.kind === 'pitch' ? d.best : pct;
     session.drills.push({ id: def.id, label: def.cue, score: def.kind === 'pitch' ? Math.round(d.best) : pct, at: d.result.at, kind: 'control' });
     renderDrillGrid(); renderSession();
@@ -2226,6 +2275,7 @@
           ? 'The line is how bright your whisper is (tongue F2 and lips/larynx F3 together), in percent around its middle. Only whispering counts; a sound with tone in it is left out.'
           : `Zone ${lo}-${hi} on the same scale as voiced vowels (0 typical masculine, 100 typical feminine), read from the tongue (F2) and lips/larynx (F3) of the whisper. A whisper raises the formants a little and the app allows for that, but speakers differ, so compare within one setup.`}</p>
       </div>
+      <figure class="tvy" id="tvy"></figure>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
       <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
@@ -2238,6 +2288,7 @@
     $('drill-again').addEventListener('click', () => selectDrill(def));
     d.whFr = []; d.demoWh = []; d.legs = 0; d.span = 0; d.whScores = []; d.eased = {}; d.whc = null;
     renderProof($('proof'), def);
+    tvyMountDrill($('tvy'), def);
     $('drill-msg').textContent = '';
     updateWhisper(d, true);
   }
@@ -2316,6 +2367,7 @@
   function finishWhisper(d, score, kind) {
     const def = d.def;
     d.result = { id: def.id, score, at: Date.now() };
+    tvyFreeze(TvY.drill);
     state.lastScores[def.id] = score;
     session.drills.push({ id: def.id, label: def.cue, score, at: d.result.at, kind });
     renderDrillGrid(); renderSession();
@@ -2574,6 +2626,7 @@
     state.lastScores[def.id] = res.score;
     session.drills.push({ id: def.id, label: def.cue, score: Math.round(res.score), at: res.at });
     renderDrillResult(res);
+    tvyFreeze(TvY.drill);
     renderDrillGrid();
     renderSession();
     const bar = $('drill-prog'); if (bar) bar.style.width = '100%';
@@ -2778,6 +2831,193 @@
         <p class="tip">${sibTip(res)}</p></div>`);
     }
     box.innerHTML = parts.join('');
+  }
+
+  // ---------------- target vs you ----------------
+  // Two short spectrograms side by side on one frequency axis and one time scale: the target (the exercise's own
+  // demo sound, or the reference voice reading a focus spot) and you (live while you practise, then the stretch
+  // that was scored). Both are made from analyzer frames the same way (D.specStrip), with F1-F3 (or a hiss's centre)
+  // marked and, for a single sound, dashed lines where your goal puts them, running across both.
+  const TVY_KEEP = 360; // frames of you kept while live (~6 s at 60 a second)
+  const TVY_TYPES = new Set(['vowel', 'sib', 'word', 'whisper', 'iso']);
+  const TvY = { drill: { kind: 'drill' }, spot: { kind: 'spot' }, cache: new Map() };
+  const TVY_NAMES = { F1: 'jaw opening (F1)', F2: 'tongue front/back (F2)', F3: 'lips and larynx (F3)', cog: "the hiss's centre" };
+  function tvyReset(T) { T.live = []; T.you = null; T.frozen = false; T.cmp = null; tvyDraw(T); }
+  // what to draw for an exercise: chart top, which spectrum, where the goal sits, and the target sound itself
+  function tvyDrillCfg(def) {
+    const fem = state.goal === 'fem', v = def.vowel && D.VOWEL_BY_KEY[def.vowel], goalF = v && (fem ? v.W : v.M), lines = [];
+    const sibGoal = def.sib && (fem ? D.SIBILANTS[def.sib].W : D.SIBILANTS[def.sib].M);
+    if ((def.type === 'vowel' || def.type === 'word') && goalF) goalF.forEach((f, i) => lines.push({ f, k: 'f' + (i + 1) }));
+    if (def.type === 'whisper' && def.kind !== 'siren' && goalF) [1, 2].forEach(i => lines.push({ f: goalF[i] * D.WHISPER_SHIFT[i], k: 'f' + (i + 1) }));
+    if (sibGoal) lines.push({ f: sibGoal, k: 'cog' });
+    const wide = def.type === 'sib' || def.type === 'word';
+    return {
+      fmax: def.type === 'sib' ? 11000 : def.type === 'word' ? 9000 : 5000, wide, lines, goalish: def.type !== 'iso' && def.kind !== 'siren',
+      tLabel: def.type === 'iso' ? 'Target: the movement' : def.kind === 'siren' ? 'Target: a whisper sliding' : `Target: typical ${fem ? 'feminine' : 'masculine'}`,
+      play: (x) => playSamples(x, 'play', def.type === 'iso' ? 'the movement' : `typical ${fem ? 'feminine' : 'masculine'}`),
+      make: (fs) => def.type === 'whisper' ? Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT)
+        : def.type === 'iso' ? isoExample(fs, def, fem, true) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS),
+      key: [def.id, state.goal, Synth.getStyle()].join('|'),
+    };
+  }
+  function tvyStrip(T, frames, trim) { return D.specStrip(frames, { fmax: T.cfg.fmax, wide: T.cfg.wide, trim }); }
+  // An exercise opens: work out its target (once per sound, goal and voice style) and start listening
+  function tvyMountDrill(host, def) {
+    const T = TvY.drill;
+    if (!host || !TVY_TYPES.has(def.type)) { T.el = null; return; }
+    ensureCtx();
+    T.cfg = tvyDrillCfg(def); T.tgt = null; T.note = 'Making the target…'; T.el = host; T.tries = 0;
+    tvyReset(T); tvyAttach(T);
+    const key = T.cfg.key + '|' + ctx.sampleRate, hit = TvY.cache.get(key), cfg = T.cfg;
+    const done = (e) => { if (T.cfg !== cfg) return; T.cfg.x = e.x; T.tgt = e.st; T.note = ''; tvyDraw(T); };
+    if (hit) return done(hit);
+    setTimeout(() => {
+      if (T.cfg !== cfg) return;
+      const x = cfg.make(ctx.sampleRate), e = { x, st: tvyStrip(T, analyzeSamples(x, ctx.sampleRate), true) };
+      TvY.cache.set(key, e); if (TvY.cache.size > 24) TvY.cache.delete(TvY.cache.keys().next().value);
+      done(e);
+    }, 30);
+  }
+  // A focus spot opens: the reference voice (neural or demo, as in Readings) reading just those words is the target
+  function tvySetSpot(S, sp) {
+    const T = TvY.spot, cfg = { fmax: 5000, wide: false, lines: [], goalish: false, tLabel: 'Target: the reference voice', spot: true };
+    T.cfg = cfg; T.tgt = null; T.note = 'Loading the reference voice…'; T.tries = 0; tvyReset(T);
+    const t = Texts.all().find(x => x.id === S.textId);
+    if (!t) { T.note = 'No reference for this text'; return; }
+    ensureCtx();
+    RefRead.audio(t, ctx.sampleRate).then(c => {
+      if (T.cfg !== cfg) return;
+      if (c.words.length !== S.texts.length || !(c.starts[sp.a] >= 0) || !(c.ends[sp.b] > 0)) { T.note = 'The reference reads a different text'; return tvyDraw(T); }
+      const a = Math.max(0, Math.round((c.starts[sp.a] - 0.06) * c.fs)), b = Math.min(c.x.length, Math.round((c.ends[sp.b] + 0.12) * c.fs));
+      cfg.x = c.x.slice(a, b); cfg.fs = c.fs;
+      cfg.tLabel = `Target: the ${RefRead.who(c)}`;
+      setTimeout(() => { if (T.cfg !== cfg) return; T.tgt = tvyStrip(T, analyzeSamples(cfg.x, c.fs), true); T.note = ''; tvyFrozenCmp(T); tvyDraw(T); }, 30);
+    }, () => { if (T.cfg === cfg) { T.note = "The reference voice couldn't be loaded"; tvyDraw(T); } });
+  }
+  function tvyPush(T, fr) {
+    if (!T.el || !T.cfg || T.frozen) return;
+    T.live.push({ kind: fr.kind, spec: fr.spec, wide: fr.wide, formants: fr.formants, whisperF: fr.whisperF, cog: fr.cog, fsd: fr.fsd });
+    if (T.live.length > (T.cfg.spot ? 2 * TVY_KEEP : TVY_KEEP)) T.live.shift();
+    if (frameCount % 3 === 0) tvyDraw(T);
+  }
+  // how much of you the live panel shows: a little more than the target, so a whole try fits beside it
+  const tvyWin = (T) => clamp(Math.round((T.tgt ? T.tgt.cols : 90) * 1.3), 90, T.cfg && T.cfg.spot ? 2 * TVY_KEEP : 240);
+  // The try is over: keep the stretch that was scored (the last window, trimmed to the sound) and compare it
+  function tvyFreeze(T) {
+    if (!T.cfg || T.frozen) return;
+    T.frozen = true; T.tries = (T.tries || 0) + 1;
+    T.you = tvyStrip(T, T.cfg.spot ? T.live || [] : (T.live || []).slice(-tvyWin(T)), true);
+    tvyFrozenCmp(T); tvyDraw(T);
+  }
+  function tvyFrozenCmp(T) { T.cmp = T.frozen && T.tgt && T.you && T.you.cols ? D.compareStrips(T.tgt, T.you) : null; }
+  // the line under the pictures: the formant that differs most, in plain words
+  function tvySay(T) {
+    if (!T.cfg) return '';
+    if (!T.frozen) return T.cfg.spot ? (T.tgt ? 'Read the line: your try fills in on the right.' : '') : 'Make the sound: it scrolls in on the right.';
+    const c = T.cmp;
+    if (!c || !c.rows.length) return 'Too little of your sound was read to compare in numbers; the picture still shows it.';
+    if (!c.big) return T.cfg.spot ? 'Across the phrase, your formants sit within 4% of the reference.' : 'Your formants sit within 4% of the target. Close match.';
+    const b = c.big, fem = state.goal === 'fem', pc = Math.round(Math.abs(b.r - 1) * 100), up = b.r > 1;
+    const past = T.cfg.goalish && (fem ? up : !up) ? ', past the typical voice, which still counts for your goal' : '';
+    const all = c.rows.length > 1 ? ` (${c.rows.map(r => `${r.k === 'cog' ? 'hiss' : r.k} ${r.r >= 1 ? '+' : '−'}${Math.round(Math.abs(r.r - 1) * 100)}%`).join(', ')})` : '';
+    return `${T.cfg.spot ? 'Across the phrase, the' : 'Biggest difference:'} ${TVY_NAMES[b.k]}${T.cfg.spot ? ' sits' : ','} ${Math.round(b.y)} Hz against ${Math.round(b.t)} Hz, ${pc}% ${up ? 'higher' : 'lower'}${past}.${all}`;
+  }
+  function tvyAttach(T, host) {
+    if (host) T.el = host;
+    const el = T.el; if (!el || !T.cfg) return;
+    const spot = T.cfg.spot;
+    el.innerHTML = `<div class="tvy-head"><b>Target vs you</b><button type="button" class="btn sm ghost tvy-play">▶ Hear target</button></div>
+      <canvas class="tvy-cv" height="170" role="img" aria-label="Spectrogram of the target and of you, side by side on one frequency scale"></canvas>
+      <p class="small tvy-read"><span class="tvy-say"></span></p>`;
+    el.querySelector('.tvy-read').append(infoBadge('About Target vs you', `Left: ${spot ? 'the reference voice reading these words' : "this exercise's demo sound"}. Right: you, ${spot ? 'from your latest try' : 'live while you practise, then the stretch that was scored'}. Both are drawn the same way, low to high (0-${T.cfg.fmax / 1000} kHz), on the same time scale, with the formants read marked: F1 amber (jaw), F2 rose (tongue), F3 blue (lips and larynx)${T.cfg.wide ? ', and the centre of a hiss in the accent colour' : ''}. ${T.cfg.lines.length ? 'Dashed lines run across both at your goal for this sound; a band of yours sitting under its line means that part is darker than the goal. ' : spot ? 'A phrase has many vowels, so there is no single goal line; compare the shape of the bands word by word. ' : ''}The target is ${spot ? 'a machine reading (neural or demo voice), a guide rather than the only right way' : 'synthetic, at typical values, so your bands can sit a little apart and still be on goal'}. Measured on synthetic voices; real voices vary more.`));
+    const btn = el.querySelector('.tvy-play');
+    btn.onclick = () => {
+      const x = T.cfg && T.cfg.x; if (!x) return;
+      if (spot) { if (Run.on) return; tvyPlayRaw(x, T.cfg.fs); } else (exSrc ? stopExample() : T.cfg.play(x));
+    };
+    btn.disabled = spot && Run.on;
+    tvyDraw(T);
+  }
+  let tvySrc = null;
+  function tvyPlayRaw(x, fs) {
+    ensureCtx();
+    if (tvySrc) { try { tvySrc.stop(); } catch (e) {} tvySrc = null; }
+    const ab = ctx.createBuffer(1, x.length, fs); ab.copyToChannel(x, 0);
+    const s = ctx.createBufferSource(); s.buffer = ab; s.connect(ctx.destination); s.onended = () => { if (tvySrc === s) tvySrc = null; }; s.start(); tvySrc = s;
+  }
+  function tvyImage(st) {
+    if (st._cv && st._lut === LUT) return st._cv;
+    const cv = document.createElement('canvas'); cv.width = Math.max(1, st.cols); cv.height = st.rows;
+    if (st.cols) {
+      const g = cv.getContext('2d'), im = g.createImageData(cv.width, cv.height);
+      for (let c = 0; c < st.cols; c++) for (let r = 0; r < st.rows; r++) {
+        const v = st.v[c * st.rows + r], o = ((st.rows - 1 - r) * cv.width + c) * 4;
+        im.data[o] = LUT[v * 3]; im.data[o + 1] = LUT[v * 3 + 1]; im.data[o + 2] = LUT[v * 3 + 2]; im.data[o + 3] = 255;
+      }
+      g.putImageData(im, 0, 0);
+    }
+    st._cv = cv; st._lut = LUT;
+    return cv;
+  }
+  function tvyDraw(T) {
+    const el = T && T.el, cv = el && el.isConnected && el.querySelector('.tvy-cv');
+    if (!cv || !C.ink || !LUT) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), W = cv.width, H = cv.height, cfg = T.cfg, fmax = cfg.fmax;
+    const ax = 30 * dpr, gap = 8 * dpr, top = 18 * dpr, bot = 2 * dpr, pw = (W - ax - gap) / 2, ph = H - top - bot;
+    const Y = (f) => top + (1 - f / fmax) * ph, X = [ax, ax + pw + gap];
+    g.fillStyle = C.panel; g.fillRect(0, 0, W, H);
+    g.font = `${10 * dpr}px ${C.font}`; g.textBaseline = 'alphabetic';
+    // the frequency axis
+    g.fillStyle = C.muted; g.textAlign = 'right';
+    const step = fmax > 6000 ? 2000 : 1000;
+    for (let f = step; f < fmax; f += step) g.fillText(f / 1000 + 'k', ax - 6 * dpr, Y(f) + 3.5 * dpr);
+    const you = T.frozen ? T.you : T.live && T.live.length ? tvyStrip(T, T.live.slice(-tvyWin(T)), false) : null;
+    const span = Math.max(tvyWin(T), T.tgt ? T.tgt.cols : 0, T.frozen && you ? you.cols : 0), cw = pw / span;
+    const halo = fmHalo();
+    const strip = (st, x0, right) => {
+      if (!st || !st.cols) return;
+      const w = st.cols * cw, sx = right ? x0 + pw - w : x0;
+      g.imageSmoothingEnabled = true; g.drawImage(tvyImage(st), 0, 0, st.cols, st.rows, sx, top, w, ph);
+      for (let c = 0; c < st.cols; c++) {
+        const x = sx + c * cw, mw = Math.max(1, cw + 0.5);
+        (st.fm[c] || []).forEach((f, i) => {
+          if (!(f > 0) || f >= fmax) return;
+          if (halo) { g.fillStyle = halo; g.fillRect(x, Y(f) - 2.5 * dpr, mw, 5 * dpr); }
+          g.fillStyle = C['f' + (i + 1)]; g.fillRect(x, Y(f) - 1.5 * dpr, mw, 3 * dpr);
+        });
+        const s = st.cog[c];
+        if (s > 0 && s < fmax) { g.fillStyle = C.accent; g.fillRect(x, Y(s) - 1.5 * dpr, mw, 3 * dpr); }
+      }
+    };
+    for (const x0 of X) { g.fillStyle = LUT ? `rgb(${LUT[0]},${LUT[1]},${LUT[2]})` : C.panel; g.fillRect(x0, top, pw, ph); }
+    strip(T.tgt, X[0], false);
+    strip(you, X[1], !T.frozen);
+    // empty panels say why
+    g.fillStyle = C.muted; g.textAlign = 'center';
+    if (!T.tgt) g.fillText(T.note || '', X[0] + pw / 2, top + ph / 2);
+    if (!you || !you.cols) g.fillText(T.frozen ? 'Nothing heard' : cfg.spot && Run.on ? 'Listening…' : 'You appear here', X[1] + pw / 2, top + ph / 2);
+    // the goal, dashed across both panels, with a mark on the axis
+    g.lineWidth = 1.5 * dpr; g.setLineDash([5 * dpr, 4 * dpr]);
+    for (const l of cfg.lines) {
+      if (!(l.f < fmax)) continue;
+      const y = Y(l.f), col = l.k === 'cog' ? C.accent : C[l.k];
+      g.strokeStyle = col; g.globalAlpha = 0.9;
+      g.beginPath(); g.moveTo(X[0], y); g.lineTo(X[0] + pw, y); g.moveTo(X[1], y); g.lineTo(X[1] + pw, y); g.stroke();
+      g.globalAlpha = 1; g.fillStyle = col;
+      g.beginPath(); g.moveTo(ax - 5 * dpr, y - 4 * dpr); g.lineTo(ax - 0.5, y); g.lineTo(ax - 5 * dpr, y + 4 * dpr); g.closePath(); g.fill();
+    }
+    g.setLineDash([]);
+    // frames round the panels and their names
+    g.strokeStyle = C.line; g.lineWidth = 1;
+    for (const x0 of X) g.strokeRect(x0 + 0.5, top + 0.5, pw - 1, ph - 1);
+    g.fillStyle = C.muted; g.textAlign = 'left';
+    const yName = T.frozen ? (cfg.spot ? `You: try ${T.tries}` : 'You: the scored take') : cfg.spot ? 'You' : 'You: live';
+    const fit = (long, short) => (g.measureText(long).width <= pw - 4 * dpr ? long : short);
+    g.fillText(fit(cfg.tLabel, 'Target'), X[0], 12 * dpr);
+    g.fillText(fit(yName, T.frozen && !cfg.spot ? 'You: scored' : yName.replace(': live', '')), X[1], 12 * dpr);
+    const say = el.querySelector('.tvy-say'); if (say) say.textContent = tvySay(T);
+    const btn = el.querySelector('.tvy-play'); if (btn) btn.disabled = !cfg.x || (cfg.spot && Run.on);
   }
 
   // ---------------- session summary ----------------
@@ -3488,6 +3728,7 @@
     start(kind) {
       this.end(true);
       Object.assign(this, { on: true, kind, frames: [], chunks: [], mr: null, full: false, buf: kind !== 'mic' ? this.pendingBuf : null, pendingBuf: null, t0: performance.now() });
+      if (kind === 'mic') Words.beginTake(); // words the recogniser hears (Show words on) go on the take's timeline
       if (kind === 'mic' && stream && window.MediaRecorder) {
         try {
           // its own copy of the stream, so the last second still reaches the recording after the microphone is stopped
@@ -3507,16 +3748,27 @@
     end(quiet) {
       if (!this.on) return;
       this.on = false;
-      const frames = this.frames, mr = this.mr, chunks = this.chunks, buf = this.buf;
+      const frames = this.frames, mr = this.mr, chunks = this.chunks, buf = this.buf, t0 = this.t0, lag = FRAME_LAG_MS();
       this.frames = []; this.mr = null; this.chunks = []; this.buf = null;
-      if (quiet || frames.filter(f => f.f0 > 0).length < 20) { // under about a third of a second of voice
+      const thin = frames.filter(f => f.f0 > 0).length < 20; // under about a third of a second of voice
+      const heard = Words.endTake(quiet || thin);
+      if (quiet || thin) {
         if (mr && mr.state !== 'inactive') { mr.ondataavailable = null; try { mr.stop(); } catch (e) {} }
         return;
       }
-      const tk = { id: 'free' + (++this.n), tl: D.readingTimeline(frames, this.t0, 0), kind: this.kind, at: new Date().toISOString(), full: this.full, buf, blob: null };
-      if (!mr) return showFreeReview(tk);
-      const done = () => { tk.blob = chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null; showFreeReview(tk); };
-      if (mr.state === 'inactive') done(); else { mr.addEventListener('stop', done); try { mr.stop(); } catch (e) { done(); } }
+      const tk = { id: 'free' + (++this.n), tl: D.readingTimeline(frames, t0, 0), kind: this.kind, at: new Date().toISOString(), full: this.full, buf, blob: null, heard: null };
+      const rec = !mr ? Promise.resolve(null) : new Promise((res) => {
+        const done = () => res(chunks.length ? new Blob(chunks, { type: mr.mimeType || 'audio/webm' }) : null);
+        if (mr.state === 'inactive') done(); else { mr.addEventListener('stop', done); try { mr.stop(); } catch (e) { done(); } }
+      });
+      Promise.all([heard, rec]).then(([list, blob]) => {
+        tk.blob = blob;
+        if (list) { // the words heard, each over its own stretch of the take
+          const h = D.heardWords(frames, t0, tk.tl.dur, list, lag);
+          tk.heard = h; tk.tl.ws = h.ws; tk.tl.we = h.we;
+        }
+        showFreeReview(tk);
+      });
     },
   };
   function showFreeLive() {
@@ -3532,16 +3784,24 @@
     Free.cur = tk;
     $('ftl-live').hidden = true; el.hidden = false;
     const audio = !!(tk.blob || tk.buf), src = tk.kind === 'mic' ? 'take' : tk.kind === 'demo' ? 'demo voice' : 'recording';
+    const H = tk.heard && tk.heard.words.length ? tk.heard : null;
+    const wordsAbout = H ? ' Words: what your browser\'s speech recognition heard, its guess and not a checked transcript. It gives no timings, so each word is spread over the stretch of voice just before it came back, and can sit a word or so off. Words it was unsure of are dotted and slanted. Each word shows its pitch as a level and its resonance as a bar.' : '';
     mountTimeline(el, {
-      id: tk.id, tl: tk.tl, words: null, blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
+      id: tk.id, tl: tk.tl, words: H ? H.words : null, unsure: H ? (i) => H.unsure[i] : null, gone: () => null,
+      wordInfo: (i) => freeWordInfo(H, i), blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
       heading: tk.kind === 'mic' ? 'Your last take' : tk.kind === 'demo' ? 'The demo voice' : 'The recording',
-      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ' Tap anywhere to hear it from there.' : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
+      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap anywhere to hear it from there${H ? ', or tap a word to hear just that word' : ''}.` : ''}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
       noAudio: "This browser couldn't record the take, so no spectrogram",
-      hint: audio ? 'Tap the timeline to play from that moment.' : 'Tap the timeline for the numbers there.',
+      hint: (tk.heard && !H ? 'Show words was on, but the speech recognition heard no words in this take. ' : '') + (audio ? `Tap the timeline to play from that moment${H ? ', or a word to hear it' : ''}.` : 'Tap the timeline for the numbers there.'),
       extraBtns: `${tk.blob ? '<button type="button" class="btn sm ghost" id="ftl-save">Save audio</button>' : ''}<button type="button" class="btn sm ghost" id="ftl-back">Live view</button>`,
     });
     $('ftl-back').onclick = () => showFreeLive();
     const sv = $('ftl-save'); if (sv) sv.onclick = () => saveRunAudio({ title: 'freestyle', at: tk.at }, tk.blob);
+  }
+  // the line under a take's timeline for one heard word
+  function freeWordInfo(H, i) {
+    const [t, p, r, s, rough] = H.words[i];
+    return `heard as <b>“${escapeHtml(t)}”</b>${H.unsure[i] ? ' (unsure)' : ''}: pitch ${p != null ? p + ' Hz' : '--'} · ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : `no resonance reading (${noResWhy(t, p)})`}${s != null ? ` · /s/ ${Math.round(s)}` : ''}${r != null && rough ? ' (from short vowels, rough)' : ''}`;
   }
   // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
   // (a browser's own recordings often can't be seeked in an audio element).
@@ -3613,7 +3873,7 @@
   // stretch of time with its pitch and resonance. words is the reading's byWord, or null for a Freestyle take.
   // pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
   // ref: the demo voice laid on this clock (D.warpTimeline, plus its words' byWord), drawn dashed.
-  function timelineSvg(words, tl, pxs, spec, note, gone, ref) { // gone(i): 'miss' for a word the word check didn't hear
+  function timelineSvg(words, tl, pxs, spec, note, gone, ref, unsure) { // gone(i): 'miss' for a word the word check didn't hear; unsure(i): a heard word the recogniser wasn't sure of
     const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = words ? TL_LANES : tlLanes(false);
     const L = 6, W = Math.ceil(L + tl.dur / 1000 * pxs + 40), x = (ms) => L + ms / 1000 * pxs;
     const ps = tl.f0.filter(v => v > 0);
@@ -3662,13 +3922,14 @@
     // words, each across its own stretch: its pitch as a level, its resonance as a bar, its name under them.
     // Names go on two rows, and one is left out when it would overlap (zoom in to see them all).
     if (words) {
-      const end = [-1e9, -1e9], spans = D.wordSpans(tl.ws, tl.dur);
+      const end = [-1e9, -1e9], spans = D.wordSpans(tl.ws, tl.dur, tl.we);
       const resOff = (r) => r != null && !onTarget(Math.round(r)), pitchOff = (p) => p != null && (state.goal === 'fem' ? p < plo : p > phi);
       spans.forEach((sp, k) => {
         if (!sp || !words[k]) return;
         let [t, p, r, , rough] = words[k]; const x0 = x(sp[0]), wd = Math.max(1.5, x(sp[1]) - x0 - 1), fn = D.wordVowels(t, PRON).why === 'function', cx = x0 + wd / 2, miss = !!gone && gone(k) === 'miss';
         if (miss) p = r = null;
-        const tip = miss ? `${t}: ${noResWhy(t, p, 'miss')}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, gone && gone(k))}`;
+        const un = !!unsure && unsure(k), heardAs = unsure ? `heard as “${t}”${un ? ' (unsure)' : ''}` : t;
+        const tip = !miss && unsure ? `${heardAs}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) : 'no resonance reading: ' + noResWhy(t, p)}` : miss ? `${t}: ${noResWhy(t, p, 'miss')}` : `${t}: ${p != null ? p + ' Hz' : 'no pitch'}, ${r != null ? 'resonance ' + (rough ? '≈' : '') + Math.round(r) + (rough ? ' (rough)' : '') : 'no resonance reading: ' + noResWhy(t, p, gone && gone(k))}`;
         g += `<line class="tl-wtick" x1="${f1(x0)}" x2="${f1(x0)}" y1="${Y.wp[0] - 6}" y2="${Y.lab - 9 + (k % 2) * 13}"/>`
           + `<g class="tl-w" data-i="${k}" tabindex="0" role="button" aria-label="${escapeHtml(tip)}"><title>${escapeHtml(tip)}</title>`
           + `<rect class="wr-hit" x="${f1(x0)}" y="${Y.wp[0] - 6}" width="${f1(wd + 1)}" height="${Y.H - Y.wp[0] + 6}"/>`
@@ -3679,7 +3940,7 @@
           + (ref && ref.words[k] && ref.words[k][2] != null ? `<line class="tl-ref" x1="${f1(x0 + 0.5)}" x2="${f1(x0 + wd)}" y1="${f1(wry(ref.words[k][2]))}" y2="${f1(wry(ref.words[k][2]))}"/>` : '')
           + '</g>';
         const row = k % 2, lw = t.length * 6.6 + 6;
-        if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
+        if (x0 > end[row]) { g += `<text class="wr-word${resOff(r) ? ' off' : ''}${miss ? ' miss' : fn && r == null ? ' fn' : ''}${un ? ' unsure' : ''}" x="${f1(x0 + 2)}" y="${Y.lab + 4 + row * 13}">${escapeHtml(t)}</text>`; end[row] = x0 + lw; }
       });
     }
     g += `<line class="tl-head" x1="${L}" x2="${L}" y1="16" y2="${Y.H}" visibility="hidden"/>`;
@@ -3748,23 +4009,23 @@
     const V = { pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
     const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
     el.innerHTML = `<div class="section-head"><h4>${o.heading}${infoHtml('About the timeline', o.about)}</h4>
-        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.unsure ? '<span><u class="unsure-key">word</u>unsure</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
       <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}
         <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
-        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', 'Each word: pitch') + lab('wr', 'Each word: resonance') : ''}
+        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance' : 'Each word: resonance') : ''}
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
       <p class="small" id="tl-read" aria-live="polite">${o.hint}</p>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
     let svg = null, head = null;
     const msAt = (ev) => { const r = svg.getBoundingClientRect(); return clamp(((ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width) - V.view.L) / V.pxs * 1000, 0, tl.dur); };
-    const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k; };
+    const wordAt = (ms) => { let k = -1; if (words) (tl.ws || []).forEach((w, i) => { if (w != null && w <= ms) k = i; }); return k >= 0 && tl.we && tl.we[k] != null && ms > tl.we[k] + 60 ? -1 : k; };
     const say = (ms) => {
       const i = Math.min(tl.f0.length - 1, Math.floor(ms / tl.bin)), k = wordAt(ms), w = words && words[k];
       // the nearest pitch and resonance within a tenth of a second, so a tap between dots still reads
       let f = 0, r = null;
       for (let d = 0; d <= 2 && (!f || r == null); d++) for (const j of [i - d, i + d]) { if (j < 0 || j >= tl.f0.length) continue; if (!f && tl.f0[j]) f = tl.f0[j]; if (r == null && tl.rs[j] != null) r = tl.rs[j]; }
-      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · “${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
+      return `<b>${clockOf(ms / 1000)}</b>${w ? ` · ${o.unsure ? 'heard as ' : ''}“${escapeHtml(w[0])}”` : ''} · ${f ? f + ' Hz' : 'no pitch'} · ${r != null ? 'resonance ' + Math.round(r) : 'no vowel read'}`;
     };
     const mark = (cls, k) => { svg.querySelectorAll(`.tl-w.${cls}`).forEach(x => x.classList.remove(cls)); const g = k >= 0 && svg.querySelector(`.tl-w[data-i="${k}"]`); if (g) g.classList.add(cls); };
     const place = (ms, follow) => {
@@ -3773,7 +4034,7 @@
       if (follow) { const px = hx * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width), v = scroll.clientWidth; if (px < scroll.scrollLeft + 20 || px > scroll.scrollLeft + v * 0.8) scroll.scrollLeft = Math.max(0, px - v * 0.25); }
     };
     const draw = () => {
-      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref);
+      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref, o.unsure);
       scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head');
       if (V.head != null) place(V.head, false);
       mark('sel', V.sel); mark('on', V.on);
@@ -3831,7 +4092,7 @@
     const pickWord = (i) => {
       if (!words) return;
       V.sel = i; V.hold = true; mark('sel', i); read.innerHTML = o.wordInfo(i);
-      const sp = D.wordSpans(tl.ws, tl.dur)[i];
+      const sp = D.wordSpans(tl.ws, tl.dur, tl.we)[i];
       if (playable && Player.id === o.id) {
         hook();
         Player.play(Math.max(0, sp[0] - 150) / 1000, (sp[1] + 250) / 1000);
@@ -3875,6 +4136,7 @@
     const t = Reader.current; if (!t) return;
     Player.stop();
     Run.on = true; Run.text = t; Run.maxIdx = 0; Run.start = Date.now(); Run.frames = [];
+    if (Spot.cur) { const T = TvY.spot; T.live = []; T.frozen = false; T.cmp = null; T.you = null; }
     Words.resetHeard();
     Run.gates = { voiced: 0, formants: 0, steady: 0, scored: 0, loose: 0, refused: 0 };
     stopRunAudio(); if (stream && state.running === 'mic') startRunAudio(stream);
@@ -4258,12 +4520,13 @@
     $('reader-form').hidden = true; $('reader-text').hidden = false; $('reader').classList.remove('editing');
     Reader.render({ id: S.textId, title: S.title, body: S.texts.slice(sp.a, sp.b + 1).join(' ') });
     $('reader').classList.add('spot');
+    tvySetSpot(S, sp);
     beginRun();
     paintSpot();
   }
   function endSpots() {
     if (!Spot.cur) return;
-    Spot.cur = null;
+    Spot.cur = null; TvY.spot.el = null; TvY.spot.cfg = null;
     $('reader').classList.remove('spot');
     $('reader-spot').hidden = true;
     if (Run.on) cancelRun();
@@ -4271,6 +4534,7 @@
   function finishSpot() {
     const S = Spot.cur, sp = S.spots[S.k];
     const wr = D.wordReport(Run.frames, Reader.words.length), st = D.spotStats(sp, wr);
+    tvyFreeze(TvY.spot);
     endRun(); session = newSession(); resetSessionViews();
     if (st.r == null && st.p == null) { S.msg = 'Not enough voice was heard to score that try. Read it again a little louder.'; paintSpot(); return; }
     S.tries.push({ st, words: wr });
@@ -4337,7 +4601,9 @@
       <div class="rs-cmp"><p class="small muted rs-cap">${S.tries.length ? `Each word: in the reading → try ${S.tries.length}` : 'Each word in the reading'} (${why === 'pitch' ? 'pitch' : why === 'resonance' ? 'resonance' : 'resonance · pitch'})</p><ul class="rs-words">${chips}</ul></div></div>
       ${S.tries.length && !Run.on && !S.msg ? `<p class="rs-verdict">${spotVerdict(c, sp, S.texts)}</p>` : ''}
       <p class="small rs-msg">${escapeHtml(showMsg)}</p>
+      <figure class="tvy" id="rs-tvy"></figure>
       <div class="btn-row">${Run.on ? '' : '<button type="button" class="btn sm primary" id="rs-again">Again</button>'}${S.spots.length > 1 ? `<button type="button" class="btn sm" id="rs-next">${S.k + 1 < S.spots.length ? 'Next spot' : 'First spot'}</button>` : ''}<button type="button" class="btn sm ghost" id="rs-done">Done</button></div>`;
+    tvyAttach(TvY.spot, $('rs-tvy'));
     const again = $('rs-again'); if (again) again.onclick = () => { S.msg = ''; beginRun(); paintSpot(); };
     const next = $('rs-next'); if (next) next.onclick = () => { cancelRun(); S.k = (S.k + 1) % S.spots.length; loadSpot(); };
     $('rs-done').onclick = () => { $('reader-close').click(); };
@@ -6448,7 +6714,7 @@
     new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
     let rt = 0;
-    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); SpecPreview.draw(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); Sing.draw(); if (state.coach) renderCoach(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { clearSpec(); SpecPreview.draw(); drawVowelChart(); drawPitch(); drawHistory(); renderTractLive(); paintDots(); Sing.draw(); if (state.coach) renderCoach(); tvyDraw(TvY.drill); tvyDraw(TvY.spot); }, 120); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawVowelChart(); drawPitch(); clearSpec(); });
     Reader.init();
     Sing.init();
