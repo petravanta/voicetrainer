@@ -972,3 +972,4 @@ a { color: var(--accent); }
 .tl-scrub .tl-svg { cursor: ew-resize; }
 .tl-fmt { white-space: nowrap; }
 .tl-fmt .k { font-weight: 600; }
+.tvy-btns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

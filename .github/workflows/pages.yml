@@ -50,6 +50,7 @@ jobs:
       - run: node test/refread.test.js
       - run: node test/refclips.test.js
       - run: node test/tvy.test.js
+      - run: node test/sustain.test.js
       - run: node test/natural.test.js
       - run: node test/formants.test.js
       - run: node test/cue.test.js
