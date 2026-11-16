@@ -1146,6 +1146,7 @@
     const t = $('meter-target');
     t.style.left = clamp(lo, 0, 100) + '%';
     t.style.width = clamp(hi, 0, 100) - clamp(lo, 0, 100) + '%';
+    t.parentElement.classList.toggle('in', Number.isFinite(v) && onTarget(Math.round(v))); // rainbow band (Rainbow colours)
     if (Number.isFinite(v)) {
       const inT = onTarget(v), mid = (D.RES_AVG.masc + D.RES_AVG.fem) / 2;
       if (state.meterDemo) $('res-desc').textContent = `This is the ${state.meterName}, not you: ${inT ? 'inside' : 'outside'} your target range. It is not scored or saved.`;
@@ -3078,7 +3079,7 @@
   // ---------------- session summary ----------------
   function barRow(label, sub, score) {
     const row = document.createElement('div');
-    row.className = 'bar';
+    row.className = onTarget(Math.round(score)) ? 'bar in' : 'bar';
     row.innerHTML = `<span class="label"></span><span class="track"><span class="mark"></span></span><span class="val"></span>`;
     row.querySelector('.label').textContent = label;
     if (sub) { const s = document.createElement('small'); s.textContent = sub; row.querySelector('.label').appendChild(s); }
@@ -5668,6 +5669,7 @@
       $('sg-res').textContent = fresh && Number.isFinite(v) ? Math.round(v) : '--';
       nd.hidden = !(fresh && Number.isFinite(v)); if (!nd.hidden) nd.style.left = clamp(v, 0, 100) + '%';
       const [lo, hi] = target(), b = $('sg-band'); b.style.left = lo + '%'; b.style.width = (hi - lo) + '%';
+      b.parentElement.classList.toggle('in', !nd.hidden && onTarget(Math.round(v)));
       $('sg-vowel').textContent = fresh ? ($('ro-vowel').textContent.split(' ')[0] || '--') : '--';
       const t = this.clock();
       $('sg-clock').textContent = this.lyr.timed ? (t == null ? 'waiting for the first line' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}${this.paused ? ' paused' : ''}`)
