@@ -964,3 +964,11 @@ a { color: var(--accent); }
 .tvy-read { margin: 0; color: var(--muted); }
 .tvy-read .tvy-say { color: var(--ink); }
 .reader-spot .tvy, #reader-spot .tvy { margin-top: 8px; }
+/* the cued spot on the tall timeline: a line across every lane with a marker at the top to grab */
+.tl-cue line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; }
+.tl-cue path { fill: var(--accent); }
+.tl-cue { pointer-events: none; }
+.tl-svg { -webkit-user-select: none; user-select: none; }
+.tl-scrub .tl-svg { cursor: ew-resize; }
+.tl-fmt { white-space: nowrap; }
+.tl-fmt .k { font-weight: 600; }
