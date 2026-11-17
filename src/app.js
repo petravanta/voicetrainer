@@ -707,11 +707,14 @@
         : 'Passages are read by the demo voice above, at its pitch, resonance and brightness. It sounds more like a machine than the speech voice, but the app can measure it: the meters follow it live, Demo voice under Readings shows its pitch and resonance word by word, and your own readings can show it as a dashed reference line. It never counts toward your progress.';
     },
     open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
+    // Target vs you showing the demo voice follows new settings when the dialog closes
+    closed() { const T = TvY.drill; if (T.el && tvyDemoOn(T)) { tvyMakeDemo(T); tvyFrozenCmp(T); tvyDraw(T); } },
     init() {
       for (const t of ['fem', 'masc']) $('vd-' + t).addEventListener('click', () => this.setType(t));
       for (const t of ['natural', 'classic']) $('vd-' + t).addEventListener('click', () => { this.get().style = t; Synth.setStyle(t); this.save(); this.paint(); });
       for (const t of ['neural', 'demo', 'speech']) $('vd-read-' + t).addEventListener('click', () => { Reader.stopListen(); this.get().read = t; this.save(); this.paint(); });
       this.get(); // sets the synth style before anything is played or graded
+      $('voice-dlg').addEventListener('close', () => this.closed());
       for (const k of ['pitch', 'res', 'bright', 'rate']) {
         $('vd-' + k).addEventListener('input', (e) => { this.get()[k] = +e.target.value; this.save(); this.paint(); });
       }
@@ -730,11 +733,11 @@
     set(on) { this.on = !!on; try { localStorage.setItem(this.KEY, this.on ? '1' : '0'); } catch (e) {} },
     applies: (def) => Synth.canSustain(def),
   };
-  function playHeld(def) {
+  function playHeld(def, voice) {
     ensureCtx();
-    const fem = state.goal === 'fem', h = Synth.sustain(ctx.sampleRate, def, state.goal, D.VOWELS, D.SIBILANTS, { shift: D.WHISPER_SHIFT });
+    const fem = state.goal === 'fem', h = Synth.sustain(ctx.sampleRate, def, state.goal, D.VOWELS, D.SIBILANTS, { shift: D.WHISPER_SHIFT, voice });
     const what = def.type === 'sib' ? `"${def.cue}"` : def.type === 'whisper' ? 'whisper' : def.type === 'word' ? `"${def.cue}" (vowel)` : `"${D.VOWEL_BY_KEY[def.vowel].cue}"`;
-    playSamples(h.x, 'hold', `${what} held, typical ${fem ? 'feminine' : 'masculine'}`, h);
+    playSamples(h.x, 'hold', `${what} held, ${voice ? 'in the demo voice' : `typical ${fem ? 'feminine' : 'masculine'}`}`, h);
   }
   function playExample(def, mode) {
     ensureCtx();
@@ -853,7 +856,7 @@
     else if (t === 'embody') updateEmbody(d, force);
     else if (t === 'prosody' && !force) updateProsody(d);
   }
-  function tvyMineNow() { try { return tvyMineOn(TvY.drill); } catch (e) { return false; } } // safe before Target vs you is set up
+  function tvyHearNow() { try { return tvyRef(TvY.drill).hear; } catch (e) { return '▶ Hear target'; } } // safe before Target vs you is set up
   function setExampleUi(mode) {
     if (!mode) document.querySelectorAll('.proof-play.playing').forEach(x => { if (!exSrc) { x.classList.remove('playing'); x.textContent = '▶'; } });
     const p = $('ex-play'), c = $('ex-compare');
@@ -862,7 +865,7 @@
     if (p && !mode && state.drill && Sustain.on && Sustain.applies(state.drill.def)) p.textContent = 'Play example (held)';
     document.querySelectorAll('.tvy-play').forEach(b => {
       const on = !!mode && mode !== 'compare' && !b.dataset.spot;
-      b.textContent = on ? '■ Stop' : !b.dataset.spot && tvyMineNow() ? '▶ Hear your take' : '▶ Hear target'; b.setAttribute('aria-pressed', String(on));
+      b.textContent = on ? '■ Stop' : !b.dataset.spot ? tvyHearNow() : '▶ Hear target'; b.setAttribute('aria-pressed', String(on));
     });
   }
   function begin(kind, label) {
@@ -2974,12 +2977,47 @@
       try { db.transaction('m', 'readwrite').objectStore('m').delete(k); } catch (e) {}
     },
   };
-  const MINE_PREF = 'voicetrainer.tvymine'; // '0' when you'd rather see the demo sound though a take is kept
-  const minePref = () => { try { return localStorage.getItem(MINE_PREF) !== '0'; } catch (e) { return true; } };
+  // Which reference the left picture shows: 'typ' (typical for your goal), 'demo' (the demo voice from Settings,
+  // at its pitch, resonance and brightness) or 'mine' (your kept take). Remembered on this device.
+  const REF_PREF = 'voicetrainer.tvyref';
+  const refPref = () => { try { return localStorage.getItem(REF_PREF) || ''; } catch (e) { return ''; } };
+  const setRefPref = (w) => { try { localStorage.setItem(REF_PREF, w); } catch (e) {} };
+  const tvyDemoOk = (T) => !!(T.cfg && T.cfg.def && T.cfg.def.type !== 'iso');
   const tvyMineOn = (T) => !!(T.mine && T.which === 'mine');
-  const tvyTgt = (T) => (tvyMineOn(T) ? T.mine.st : T.tgt);
+  const tvyDemoOn = (T) => T.which === 'demo' && tvyDemoOk(T);
+  function tvyRef(T) {
+    if (tvyMineOn(T)) return { st: T.mine.st, x: T.mine.x, label: tvyMineLabel(T), short: 'Your take', hear: '▶ Hear your take', of: 'your kept take', dry: true };
+    if (tvyDemoOn(T)) {
+      const v = DemoVoice.get();
+      return { st: T.demo && T.demo.st, x: T.demo && T.demo.x, label: `Demo voice: ${v.pitch} Hz, score ${Math.round(D.resScore(v.res / 100))}`, short: 'Demo voice', hear: '▶ Hear demo voice', of: 'the demo voice', voice: v };
+    }
+    return { st: T.tgt, x: T.cfg && T.cfg.x, label: T.cfg ? T.cfg.tLabel : '', short: 'Target', hear: '▶ Hear target', of: null };
+  }
+  const tvyTgt = (T) => tvyRef(T).st;
+  // the exercise's sound in the demo voice, made (and measured) when first shown
+  function tvyMakeDemo(T) {
+    if (!tvyDemoOk(T)) return;
+    const v = DemoVoice.get(), def = T.cfg.def, cfg = T.cfg, voice = { pitch: v.pitch, res: v.res, bright: v.bright };
+    const key = ['demo', def.id, state.goal, Synth.getStyle(), voice.pitch, voice.res, voice.bright, ctx.sampleRate].join('|');
+    if (T.demo && T.demo.key === key) return;
+    const hit = TvY.cache.get(key);
+    if (hit) { T.demo = hit; return; }
+    T.demo = null;
+    setTimeout(() => {
+      if (T.cfg !== cfg) return;
+      const fs = ctx.sampleRate;
+      const x = def.type === 'whisper' ? Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT, { voice }) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS, { voice });
+      const e = { key, x, st: tvyStrip(T, analyzeSamples(x, fs), true) };
+      TvY.cache.set(key, e); if (TvY.cache.size > 24) TvY.cache.delete(TvY.cache.keys().next().value);
+      T.demo = e; tvyFrozenCmp(T); tvyDraw(T);
+    }, 30);
+  }
+  function tvySetWhich(T, w) {
+    T.which = w === 'mine' && T.mine ? 'mine' : w === 'demo' && tvyDemoOk(T) ? 'demo' : 'typ';
+    if (T.which === 'demo') tvyMakeDemo(T);
+  }
   function tvyLoadMine(T, r) {
-    if (!r) { T.mine = null; T.which = 'typ'; return; }
+    if (!r) { T.mine = null; if (T.which === 'mine') T.which = 'typ'; return; }
     const x = D.resample(D.fromPcm16(r.pcm), r.fs, ctx.sampleRate);
     T.mine = { r, x, st: tvyStrip(T, analyzeSamples(x, ctx.sampleRate), true) };
   }
@@ -2988,8 +3026,11 @@
     const row = T.el && T.el.querySelector('.tvy-mine'); if (!row) return;
     const seg = row.querySelector('.seg'), keep = row.querySelector('.tvy-keep'), fg = row.querySelector('.tvy-forget');
     const canKeep = T.frozen && T.youX && T.youX.length > 0;
-    seg.hidden = !T.mine; fg.hidden = !tvyMineOn(T); keep.hidden = !canKeep;
-    seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', String((b.dataset.w === 'mine') === tvyMineOn(T))));
+    seg.hidden = !tvyDemoOk(T) && !T.mine; fg.hidden = !tvyMineOn(T); keep.hidden = !canKeep;
+    seg.querySelectorAll('button').forEach(b => {
+      b.hidden = (b.dataset.w === 'mine' && !T.mine) || (b.dataset.w === 'demo' && !tvyDemoOk(T));
+      b.setAttribute('aria-checked', String(b.dataset.w === T.which));
+    });
     const kt = T.kept ? 'Kept ✓' : T.mine ? '☆ Keep this one instead' : '☆ Keep this take';
     if (keep.textContent !== kt) keep.textContent = kt;
     keep.disabled = !!T.kept;
@@ -3022,12 +3063,13 @@
     const T = TvY.drill;
     if (!host || !TVY_TYPES.has(def.type)) { T.el = null; return; }
     ensureCtx();
-    T.cfg = tvyDrillCfg(def); T.tgt = null; T.note = 'Making the target…'; T.el = host; T.tries = 0; T.mine = null; T.which = 'typ';
+    T.cfg = tvyDrillCfg(def); T.tgt = null; T.note = 'Making the target…'; T.el = host; T.tries = 0; T.mine = null;
+    tvySetWhich(T, refPref());
     tvyReset(T); tvyAttach(T);
     const key = T.cfg.key + '|' + ctx.sampleRate, hit = TvY.cache.get(key), cfg = T.cfg;
     Mine.get(Mine.key(def)).then(r => {
       if (T.cfg !== cfg || !r) return;
-      tvyLoadMine(T, r); T.which = minePref() ? 'mine' : 'typ'; tvyFrozenCmp(T); tvyDraw(T);
+      tvyLoadMine(T, r); const p = refPref(); tvySetWhich(T, p === '' || p === 'mine' ? 'mine' : p); tvyFrozenCmp(T); tvyDraw(T);
     });
     const done = (e) => { if (T.cfg !== cfg) return; T.cfg.x = e.x; T.tgt = e.st; T.note = ''; tvyDraw(T); };
     if (hit) return done(hit);
@@ -3091,12 +3133,12 @@
     if (!T.frozen) return T.cfg.spot ? (T.tgt ? 'Read the line: your try fills in on the right.' : '') : 'Make the sound: it scrolls in on the right and holds still while you are quiet.';
     const c = T.cmp;
     if (!c || !c.rows.length) return 'Too little of your sound was read to compare in numbers; the picture still shows it.';
-    const mine = tvyMineOn(T);
-    if (!c.big) return T.cfg.spot ? 'Across the phrase, your formants sit within 4% of the reference.' : mine ? 'Your formants sit within 4% of your kept take. Same sound again.' : 'Your formants sit within 4% of the target. Close match.';
+    const of = !T.cfg.spot && tvyRef(T).of, mine = !!of;
+    if (!c.big) return T.cfg.spot ? 'Across the phrase, your formants sit within 4% of the reference.' : tvyMineOn(T) ? 'Your formants sit within 4% of your kept take. Same sound again.' : of ? `Your formants sit within 4% of ${of}. Close match.` : 'Your formants sit within 4% of the target. Close match.';
     const b = c.big, fem = state.goal === 'fem', pc = Math.round(Math.abs(b.r - 1) * 100), up = b.r > 1;
     const past = T.cfg.goalish && !mine && (fem ? up : !up) ? ', past the typical voice, which still counts for your goal' : '';
     const all = c.rows.length > 1 ? ` (${c.rows.map(r => `${r.k === 'cog' ? 'hiss' : r.k} ${r.r >= 1 ? '+' : '−'}${Math.round(Math.abs(r.r - 1) * 100)}%`).join(', ')})` : '';
-    return `${T.cfg.spot ? 'Across the phrase, the' : mine ? 'Biggest difference from your kept take:' : 'Biggest difference:'} ${TVY_NAMES[b.k]}${T.cfg.spot ? ' sits' : ','} ${Math.round(b.y)} Hz against ${Math.round(b.t)} Hz, ${pc}% ${up ? 'higher' : 'lower'}${past}.${all}`;
+    return `${T.cfg.spot ? 'Across the phrase, the' : of ? `Biggest difference from ${of}:` : 'Biggest difference:'} ${TVY_NAMES[b.k]}${T.cfg.spot ? ' sits' : ','} ${Math.round(b.y)} Hz against ${Math.round(b.t)} Hz, ${pc}% ${up ? 'higher' : 'lower'}${past}.${all}`;
   }
   function tvyAttach(T, host) {
     if (host) T.el = host;
@@ -3106,12 +3148,17 @@
     el.innerHTML = `<div class="tvy-head"><b>Target vs you</b><span class="tvy-btns">${hold ? '<button type="button" class="btn sm ghost tvy-hold"></button>' : ''}<button type="button" class="btn sm ghost tvy-play"${spot ? ' data-spot="1"' : ''}>▶ Hear target</button></span></div>
       <canvas class="tvy-cv" height="170" role="img" aria-label="Spectrogram of the target and of you, side by side on one frequency scale"></canvas>
       <p class="small tvy-read"><span class="tvy-say"></span></p>${spot ? '' : `
-      <div class="tvy-mine" hidden><span class="seg" role="radiogroup" aria-label="Compare with" hidden><button type="button" role="radio" data-w="typ">Demo sound</button><button type="button" role="radio" data-w="mine">Your take</button></span><button type="button" class="btn sm ghost tvy-keep" hidden></button><button type="button" class="btn sm ghost tvy-forget" hidden title="Forget your kept take" aria-label="Forget your kept take">✕</button></div>`}`;
+      <div class="tvy-mine" hidden><span class="seg" role="radiogroup" aria-label="Compare with" hidden><button type="button" role="radio" data-w="typ">Typical</button><button type="button" role="radio" data-w="demo">Demo voice</button><button type="button" role="radio" data-w="mine">Your take</button></span><button type="button" class="btn sm ghost tvy-keep" hidden></button><button type="button" class="btn sm ghost tvy-forget" hidden title="Forget your kept take" aria-label="Forget your kept take">✕</button></div>`}`;
     el.querySelector('.tvy-read').append(infoBadge('About Target vs you', `Left: ${spot ? 'the reference voice reading these words' : "this exercise's demo sound"}. Right: you, ${spot ? 'from your latest try' : 'live while you practise, then the stretch that was scored'}. Both are drawn the same way, low to high (0-${T.cfg.fmax / 1000} kHz), on the same time scale, with the formants read marked: F1 amber (jaw), F2 rose (tongue), F3 blue (lips and larynx)${T.cfg.wide ? ', and the centre of a hiss in the accent colour' : ''}. ${T.cfg.lines.length ? 'Dashed lines run across both at your goal for this sound; a band of yours sitting under its line means that part is darker than the goal. ' : spot ? 'A phrase has many vowels, so there is no single goal line; compare the shape of the bands word by word. ' : ''}The target is ${spot ? 'a machine reading (neural or demo voice), a guide rather than the only right way' : 'synthetic, at typical values, so your bands can sit a little apart and still be on goal'}. Measured on synthetic voices; real voices vary more.`));
     const btn = el.querySelector('.tvy-play'), hb = el.querySelector('.tvy-hold');
     btn.onclick = () => {
       if (!spot && exSrc) return stopExample();
       if (tvyMineOn(T)) return playSamples(T.mine.x, 'play', 'your kept take', null, true);
+      if (tvyDemoOn(T)) {
+        const r = tvyRef(T);
+        if (hold && Sustain.on) return playHeld(T.cfg.def, r.voice);
+        return r.x && playSamples(r.x, 'play', 'the demo voice');
+      }
       if (!spot && hold && Sustain.on) return playHeld(T.cfg.def);
       const x = T.cfg && T.cfg.x; if (!x) return;
       if (spot) { if (Run.on) return; tvyPlayRaw(x, T.cfg.fs); } else T.cfg.play(x);
@@ -3126,8 +3173,7 @@
     const row = el.querySelector('.tvy-mine');
     if (row) {
       row.querySelectorAll('.seg button').forEach(b => { b.onclick = () => {
-        T.which = b.dataset.w === 'mine' && T.mine ? 'mine' : 'typ';
-        try { localStorage.setItem(MINE_PREF, T.which === 'mine' ? '1' : '0'); } catch (e) {}
+        tvySetWhich(T, b.dataset.w); setRefPref(T.which);
         if (exSrc) stopExample();
         tvyFrozenCmp(T); tvyDraw(T);
       }; });
@@ -3135,8 +3181,7 @@
         if (!T.youX || !T.cfg || !T.cfg.def) return;
         const res = state.drill && state.drill.result, sc = res && Number(res.score);
         const rec = { key: Mine.key(T.cfg.def), pcm: D.toPcm16(T.youX), fs: T.youFs, at: Date.now(), score: Number.isFinite(sc) ? Math.round(sc) : null };
-        Mine.put(rec); tvyLoadMine(T, rec); T.which = 'mine'; T.kept = true;
-        try { localStorage.setItem(MINE_PREF, '1'); } catch (e) {}
+        Mine.put(rec); tvyLoadMine(T, rec); T.which = 'mine'; T.kept = true; setRefPref('mine');
         tvyFrozenCmp(T); tvyDraw(T);
       };
       row.querySelector('.tvy-forget').onclick = () => {
@@ -3145,7 +3190,7 @@
         Mine.forget(Mine.key(T.cfg.def)); tvyLoadMine(T, null); T.kept = false;
         tvyFrozenCmp(T); tvyDraw(T);
       };
-      row.append(infoBadge('About your take', "Keep a take you're happy with and it becomes a third reference, beside the demo sound and the dashed goal lines: the left picture shows it, Hear plays it, and the line under the pictures says how your next try differs from it. One per exercise and goal (keeping another replaces it). It stays in this browser only and is never synced, since it is your voice. It is a guide to repeat a sound you have already made, not a measure of the goal: the goal lines and the score still say how close to the goal it is."));
+      row.append(infoBadge('About the references', "The switch picks the left picture. Typical: this exercise's sound at typical values for your goal. Demo voice: the same sound in the demo voice set in Settings, at its pitch, resonance and brightness (change them there). Your take: a take of yours you kept with Keep this take, so you can aim to repeat a sound you already made. Hear plays whichever is shown, and the line under the pictures compares your try with it. The dashed goal lines stay the same whatever you pick, and the score is always against the goal. A kept take is one per exercise and goal (keeping another replaces it, ✕ forgets it), stays in this browser only and is never synced, since it is your voice."));;
     }
     tvyDraw(T);
   }
@@ -3206,7 +3251,7 @@
     strip(you, X[1], !T.frozen);
     // empty panels say why
     g.fillStyle = C.muted; g.textAlign = 'center';
-    if (!tgt) g.fillText(T.note || '', X[0] + pw / 2, top + ph / 2);
+    if (!tgt) g.fillText(tvyDemoOn(T) ? 'Making the demo voice…' : T.note || '', X[0] + pw / 2, top + ph / 2);
     if (!you || !you.cols) g.fillText(T.frozen ? 'Nothing heard' : cfg.spot && Run.on ? 'Listening…' : 'You appear here', X[1] + pw / 2, top + ph / 2);
     // the goal, dashed across both panels, with a mark on the axis
     g.lineWidth = 1.5 * dpr; g.setLineDash([5 * dpr, 4 * dpr]);
@@ -3225,11 +3270,11 @@
     g.fillStyle = C.muted; g.textAlign = 'left';
     const yName = T.frozen ? (cfg.spot ? `You: try ${T.tries}` : 'You: the scored take') : cfg.spot ? 'You' : 'You: live';
     const fit = (long, short) => (g.measureText(long).width <= pw - 4 * dpr ? long : short);
-    const tl = tvyMineOn(T) ? tvyMineLabel(T) : cfg.tLabel;
-    g.fillText(fit(tl, fit(tl.replace(/, [^,]+$/, ''), tvyMineOn(T) ? 'Your take' : 'Target')), X[0], 12 * dpr);
+    const ref = tvyRef(T), tl = ref.label;
+    g.fillText(fit(tl, fit(tl.replace(/, [^,]+$/, ''), ref.short)), X[0], 12 * dpr);
     g.fillText(fit(yName, T.frozen && !cfg.spot ? 'You: scored' : yName.replace(': live', '')), X[1], 12 * dpr);
     const say = el.querySelector('.tvy-say'); if (say) say.textContent = tvySay(T);
-    const btn = el.querySelector('.tvy-play'); if (btn) { btn.disabled = !(tvyMineOn(T) || cfg.x) || (cfg.spot && Run.on); const bt = tvyMineOn(T) ? '▶ Hear your take' : '▶ Hear target'; if (!exSrc && btn.textContent !== bt) btn.textContent = bt; }
+    const btn = el.querySelector('.tvy-play'); if (btn) { btn.disabled = !(cfg.spot ? cfg.x : ref.x) || (cfg.spot && Run.on); const bt = cfg.spot ? '▶ Hear target' : ref.hear; if (!exSrc && btn.textContent !== bt) btn.textContent = bt; }
     tvyPaintMine(T);
   }
 
