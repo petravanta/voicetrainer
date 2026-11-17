@@ -66,7 +66,7 @@
     <linearGradient id="vt-rb-h"><stop offset="0" class="rb0"/><stop offset=".17" class="rb1"/><stop offset=".33" class="rb2"/><stop offset=".5" class="rb3"/><stop offset=".67" class="rb4"/><stop offset=".83" class="rb5"/><stop offset="1" class="rb6"/></linearGradient>
   </defs></svg>
   <div class="meter-card" id="meter-card" data-for="freestyle">
-    <div class="eyebrow"><span>Resonance</span><span id="res-context">all vowels</span></div>
+    <div class="eyebrow"><span>Resonance score</span><span id="res-context">all vowels</span></div>
     <div class="meter-row">
       <span class="res-score"><output id="res-num" class="big">--</output><span class="res-pm" id="res-pm" hidden title="Rough uncertainty of one reading. It grows with pitch: formants are harder to measure in a higher voice.">±0</span></span>
       <p class="meter-desc" id="res-desc">Hold a vowel or speak a sentence. The score compares the shape of your mouth and throat (measured as formants) with typical adult values for the same vowel.</p>
@@ -93,7 +93,7 @@
     <div class="ftl-live" id="ftl-live">
       <div class="ftl-lab"><span>Pitch · <span id="pitch-band-label">target band 165 to 255 Hz</span></span></div>
       <canvas id="cv-pitch" height="130"></canvas>
-      <div class="ftl-lab"><span>Resonance · <span id="res-band-label">goal 52-75</span></span></div>
+      <div class="ftl-lab"><span>Resonance score · <span id="res-band-label">goal 52-75</span></span></div>
       <canvas id="cv-res" height="70"></canvas>
       <div class="ftl-lab"><span>Spectrogram · 0-5 kHz</span>
         <button type="button" class="info-btn" id="spec-info" aria-expanded="false" aria-controls="spec-help" aria-label="How to read the spectrogram">i</button></div>
@@ -169,14 +169,14 @@
       <p id="rd-hist-empty" class="empty">No readings of this passage yet.</p>
       <div id="rd-usual" class="fs rd-usual" hidden></div>
       <figure class="chart" id="rd-chart-wrap" hidden>
-        <figcaption>Resonance per reading <small>dashed lines: average man (37.5) and woman (62.5); the band is your target</small></figcaption>
+        <figcaption>Resonance score per reading <small>dashed lines: average man (37.5) and woman (62.5); the band is your target</small></figcaption>
         <canvas id="cv-hist" height="200"></canvas>
-        <div class="legend"><span><i class="dot res"></i>resonance</span><span><i class="dot sib"></i>/s/ brightness</span></div>
+        <div class="legend"><span><i class="dot res"></i>resonance score</span><span><i class="dot sib"></i>/s/ brightness</span></div>
         <p class="small muted" id="rd-hist-old" hidden>Hollow dots are readings from before November 2026, converted from the old scale. That scale stopped at the averages, so a hollow dot on a dashed line may have been further out.</p>
       </figure>
       <div class="table-wrap" id="rd-table-wrap" hidden>
         <table id="hist-table">
-          <thead><tr><th>Date</th><th class="num">Resonance</th><th class="num">/s/</th><th class="num">Pitch</th><th class="num">Breath</th><th class="num">Read</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th class="num">Resonance score</th><th class="num">/s/</th><th class="num">Pitch</th><th class="num">Breath</th><th class="num">Read</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -221,7 +221,7 @@
     </div>
     <div class="session-grid">
       <div>
-        <h3>Resonance by vowel<button type="button" class="info-btn inline" data-info aria-controls="info-sess-vowels" aria-describedby="info-sess-vowels" aria-expanded="false" aria-label="How vowels are recognised here">i</button><span class="info-pop" id="info-sess-vowels" role="note" hidden>Without a text, each vowel is recognised by sound alone, so one can land under the wrong vowel. A reading checks every vowel against the word you're on.</span></h3>
+        <h3>Resonance score by vowel<button type="button" class="info-btn inline" data-info aria-controls="info-sess-vowels" aria-describedby="info-sess-vowels" aria-expanded="false" aria-label="How vowels are recognised here">i</button><span class="info-pop" id="info-sess-vowels" role="note" hidden>Without a text, each vowel is recognised by sound alone, so one can land under the wrong vowel. A reading checks every vowel against the word you're on.</span></h3>
         <div id="sess-vmap" class="vm-chart" hidden></div>
         <div id="sess-fo"></div>
         <div id="sess-vowels" class="bars"><p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p></div>
@@ -263,7 +263,7 @@
       </div>
     </div>
     <div class="reader-hud" aria-live="off">
-      <span>Resonance <b id="rh-res">--</b></span>
+      <span>Resonance score <b id="rh-res">--</b></span>
       <span>Vowel <b id="rh-vowel">--</b></span>
       <span>Pitch <b id="rh-pitch">--</b></span>
       <span>Breath <b id="rh-breath">--</b></span>
@@ -352,7 +352,7 @@
     <div class="sg-stage panel" id="sg-stage" hidden>
       <div class="sg-hud" aria-live="off">
         <div class="sg-stat"><span class="sg-k">Note</span><b id="sg-note">--</b><small id="sg-hz">&nbsp;</small></div>
-        <div class="sg-stat"><span class="sg-k">Resonance</span><b id="sg-res">--</b><span class="sg-meter" aria-hidden="true"><i class="sg-band" id="sg-band"></i><i class="sg-needle" id="sg-needle" hidden></i></span></div>
+        <div class="sg-stat"><span class="sg-k">Resonance score</span><b id="sg-res">--</b><span class="sg-meter" aria-hidden="true"><i class="sg-band" id="sg-band"></i><i class="sg-needle" id="sg-needle" hidden></i></span></div>
         <div class="sg-stat"><span class="sg-k">Vowel</span><b id="sg-vowel">--</b><small id="sg-clock">&nbsp;</small></div>
       </div>
       <figure class="sg-fig">

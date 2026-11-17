@@ -2864,7 +2864,7 @@
     if (res.vowelScore != null) {
       const v = D.VOWEL_BY_KEY[res.vowel], fo = D.formantOffsets(res.F, v, state.goal, { f0: res.f0 || 0 });
       parts.push(`<div class="result">
-        <div class="result-score"><strong>${Math.round(res.vowelScore)}</strong><span>vowel "${v.cue}" resonance</span>${pill(res.vowelScore)}</div>
+        <div class="result-score"><strong>${Math.round(res.vowelScore)}</strong><span>vowel "${v.cue}" resonance score</span>${pill(res.vowelScore)}</div>
         <table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th><th>Scale</th><th>To goal</th></tr></thead><tbody>
         ${fo.rows.map((r, i) => `<tr class="${r.skip ? 'na' : r.need ? 'off' : 'ok'}${i === fo.worst ? ' worst' : ''}"><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${r.score == null ? '--' : Math.round(r.score)}</td><td>${foVal(r, true)}</td></tr>`).join('')}
         </tbody></table>
@@ -3766,7 +3766,7 @@
   }
   // Demo voice in the Readings library: hear the passage in the demo voice and see what the app measures
   function showRefResult(t) {
-    const box = $('rd-result'); box.hidden = false; box.rec = null; box.cue = null;
+    const box = $('rd-result'); box.hidden = false; box.rec = null; box.cue = null; box.tlJump = null;
     Player.stop();
     const v = DemoVoice.get(), who = RefRead.whoFor(t);
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(t.title)}: the ${who}</h3></div><p class="small" id="ref-prog" role="status">${who === 'neural voice' ? 'Loading and measuring the neural voice' : `Making and measuring the demo voice (${v.pitch} Hz, resonance ${Math.round(D.resScore(v.res / 100))})`}…</p>`;
@@ -3846,7 +3846,7 @@
       id: tk.id, tl: tk.tl, words: H ? H.words : null, unsure: H ? (i) => H.unsure[i] : null, gone: () => null,
       wordInfo: (i) => freeWordInfo(H, i), blob: tk.blob, buf: tk.buf, alive: () => Free.cur === tk, fitShort: true,
       heading: tk.kind === 'mic' ? 'Your last take' : tk.kind === 'demo' ? 'The demo voice' : 'The recording',
-      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it.${H ? ' Tap a word to cue it and see its numbers.' : ''}` : ' Tap anywhere for the numbers at that moment.'}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
+      about: `The ${src} from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance score: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>).${wordsAbout} Zoom with − and +, by pinching, or Ctrl and the mouse wheel.${audio ? ` Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it.${H ? ' Tap a word to cue it and see its numbers.' : ''}` : ' Tap anywhere for the numbers at that moment.'}${tk.full ? ' Only the first ten minutes are kept.' : ''} Freestyle takes stay in this page only: the next one replaces this, and nothing is saved or sent anywhere.`,
       noAudio: "This browser couldn't record the take, so no spectrogram",
       hint: (tk.heard && !H ? 'Show words was on, but the speech recognition heard no words in this take. ' : '') + (audio ? `Tap the timeline${H ? ' (or a word)' : ''} to cue it and see the numbers there, then ▶ Play from it.` : 'Tap the timeline for the numbers there.'),
       extraBtns: `${tk.blob ? '<button type="button" class="btn sm ghost" id="ftl-save">Save audio</button>' : ''}<button type="button" class="btn sm ghost" id="ftl-back">Live view</button>`,
@@ -3858,7 +3858,7 @@
   // a heard word's numbers for the timeline readout's slots (mountTimeline's cue line)
   function freeWordInfo(H, i) {
     const [t, p, r, s, rough] = H.words[i];
-    const note = [H.unsure[i] ? 'Heard as this word, unsure.' : '', r == null ? `No resonance reading: ${noResWhy(t, p)}.` : rough ? 'Resonance from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''];
+    const note = [H.unsure[i] ? 'Heard as this word, unsure.' : '', r == null ? `No resonance score: ${noResWhy(t, p)}.` : rough ? 'Resonance score from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''];
     return { word: t, unsure: !!H.unsure[i], f0: p, res: r, rough, note: note.filter(Boolean).join(' ') };
   }
   // Plays a recording from any moment: decoded once into memory, so a jump is instant and exact
@@ -4014,8 +4014,14 @@
     const off = gone === 'miss' || gone === 'end';
     const why = () => { const w = noResWhy(t, p, gone); return rec.ref ? w.replace('your voice', 'the voice') : w; };
     const note = off ? why()[0].toUpperCase() + why().slice(1) + '.'
-      : [r == null ? `No resonance reading: ${why()}.` : rough ? 'Resonance from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''].filter(Boolean).join(' ');
+      : [r == null ? `No resonance score: ${why()}.` : rough ? 'Resonance score from short vowels, rough.' : '', s != null ? `/s/ ${Math.round(s)}.` : ''].filter(Boolean).join(' ');
     return { word: t, miss: gone === 'miss', f0: off ? null : p, res: off ? null : r, rough, ref: refN, note };
+  }
+  // With a timeline on hand, Word by word says nothing it doesn't, so it's put away and focus spots' Show goes to
+  // the timeline; readings with no timeline here (older ones, or from another device) keep Word by word.
+  function timelineTakesOver(box, el, T) {
+    const wr = box.querySelector('.wr'); if (wr) wr.hidden = true;
+    box.tlJump = (a) => { T.pickWord(a); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
   }
   const TLSpec = { id: null, spec: null }; // the last recording's spectrogram, so reopening it is instant
   // Fills the reading's timeline once its stored data is found, and the player and spectrogram when the recording is there too.
@@ -4029,12 +4035,13 @@
     const T = mountTimeline(el, {
       id: rec.id, tl: got.tl, words: rec.byWord || [], blob, alive: () => box.rec === rec,
       heading: 'Timeline',
-      about: `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`,
+      about: `Your reading from start to end, every lane on the same clock. Pitch: dots coloured from darker to brighter resonance. Resonance score: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, its pitch as a level and its resonance as a bar, so busy bits are narrow and long words wide. Words sit where the highlight reached them, which can trail your voice a little. Zoom with − and +, by pinching, or Ctrl and the mouse wheel. ${blob ? `Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. The recording stays in this browser only (the last ${REPLAY_KEEP} readings), is never synced or sent anywhere, and goes when you delete the reading.` : 'This reading has no recording on this device (it was read on another device, or this browser couldn\'t record), so it can\'t be played and has no spectrogram.'}`,
       noAudio: 'No recording on this device, so no spectrogram',
       hint: blob ? 'Tap the timeline (or a word) to cue it and see the numbers there, then ▶ Play from it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i, ref), gone: (i) => wordGone(rec, i),
       ref: ref ? Object.assign(D.warpTimeline(ref.tl, got.tl.ws, got.tl.dur), { words: ref.byWord }) : null, refWho: ref ? RefRead.who(ref) : null,
     });
+    timelineTakesOver(box, el, T);
     if (!blob) return;
     const audio = $('rd-audio'); if (audio) { audio.hidden = false; audio.onclick = () => saveRunAudio(rec, blob); }
     if (!(await T.ready)) return;
@@ -4052,11 +4059,12 @@
     const T = mountTimeline(el, {
       id: rec.id, tl: rec.tl, words: rec.byWord, buf, alive: () => box.rec === rec,
       heading: 'Timeline',
-      about: `The ${RefRead.who(rec)} reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. Zoom with −, + or by pinching.`,
+      about: `The ${RefRead.who(rec)} reading the passage, every lane on the same clock, measured the way your readings are. Pitch: dots coloured from darker to brighter resonance. Resonance score: smoothed over a quarter second, broken where no vowel could be read. Spectrogram: the sound itself, low to high, with the formants read marked in colour (F1 <span class="k f1">amber</span>, F2 <span class="k f2">rose</span>, F3 <span class="k f3">blue</span>). Words: each across its own stretch, from the exact moment the voice started it. Tap or click anywhere to cue that moment: its time, pitch, resonance and F1-F3 show under the timeline, and ▶ Play plays from there (Stop keeps the cue). With a mouse, drag to scrub the cue; on a phone, drag the cue's marker with a finger (elsewhere a finger scrolls the timeline as usual). Arrow keys nudge it. Tap a word to cue it and see its numbers. Zoom with −, + or by pinching.`,
       noAudio: `This browser couldn't hold the ${RefRead.who(rec)}'s audio, so no spectrogram`,
       hint: buf ? 'Tap the timeline (or a word) to cue it and see the numbers there, then ▶ Play from it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i), gone: () => null,
     });
+    timelineTakesOver(box, el, T);
     T.ready.then(ok => {
       if (!ok || box.rec !== rec) return;
       box.cue = { canPlay: (i) => rec.tl.ws[i] != null && Player.id === rec.id, word: (i) => { T.pickWord(i, true); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } };
@@ -4077,11 +4085,11 @@
     const word = c.word != null ? `“${escapeHtml(c.word)}”` : '–';
     const fm = [0, 1, 2].map(k => `<span class="tr-f tr-f${k + 1}"><span class="k f${k + 1}">F${k + 1}</span>${v(c.F && c.F[k], 4)}${k === 2 ? '<small>Hz</small>' : ''}</span>`).join('');
     const ref = c.refWho ? `<span class="tr-rl ref-num" title="${escapeHtml(c.refWho)}">${escapeHtml(c.refWho)}</span>`
-      + `<span class="tr-rp">${v(c.ref && c.ref.f0, 4)}<small>Hz</small></span><span class="tr-rr"><small>resonance</small>${v(res(c.ref && c.ref.res, c.ref && c.ref.rough), 3)}</span>` : '';
+      + `<span class="tr-rp">${v(c.ref && c.ref.f0, 4)}<small>Hz</small></span><span class="tr-rr"><small>resonance score</small>${v(res(c.ref && c.ref.res, c.ref && c.ref.rough), 3)}</span>` : '';
     return `<span class="tr-t">${c.t || '–:–'}</span>`
       + `<span class="tr-w${c.unsure ? ' unsure' : ''}${c.miss ? ' miss' : ''}" title="${c.word != null ? escapeHtml(c.word) : ''}">${word}</span>`
       + `<span class="tr-p">${v(c.f0, 4)}<small>Hz</small></span>`
-      + `<span class="tr-r"><small>resonance</small>${v(res(c.res, c.rough), 3)}</span>`
+      + `<span class="tr-r"><small>resonance score</small>${v(res(c.res, c.rough), 3)}</span>`
       + `<span class="tr-fm">${fm}</span>${ref}<span class="tr-n">${c.note || ''}</span>`;
   }
   function mountTimeline(el, o) {
@@ -4094,7 +4102,7 @@
       <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}
         <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
-        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance' : 'Each word: resonance') : ''}
+        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance score · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance score' : 'Each word: resonance score') : ''}
           ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
       <div class="tl-readbox"><div class="tl-read${o.ref ? ' has-ref' : ''}${words ? '' : ' no-words'}" id="tl-read" aria-live="polite">${cueHtml({ note: o.hint, refWho: o.ref ? (o.refWho || 'demo voice') : null })}</div></div>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
@@ -4390,7 +4398,7 @@
       quiet: 'Too little voice reached the microphone to read your vowels.',
       high: 'Your voice sat above about 280 Hz, where the vowel shape can no longer be read from the voice reliably.',
       unclear: "Vowels were heard, but their shape didn't fit any vowel the app knows. A nasal or buzzy tone, room echo or a phone microphone's processing can cause this. The microphone and voice check in Settings can tell which.",
-      unsteady: "Resonance is read from vowels the mouth holds for a moment, and none held still long enough. Try reading a little slower and letting the long vowels last.",
+      unsteady: "The resonance score is read from vowels the mouth holds for a moment, and none held still long enough. Try reading a little slower and letting the long vowels last.",
     }[rec.resWhy];
     return `<small>${D.SING_WHY[rec.resWhy]}${more ? infoHtml('Why no resonance', more) : ''}</small>`;
   }
@@ -4399,7 +4407,7 @@
   // A reading's result, or (rec.ref) the demo voice's measured reading of a passage. opt.ref: the demo voice's
   // measured reading of the same words, drawn as a dashed reference; opt.keep: redrawn in place (no scroll).
   function showReadingResult(rec, msg, opt = {}) {
-    const box = $('rd-result'); box.hidden = false; box.rec = rec; box.cue = null; box.refToken = null;
+    const box = $('rd-result'); box.hidden = false; box.rec = rec; box.cue = null; box.tlJump = null; box.refToken = null;
     Player.stop();
     if (!rec) { box.innerHTML = `<p>${msg}</p><div class="btn-row"><button type="button" class="btn sm" id="rd-close">Close</button></div>`; $('rd-close').onclick = () => { box.hidden = true; }; return; }
     const isRef = !!rec.ref, ref = !isRef && RefRead.fits(opt.ref, rec) ? opt.ref : null;
@@ -4420,7 +4428,7 @@
         : "The app's demo voice reads the same passage at the pitch, resonance and brightness set in Voice settings, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. Use it as a target to aim at, and as a check: where the demo voice reads close to what it was set to, the measuring works for that bit of the passage. It is a machine voice, so its melody is simpler than real speech.") + '</div>';
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}${isRef ? `: the ${RefRead.who(rec)}` : ''}</h3><span class="muted small">${isRef ? `Not saved · ${clockOf(rec.seconds)} long` : rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
       <div class="stats">
-        ${stat('Resonance', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + (isRef ? (clip ? '' : `<small>set to ${setRes}</small>`) : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${Math.round(ref.resonance)}</small>` : '')))}
+        ${stat('Resonance score', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + (isRef ? (clip ? '' : `<small>set to ${setRes}</small>`) : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${Math.round(ref.resonance)}</small>` : '')))}
         ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', isRef ? '' : delta(rec.sibS, last && last.sibS))}
         ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}${isRef ? (clip ? '' : `<small>set to ${vv.pitch} Hz</small>`) : `<small>target ${pitchBand().join('-')} Hz</small>`}${ref && ref.pitchMedian != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${ref.pitchMedian} Hz</small>` : ''}`)}
         ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
@@ -4645,7 +4653,7 @@
   // what is off in a spot, with the goal beside it
   function spotWhat(sp) {
     const [lo, hi] = target(), [plo, phi] = pitchBand(), fem = state.goal === 'fem', out = [];
-    if (sp.why !== 'pitch' && sp.r != null) out.push(`resonance ${Math.round(sp.r)} (goal ${fem ? lo + '+' : 'under ' + hi})`);
+    if (sp.why !== 'pitch' && sp.r != null) out.push(`resonance score ${Math.round(sp.r)} (goal ${fem ? lo + '+' : 'under ' + hi})`);
     if (sp.why !== 'resonance' && sp.p != null) out.push(`pitch ${Math.round(sp.p)} Hz (goal ${fem ? plo + '+' : 'under ' + phi})`);
     return out.join(', ');
   }
@@ -4653,7 +4661,7 @@
     return spots.map((sp, k) => {
       const n = recs.length ? timesWeak(sp, recs) : 0;
       return `<li class="fs-item"><div class="fs-text"><q>${escapeHtml(clipQuote(texts, sp))}</q><span class="small muted">${escapeHtml(spotWhat(sp))}${n ? ` · weak in ${n} of your last ${recs.length} reading${recs.length > 1 ? 's' : ''}` : ''}</span></div>`
-        + `<div class="fs-btns">${showBtn ? `<button type="button" class="btn sm ghost wr-jump-btn" data-ph="${k}">Show</button>` : ''}<button type="button" class="btn sm" data-spot="${k}">Practise</button></div></li>`;
+        + `<div class="fs-btns">${showBtn ? `<button type="button" class="btn sm ghost wr-jump-btn" data-ph="${k}" data-a="${sp.a}" data-b="${sp.b}">Show</button>` : ''}<button type="button" class="btn sm" data-spot="${k}">Practise</button></div></li>`;
     }).join('');
   }
   function focusHtml(rec, spots) {
@@ -4804,6 +4812,7 @@
       g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(g); } });
     });
     box.querySelectorAll('.wr-jump, .wr-jump-btn').forEach(b => b.addEventListener('click', () => {
+      if (box.tlJump && b.dataset.a != null) return box.tlJump(+b.dataset.a);
       svg.querySelectorAll('.wr-hl.on').forEach(x => x.classList.remove('on'));
       const hl = svg.querySelector(`.wr-hl[data-ph="${b.dataset.ph}"]`); if (!hl) return;
       hl.classList.add('on');
@@ -5811,7 +5820,7 @@
         const rows = this.empty ? '' : sum.map((s, i) => {
           const l = lines[i]; if (!l.text) return '';
           const inst = D.instrumentalLine(l.text);
-          const v = s.res != null ? Math.round(s.res) : null, tip = v != null ? `Resonance ${v} ± ${s.pm}, from ${s.vowelFrames} vowel readings${s.shaky ? ' (only a few, so a rough guide)' : ''}` : '';
+          const v = s.res != null ? Math.round(s.res) : null, tip = v != null ? `Resonance score ${v} ± ${s.pm}, from ${s.vowelFrames} vowel readings${s.shaky ? ' (only a few, so a rough guide)' : ''}` : '';
           const bar = v != null && !inst ? `<span class="sg-bar${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}"><s style="left:${lo}%;width:${hi - lo}%"></s><i class="${inT(s.res) ? 'in' : ''}" style="width:${clamp(s.res, 2, 100)}%"></i><u style="left:${clamp(s.res - s.pm, 0, 100)}%;width:${clamp(s.res + s.pm, 0, 100) - clamp(s.res - s.pm, 0, 100)}%"></u></span><span class="n${s.shaky ? ' shaky' : ''}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}">${s.shaky ? '≈' : ''}${v}</span>`
             : `<span class="why">${inst ? 'instrumental' : D.SING_WHY[s.why]}</span>`;
           const rng = s.f0 != null ? `<span class="r">${D.hzToNote(s.lo)}–${D.hzToNote(s.hi)}</span>` : '<span class="r">--</span>';
@@ -5820,15 +5829,15 @@
           return `<li><span class="t">${escapeHtml(l.text)}${mel}</span>${bar}${rng}</li>`;
         }).join('');
         box.innerHTML = `<div class="section-head"><h3>${this.song && this.song.title.trim() ? escapeHtml(this.song.title.trim()) : this.trackName && this.audio ? escapeHtml(this.trackName.replace(/\.[^.]+$/, '')) : 'Song finished'}</h3><span class="muted small">Not saved</span></div>
-          <div class="stats">${stat('Resonance', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
+          <div class="stats">${stat('Resonance score', mRes != null ? Math.round(mRes) : '--', mRes != null ? `median of ${res.length} vowel readings` : 'too few steady vowels')}
           ${stat('In your target', res.length >= 8 ? Math.round(100 * res.filter(inT).length / res.length) + '%' : '--', `band ${lo} to ${hi}`)}
           ${stat('Range', `${D.hzToNote(pLo)}–${D.hzToNote(pHi)}`, `${Math.round(12 * Math.log2(pHi / pLo))} semitones, ${Math.round(pLo)} to ${Math.round(pHi)} Hz`)}
           ${mel ? stat('On the tune', mel.held >= 1 ? Math.round(100 * mel.on / mel.held) + '%' : '--', mel.held >= 1 ? `of ${Math.round(mel.held)} s of held notes${mel.oct / mel.held >= 0.1 ? `; ${Math.round(100 * mel.oct / mel.held)}% an octave away` : ''}` : 'too few held notes') : ''}
           ${stat('Singing', `${Math.floor(sung / 60)}:${String(Math.round(sung % 60)).padStart(2, '0')}`, `of ${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`)}</div>
           ${worst.length ? `<p>Furthest from your goal: ${worst.map(s => `<q>${escapeHtml(lines[s.line].text)}</q> (${Math.round(s.res)})`).join(' and ')}. Try speaking those words in your goal voice, then sing them again.</p>` : scored.length ? '<p>Every line with a solid reading was inside your target band.</p>' : ''}
           ${this.heldHtml()}
-          ${rows ? `<h4 class="eyebrow"><span>Resonance and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
-          <p class="small muted">≈ means only a few vowels were read. Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "Resonance is read from steady vowels only, the same way as when you speak. Every line gets a score once 3 vowel readings land on it; under 8 it's marked ≈ and is a rough guide. The pale band on each bar is how far the score could be off. A line with no score says why: too little voice, too high, vowels that couldn't be measured (often a nasal or buzzy sound), or no held vowel (quick words and slides). Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 1100 Hz (C6). Music from speakers in the room also mixes into the readings.")}</p>
+          ${rows ? `<h4 class="eyebrow"><span>Resonance score and range per line</span><span>men avg ${Math.round(D.RES_AVG.masc)} · women avg ${Math.round(D.RES_AVG.fem)}</span></h4><ul class="sg-sum">${rows}</ul>` : ''}
+          <p class="small muted">≈ means only a few vowels were read. Treat lines above C#4 as a hint.${infoHtml('How singing is measured', "The resonance score is read from steady vowels only, the same way as when you speak. Every line gets a score once 3 vowel readings land on it; under 8 it's marked ≈ and is a rough guide. The pale band on each bar is how far the score could be off. A line with no score says why: too little voice, too high, vowels that couldn't be measured (often a nasal or buzzy sound), or no held vowel (quick words and slides). Sung vowels are often stretched and darkened, and above about 280 Hz (C#4) the measurement gets rough, so treat high lines as a hint. Pitch is read up to about 1100 Hz (C6). Music from speakers in the room also mixes into the readings.")}</p>
           <div class="btn-row"><button type="button" class="btn primary" data-sg="again">Sing it again</button><button type="button" class="btn" data-sg="edit">Change the lyrics</button></div>`;
       }
       box.hidden = false;
