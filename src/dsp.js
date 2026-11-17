@@ -2877,6 +2877,47 @@
   // Returns the missing fields, in form order: [] when the song is ready.
   const ownSongMissing = (s) => ['title', 'artist'].filter(k => !String((s && s[k]) || '').trim());
 
+
+  // ---- your own take as a reference: the last few seconds of the microphone, kept in a ring, cut out by sample count ----
+  // SampleRing holds the newest `cap` samples; `total` counts every sample ever pushed, so a span is asked for in those
+  // absolute numbers (what was already dropped is left out).
+  class SampleRing {
+    constructor(cap) { this.buf = new Float32Array(cap); this.total = 0; }
+    push(x) {
+      const b = this.buf, n = b.length;
+      if (x.length > n) { this.total += x.length - n; x = x.subarray(x.length - n); }
+      const at = this.total % n, k = Math.min(x.length, n - at);
+      b.set(x.subarray(0, k), at); if (k < x.length) b.set(x.subarray(k), 0);
+      this.total += x.length;
+    }
+    slice(a, z) {
+      const b = this.buf, n = b.length;
+      a = Math.max(Math.round(a), this.total - n, 0); z = Math.min(Math.round(z), this.total);
+      const out = new Float32Array(Math.max(0, z - a));
+      for (let i = 0; i < out.length; i++) out[i] = b[(a + i) % n];
+      return out;
+    }
+  }
+  // 16-bit samples for storing a take (half the size of floats, plenty for a voice), and back
+  function toPcm16(x) { const o = new Int16Array(x.length); for (let i = 0; i < x.length; i++) o[i] = Math.max(-32768, Math.min(32767, Math.round(x[i] * 32767))); return o; }
+  function fromPcm16(p) { const o = new Float32Array(p.length); for (let i = 0; i < p.length; i++) o[i] = p[i] / 32767; return o; }
+  // linear resampling, for a take kept at one sample rate and played or read at another (44.1 vs 48 kHz)
+  function resample(x, from, to) {
+    if (from === to || !x.length) return x;
+    const n = Math.max(1, Math.round(x.length * to / from)), o = new Float32Array(n), r = from / to;
+    for (let i = 0; i < n; i++) { const t = i * r, j = Math.floor(t), f = t - j; o[i] = (x[j] || 0) * (1 - f) + (x[Math.min(j + 1, x.length - 1)] || 0) * f; }
+    return o;
+  }
+  // The stretch of microphone audio behind a run of analysed frames: each frame read the `win` samples before the
+  // ring's count `n` at that moment; a little padding either side is trimmed off again when the take is read back.
+  const MINE_PAD_S = 0.12, MINE_MAX_S = 6;
+  function takeSpan(ns, win, fs) {
+    const v = ns.filter(Number.isFinite); if (!v.length) return null;
+    let a = Math.min(...v) - win - MINE_PAD_S * fs, z = Math.max(...v) + MINE_PAD_S * fs;
+    if (z - a > MINE_MAX_S * fs) a = z - MINE_MAX_S * fs;
+    return { a: Math.max(0, Math.round(a)), z: Math.round(z) };
+  }
+
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
@@ -2887,6 +2928,7 @@
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, APP_BUILT, buildLabel, newerBuild, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,
     LYRICS_CACHE_MAX, LYRICS_CACHE_CHARS, lyricsKey, lyricsCacheClean, lyricsCacheCap, lyricsCachePut, songsStamp, songsMerge, songsGoneClean, lyricsCacheDrop, lyricsCacheGet, lyricsCacheFind, lyricsCacheVideo, lyricsCacheTouch, lyricsCacheSort, LYRICS_SORTS, usedAgo, videoClean, ownSongMissing,
     karaokeSearchUrl, youtubeId, youtubeStart, youtubeUrl,
+    SampleRing, toPcm16, fromPcm16, resample, takeSpan, MINE_PAD_S, MINE_MAX_S,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTDSP = api;

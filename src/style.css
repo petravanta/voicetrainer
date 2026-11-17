@@ -1064,3 +1064,6 @@ a { color: var(--accent); }
 .rb-defs .rb4 { stop-color: #e6cf2e; } .rb-defs .rb5 { stop-color: #f0882a; } .rb-defs .rb6 { stop-color: #e2304a; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rb-defs .rb0 { stop-color: #8a63ee; } :root:not([data-theme="light"]) .rb-defs .rb1 { stop-color: #4d82f2; } :root:not([data-theme="light"]) .rb-defs .rb2 { stop-color: #2bbde0; } :root:not([data-theme="light"]) .rb-defs .rb3 { stop-color: #43c873; } :root:not([data-theme="light"]) .rb-defs .rb4 { stop-color: #f0dc4a; } :root:not([data-theme="light"]) .rb-defs .rb5 { stop-color: #f79a42; } :root:not([data-theme="light"]) .rb-defs .rb6 { stop-color: #f04d64; } }
 :root[data-theme="dark"] .rb-defs .rb0 { stop-color: #8a63ee; } :root[data-theme="dark"] .rb-defs .rb1 { stop-color: #4d82f2; } :root[data-theme="dark"] .rb-defs .rb2 { stop-color: #2bbde0; } :root[data-theme="dark"] .rb-defs .rb3 { stop-color: #43c873; } :root[data-theme="dark"] .rb-defs .rb4 { stop-color: #f0dc4a; } :root[data-theme="dark"] .rb-defs .rb5 { stop-color: #f79a42; } :root[data-theme="dark"] .rb-defs .rb6 { stop-color: #f04d64; }
+.tvy-mine { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tvy-mine[hidden], .tvy-mine [hidden] { display: none; }
+.tvy-mine .seg button { font-size: 0.82rem; padding: 5px 10px; }
