@@ -27,6 +27,7 @@ jobs:
           node-version: 20
       - run: node scripts/check-data.js
       - run: node test/dsp.test.js
+      - run: node test/dims.test.js
       - run: node test/examples.test.js
       - run: node test/coach.test.js
       - run: node test/reading.test.js
