@@ -1244,6 +1244,158 @@
     for (let w = 1; w < W; w++) if (ws[w] < ws[w - 1]) ws[w] = ws[w - 1];
     return { ws: ws.map(Math.round), we: we.map(x => (x == null ? null : Math.round(x))), stretches: C, last: W - 1 };
   }
+  // ---------- word edges from the sounds of the words ----------
+  // A word's spelling, turned into a rough sequence of sound classes: V (a vowel, or l r m n w y, which carry voice
+  // the same way), S (a hiss: s z sh ch j), F (a soft rasp: f v th h) and K (a stop: p t k b d g, mostly a short
+  // quiet). Silent letters (a final e, gh) are dropped and repeats merged. Returns [{ c, n: letters }].
+  function soundClasses(word) {
+    let w = String(word).toLowerCase().replace(/[^a-z]/g, '');
+    if (!w) return [];
+    if (w.length > 2) w = w.replace(/([^aeiouy])e$/, '$1').replace(/([^aeiouy])es$/, '$1s');
+    w = w.replace(/tch/g, 'S').replace(/(sh|ch)/g, 'S').replace(/(th|ph)/g, 'F').replace(/gh/g, '').replace(/wh/g, 'w').replace(/ck/g, 'k').replace(/qu/g, 'kw').replace(/x/g, 'kS');
+    const out = [];
+    for (let i = 0; i < w.length; i++) {
+      const ch = w[i], nx = w[i + 1] || '';
+      let c;
+      if (ch === 'S') c = 'S'; else if (ch === 'F') c = 'F';
+      else if ('aeiouylrmnw'.includes(ch)) c = 'V';
+      else if ('sz'.includes(ch) || ch === 'j' || (ch === 'c' && 'eiy'.includes(nx))) c = 'S';
+      else if ('fvh'.includes(ch)) c = 'F';
+      else c = 'K';
+      const last = out[out.length - 1];
+      if (last && last.c === c) last.n++; else out.push({ c, n: 1 });
+    }
+    if (!out.some(s => s.c === 'V')) out.push({ c: 'V', n: 1 }); // "hmm", "shh": still voiced somewhere
+    return out;
+  }
+  // How well a frame's sound fits each class (0 best, more negative worse). k: 'v' voiced, 's' hiss, 'o' other sound,
+  // '.' quiet (the analyzer's frame kinds). P is a pause, G anything at all (noise, a cough, an "um", a re-read).
+  const CLASS_FIT = {
+    V: { v: 0, o: -1.2, s: -2.5, '.': -3 },
+    S: { s: 0, o: -0.8, v: -1.8, '.': -2.5 },
+    F: { o: -0.3, s: -0.4, '.': -0.8, v: -1.5 },
+    K: { '.': 0, o: -0.3, s: -1, v: -1.6 },
+    P: { '.': 0, o: -0.3, s: -2, v: -2.5 }, // a breath before the next phrase is part of the pause
+    G: { '.': -0.6, o: -1, s: -1.1, v: -1.3 },
+  };
+  // the longest a class usually lasts (frames at ~60 a second) before each extra frame costs `over`, and the least
+  const CLASS_DUR = { V: { min: 2, per: 9, max: 40, over: 0.5 }, S: { min: 3, per: 12, max: 18, over: 1.5 }, F: { min: 1, per: 8, max: 10, over: 1.5 }, K: { min: 2, per: 8, max: 10, over: 1.5 } };
+  // Lines the passage up with the recording by those classes (a Viterbi search over one chain of short states per sound
+  // in the passage, so a sound can't run on for seconds), with an optional pause or noise between any two words, noise
+  // before the first word, and the reading free to stop after any word. frames: { t, kd: frame kind } (Run.frames).
+  // Returns { ws, we, last } in the frames' ms (we: where each word's last sound ends), or null when the frames have no
+  // kinds (an older reading).
+  function alignByClass(frames, words, opt = {}) {
+    const fr = (frames || []).filter(f => Number.isFinite(f.t) && f.kd);
+    const T = fr.length;
+    if (T < 20 || T < 0.8 * (frames || []).length || !words.length) return null;
+    const maxW = Math.min(words.length, opt.maxWords || words.length);
+    // states: per word, its sounds' chains; between words a pause state P and a noise state G
+    const S = []; // { c, word, first (first state of a sound), min, idx in chain, last (of chain), opt (sound may be skipped) }
+    const wordFirst = [], wordLast = [];
+    const punct = words.map(w => (/[.!?]["'”’)]*$/.test(w) ? 2 : /[;:,]["'”’)]*$/.test(w) ? 1 : 0));
+    const runOn = punct.map(p => (p === 2 ? -(opt.runOn != null ? opt.runOn : 2) : p === 1 ? -0.8 : 0)); // going straight on after a full stop or comma
+    for (let w = 0; w < maxW; w++) {
+      const segs = soundClasses(words[w]);
+      wordFirst.push(S.length);
+      segs.forEach((g, si) => {
+        const D = CLASS_DUR[g.c], mn = g.c === 'V' ? D.min + (opt.vmin != null ? opt.vmin : 1) * g.n : D.min;
+        const L = Math.min(D.max, Math.max(mn + 2, Math.round(D.per * (g.c === 'V' ? Math.sqrt(g.n) : 1)) + 2));
+        const base = S.length;
+        for (let i = 0; i < L; i++) S.push({ c: g.c, w, seg: si, base, i, L, min: mn, over: D.over, skip: g.c !== 'V' });
+      });
+      wordLast.push(S.length - 1);
+    }
+    const N = S.length, NEG = -1e30;
+    // previous-chain lookups: for the first state of each sound, which sounds can lead into it
+    // after word w: a pause, as a chain of LP states (a pause shorter than that doesn't count as a sentence break),
+    // and a noise state; END: after the last word read
+    const LP = 9, P0 = N, G0 = N + maxW * LP, END = G0 + maxW, START = END + 1;
+    let prev, cur;
+    const nS = START + 1;
+    prev = new Float64Array(nS).fill(NEG); cur = new Float64Array(nS).fill(NEG);
+    const bp = new Int32Array(T * nS).fill(-1); // where each state came from at each frame
+    const fit = (c, k) => CLASS_FIT[c][k] != null ? CLASS_FIT[c][k] : -2;
+    const kindOf = (f) => (f.kd === 'v' ? 'v' : f.kd === 's' ? 's' : f.kd === '.' ? '.' : 'o');
+    // best way into the first sound of word w: from START (w = 0), or from the end of word w-1, its pause or its noise
+    const segEnds = (j) => { // states from which the sound whose first state is j can be left (index >= min-1)
+      const s = S[j]; const r = []; for (let i = Math.max(0, s.min - 1); i < s.L; i++) r.push(s.base + i); return r;
+    };
+    // precompute: for each sound's first state, the list of earlier exits that may enter it (same word: previous sound,
+    // or the one before when that is skippable); and for each word, the exits of its last sound(s)
+    const firstOfSeg = []; for (let j = 0; j < N; j++) if (S[j].i === 0) firstOfSeg.push(j);
+    const segIdx = new Map(firstOfSeg.map((j, k) => [j, k]));
+    const segList = firstOfSeg.map(j => ({ j, w: S[j].w, c: S[j].c, skip: S[j].skip, ends: segEnds(j) }));
+    const wordSegs = Array.from({ length: maxW }, () => []); segList.forEach((g, k) => wordSegs[g.w].push(k));
+    const wordExits = wordSegs.map(ks => { // exits of the word: last sound's ends, or the one before if the last can be skipped
+      const r = []; const last = ks[ks.length - 1]; r.push(...segList[last].ends.map(e => [e, 0]));
+      if (ks.length > 1 && segList[last].skip) r.push(...segList[ks[ks.length - 2]].ends.map(e => [e, -0.7]));
+      return r;
+    });
+    for (let t = 0; t < T; t++) {
+      const k = kindOf(fr[t]), row = t * nS;
+      cur.fill(NEG);
+      const into = (s, v, from) => { if (v > cur[s]) { cur[s] = v; bp[row + s] = from; } };
+      // START: noise or quiet before reading
+      if (t === 0) cur[START] = Math.max(fit('G', k), fit('P', k)); else into(START, prev[START] + Math.max(fit('G', k), fit('P', k)), START);
+      for (let g = 0; g < segList.length; g++) {
+        const sg = segList[g], j = sg.j, e0 = fit(sg.c, k);
+        // stay/advance in the chain
+        for (let i = 1; i < S[j].L; i++) into(j + i, prev[j + i - 1] + e0, j + i - 1);
+        into(j + S[j].L - 1, prev[j + S[j].L - 1] + e0 - S[j].over, j + S[j].L - 1);
+        // enter the chain's first state
+        const enter = (v, from) => into(j, v + e0, from);
+        const w = sg.w, ks = wordSegs[w], pos = ks.indexOf(g);
+        if (pos > 0) {
+          for (const e of segList[ks[pos - 1]].ends) enter(prev[e], e);
+          if (pos > 1 && segList[ks[pos - 1]].skip) for (const e of segList[ks[pos - 2]].ends) enter(prev[e] - 0.7, e);
+        } else {
+          if (w === 0) { if (t === 0) cur[j] = Math.max(cur[j], e0); else enter(prev[START], START); }
+          else {
+            for (const [e, c] of wordExits[w - 1]) enter(prev[e] + c + runOn[w - 1], e);
+            for (let i = 0; i < LP; i++) enter(prev[P0 + (w - 1) * LP + i] + (i < LP - 1 ? runOn[w - 1] : 0), P0 + (w - 1) * LP + i);
+            enter(prev[G0 + w - 1] - 0.5, G0 + w - 1);
+          }
+        }
+        // a skippable first sound: the word can start at its second sound
+        if (pos === 0 && sg.skip && ks.length > 1) {
+          const g2 = segList[ks[1]], j2 = g2.j, e2 = fit(g2.c, k);
+          const ent = (v, from) => into(j2, v + e2 - 0.7, from);
+          if (w === 0) { if (t > 0) ent(prev[START], START); }
+          else { for (const [e, c] of wordExits[w - 1]) ent(prev[e] + c + runOn[w - 1], e); for (let i = 0; i < LP; i++) ent(prev[P0 + (w - 1) * LP + i] + (i < LP - 1 ? runOn[w - 1] : 0), P0 + (w - 1) * LP + i); ent(prev[G0 + w - 1] - 0.5, G0 + w - 1); }
+        }
+      }
+      // pauses and noise after each word, and the end
+      for (let w = 0; w < maxW; w++) {
+        const p = P0 + w * LP, gg = G0 + w, ep = fit('P', k), eg = fit('G', k);
+        // a real pause (the chain's end) after a word with no punctuation is less likely than at a comma or full stop
+        for (let i = 1; i < LP; i++) into(p + i, prev[p + i - 1] + ep - (i === LP - 1 && !punct[w] ? (opt.midPause != null ? opt.midPause : 1.5) : 0), p + i - 1);
+        into(p + LP - 1, prev[p + LP - 1] + ep, p + LP - 1);
+        into(gg, prev[gg] + eg, gg);
+        for (const [e, c] of wordExits[w]) { into(p, prev[e] + c + ep - (punct[w] ? 0 : 0.3), e); into(gg, prev[e] + c + eg - 3, e); into(END, prev[e] + c + Math.max(eg, ep), e); }
+        for (let i = 0; i < LP; i++) into(END, prev[p + i] + Math.max(eg, ep), p + i);
+      }
+      into(END, prev[END] + Math.max(fit('G', k), fit('P', k)), END);
+      [prev, cur] = [cur, prev];
+    }
+    // back from END at the last frame
+    if (prev[END] <= NEG / 2) return null;
+    const path = new Int32Array(T);
+    for (let t = T - 1, s = END; t >= 0; t--) { path[t] = s; s = bp[t * nS + s]; if (s < 0 && t > 0) return null; }
+    const ws = Array(maxW).fill(null), we = Array(maxW).fill(null);
+    let last = -1;
+    for (let t = 0; t < T; t++) {
+      const s = path[t]; if (s >= N) continue;
+      const w = S[s].w;
+      if (ws[w] == null) ws[w] = fr[t].t;
+      we[w] = fr[t].t + 16; if (w > last) last = w;
+    }
+    if (last < 0) return null;
+    // a word the path went straight past (every sound skipped can't happen, so this is only words never reached)
+    for (let w = 1; w <= last; w++) if (ws[w] == null) ws[w] = we[w - 1];
+    for (let w = 1; w <= last; w++) if (we[w] == null) we[w] = ws[w];
+    return { ws: ws.slice(0, last + 1).map(Math.round), we: we.slice(0, last + 1).map(Math.round), last };
+  }
   // Tag each frame with the word whose stretch it falls in (the realigned edges), for the word by word report.
   function retagFrames(frames, ws) {
     let k = 0;
@@ -2680,7 +2832,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

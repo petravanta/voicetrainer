@@ -1089,7 +1089,7 @@
     if (!gated && Run.on && Spot.cur) tvyPush(TvY.spot, fr);
     else if (d && TvY.drill.el) tvyPush(TvY.drill, fr);
     if (Run.on && !gated) Run.frames.push({ i: Reader.idx, f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frRes, u: frU, miss: frMiss, loose: frLoose || undefined, sib: frSib, k: Reader.idx === frWord ? frVowel : null,
-      t: performance.now(), e: fr.ve, a: Math.round(200 * Math.log10(fr.rms + 1e-9)) / 10, F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: frWord });
+      t: performance.now(), kd: fr.kind === 'voiced' ? 'v' : fr.kind === 'fricative' ? 's' : fr.kind === 'silence' ? '.' : 'o', e: fr.ve, a: Math.round(200 * Math.log10(fr.rms + 1e-9)) / 10, F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: frWord });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
     else if (dd) updateDemo(dd);
@@ -4310,6 +4310,7 @@
     $('reader').classList.remove('run');
     $('reader-finish').hidden = true;
   }
+  const ALIGN_ROOM = 1.15; // how far past the live highlight's last word the reading may really have got
   function finishReading() {
     if (!Run.on) return;
     if (Spot.cur) return finishSpot();
@@ -4320,13 +4321,19 @@
     // the timeline counts from the recording's start, on the frames' clock moved back by the analysis lag
     const t0 = RunAudio.mr && RunAudio.t0 != null ? RunAudio.t0 : (Run.frames.length ? Run.frames[0].t : 0);
     let fl = Run.frames.map(f => (f.t != null ? Object.assign({}, f, { t: f.t - FRAME_LAG_MS() }) : f));
-    // word edges placed again from the sound now the whole reading is there (see D.alignWords); the neural voice's
-    // reading of the passage, when there is one, is a light template. The words read are the ones the speech check
-    // heard up to, when it's on; otherwise the alignment finds where you stopped too, since the live highlight can
-    // fall well behind (its last word is only a first guess). Coverage follows whichever reached further.
+    // word edges placed again from the sound now the whole reading is there (D.alignByClass): each word's spelling
+    // becomes a chain of sound classes matched against what each moment of the recording sounds like, with pauses and
+    // noise given their own catch-all so they can't take words. The words read are the ones the speech check heard up
+    // to, when it's on; otherwise the live highlight's last word, with room for it to have fallen behind (it can lag),
+    // caps how far the alignment may go and it finds where you stopped itself. Coverage follows whichever reached further.
     const clip = Clips.pickNow(t), heardTo = sm && !sm.lost && sm.last >= 0 ? sm.last : -1, script = Reader.words.map(w => w.text);
-    const al = live.reach >= 0 || heardTo >= 0 ? D.alignWords(fl.filter(f => f.t >= t0), heardTo >= 0 ? script.slice(0, heardTo + 1) : script,
-      { ref: clip ? clip.words : null, free: heardTo < 0, guess: live.reach + 1 }) : null;
+    const fa = fl.filter(f => f.t >= t0);
+    let al = null;
+    if (live.reach >= 0 || heardTo >= 0) {
+      const maxWords = heardTo >= 0 ? heardTo + 1 : Math.round((live.reach + 1) * ALIGN_ROOM) + 3;
+      al = D.alignByClass(fa, heardTo >= 0 ? script.slice(0, heardTo + 1) : script, { maxWords })
+        || D.alignWords(fa, heardTo >= 0 ? script.slice(0, heardTo + 1) : script, { ref: clip ? clip.words : null, free: heardTo < 0, guess: live.reach + 1 });
+    }
     if (al) fl = D.retagFrames(fl, al.ws);
     const reach = al ? Math.max(al.last, heardTo) : Math.max(live.reach, sm ? sm.last : -1);
     const mw = al ? Object.assign(D.missedWords(fl, Reader.words.length), { reach }) : live;
@@ -4532,7 +4539,7 @@
       <p class="small muted">Tap a vowel to practise it.${infoHtml('Why some vowels are missing', 'Short vowels in quick speech are rarely held long enough to score, so some may be missing.')}</p></div>`;
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
-  // Word edges are placed from the recording after the reading (D.alignWords), so a word's numbers can still spill a little into its neighbours.
+  // Word edges are placed from the recording after the reading (D.alignByClass), so a word's numbers can still spill a little into its neighbours.
   // why a word of a reading has no resonance, in a few words (a missing score is never drawn as a low one)
   function noResWhy(text, pitch, gone) {
     if (gone === 'miss') return 'possibly missed, the word check did not hear it';
@@ -4619,7 +4626,7 @@
         + `<text class="wr-word${resOff(r) ? ' off' : ''}${gone === 'miss' ? ' miss' : r == null && (gone === 'end' || D.wordVowels(t, PRON).why === 'function') ? ' fn' : ''}" x="${f1(xs[i])}" y="${LT}" text-anchor="middle">${escapeHtml(t)}</text></g>`;
     });
     svg += `<text class="wr-lane" x="6" y="${PT - 8}">Pitch, goal ${plo}-${phi} Hz</text><text class="wr-lane" x="6" y="${RT - 8}">Resonance, goal ${lo}-${hi}</text>`;
-    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "Once you finish, each word's edges are found again in the recording, from pauses, dips in loudness and breaks in voicing (and the neural voice's timing, lightly, on the built-in passages). It's an estimate, so a word's numbers can still spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${rec.miss && rec.miss.length ? ` ${MISS_KEY}possibly missed` : ''}${ws.some((w, i) => w[2] == null && !['miss', 'end'].includes(wordGone(rec, i)) && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}${ref ? ` <i class="ref-key"></i>${RefRead.who(ref)}` : ''}</span></div>
+    return `<div class="wr"><div class="section-head"><h4>Word by word${infoHtml('How word by word works', "Once you finish, each word's edges are found again in the recording: its spelling is matched, sound by sound, against what each moment sounds like (vowel, hiss, other sound, quiet), with pauses and stray noise kept apart so they can't take words. It's an estimate, usually within a tenth or two of a second, so a word's numbers can still spill a little into its neighbours. Vowels that hold still for a moment give a word its resonance. A word whose vowels were too short to hold still is read from a few single moments instead; its bar is paler and rough. A crossed circle means no reading. Small linking words (the, of, a, is) are said too quickly to score at all, so they are shown in grey with no mark.${gatesNote(rec.gates)}")}</h4><span class="muted small"><span class="wr-key off"></span>off your goal${ws.some(w => w[4] && w[2] != null) ? ' <span class="wr-key rough"></span>rough' : ''}${rec.miss && rec.miss.length ? ` ${MISS_KEY}possibly missed` : ''}${ws.some((w, i) => w[2] == null && !['miss', 'end'].includes(wordGone(rec, i)) && D.wordVowels(w[0], PRON).why !== 'function') ? ' <svg class="wr-key-none" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4"/><line x1="3" y1="9" x2="9" y2="3"/></svg>no reading' : ''}${ref ? ` <i class="ref-key"></i>${RefRead.who(ref)}` : ''}</span></div>
       <p class="small muted">Top line: pitch of each word (goal ${plo}-${phi} Hz). Bars: resonance of each word (goal ${lo}-${hi}). The shaded bands are your goal.${ref ? ` Dashed: the ${RefRead.who(ref)} on the same words.` : ''}</p>${missLineHtml(rec)}
       <div class="wr-scroll"><svg class="wr-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Pitch and resonance for each word of the passage">${svg}</svg></div>
       <p class="small" id="wr-read" aria-live="polite">Tap a word for its numbers.</p></div>`;
