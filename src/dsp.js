@@ -292,6 +292,11 @@
   // they were. When F1 really sits on the first harmonic (a closed "ee" at a high pitch) the cut can't undo that:
   // the score's own F1 rules (pitchLimited, f1OnPitch) still apply there.
   const H1_KEEP = 4, H1_Q = 2;
+  // the cut is used freely under H1_CUT_MAX Hz of pitch; above it only when the plain "F1" sat under F1_ON_PITCH_LOCK x
+  // the pitch and the cut finds F1 at H1_CLEAR x the pitch or more (measured 2026-11-17 on synthetic "ee" at 200-320 Hz:
+  // the free cut read a 300 Hz F1 as 360-500; with this rule 260-370, as before the cut, and breathy voices under
+  // 200 Hz keep the gain: F1 error 27% -> 7%)
+  const H1_CUT_MAX = 200, F1_ON_PITCH_LOCK = 1.35, H1_CLEAR = 2.5;
   function tameH1(y, fs, f0, h1h2) {
     if (!(f0 > 0) || !Number.isFinite(h1h2) || h1h2 <= H1_KEEP) return y;
     const A = Math.pow(10, -(h1h2 - H1_KEEP) / 40), w0 = 2 * Math.PI * f0 / fs, al = Math.sin(w0) / (2 * H1_Q), cw = Math.cos(w0);
@@ -355,6 +360,7 @@
   // under 1.5x the pitch is past where the synthetic voice reads F1 within 20 points, so it stays as a guard.
   const F1_ON_PITCH = 1.5;
   function f1OnPitch(F, f0) { return f0 > 0 && F[0] < F1_ON_PITCH * f0; }
+  function pitchLimitHz(v) { return Math.round(F1_PITCH_RATIO * Math.sqrt(v.M[0] * v.W[0])); }
   function pitchLimited(v, f0) { return f0 > 0 && f0 > F1_PITCH_RATIO * Math.sqrt(v.M[0] * v.W[0]); }
   // Rough best-case spread of a single reading, in score points: each formant read to within F0/4 Hz,
   // (Kent & Vorperian 2018), passed through the same weighted fit. Grows with pitch; never below a 100 Hz voice.
@@ -644,7 +650,11 @@
       const zA = [COACH_BAND[g][0] / 100 - sl, COACH_BAND[g][1] / 100 + sl];
       const row = { i, hz: F[i], score: resScore(a), zone: zA.map(resScore), need: 0, pts: 0, toHz: null, dHz: 0, pct: 0, skip: null };
       if (!(F[i] > 0) || !Number.isFinite(a)) row.skip = 'range';
-      else if (i === 0 && aside === 'pitch') row.skip = 'pitch';
+      else if (i === 0 && aside === 'pitch') {
+        row.skip = 'pitch'; row.f0 = Math.round(f0);
+        // which rule: the pitch past half this vowel's typical F1, or an "F1" under 1.5x the pitch (the harmonic itself)
+        row.pitchWhy = pitchLimited(v, f0) ? 'high' : 'onpitch'; row.limitHz = pitchLimitHz(v);
+      }
       else if (a < SCORE_RANGE[0] - sl || a > SCORE_RANGE[1] + sl) row.skip = 'range';
       // F1 alone disagreeing with F2 and F3 is still shown (it may be a real jaw or throat difference, the one thing
       // to dial in), but marked unsure and never picked as the one to fix first, since it is as likely a misreading
@@ -1016,10 +1026,16 @@
         const lag = typeof this.lagHz === 'function' ? this.lagHz(out.f0) : this.lagHz;
         // a first harmonic far above the second is turned down first, or LPC spends its F1 on it (see tameH1)
         const h12 = Number.isFinite(out.h1h2) ? out.h1h2 : voiceQuality(y, this.fsd, out.f0).h1h2;
-        const yt = tameH1(y, this.fsd, out.f0, h12);
-        if (yt !== y) out.h1Cut = Math.round(h12 - H1_KEEP);
-        const all = formants(yt.subarray(yt.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8);
-        const fm = pickFormants(all);
+        const read = (z) => pickFormants(formants(z.subarray(z.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8));
+        let fm = read(y);
+        if (h12 > H1_KEEP) {
+          // From H1_CUT_MAX up, a closed vowel's F1 can sit on the first harmonic itself, and cutting the harmonic then
+          // cuts the F1 with it: the next pole up gets read (a held "ee" at ~300 Hz read 450-650). There the cut is only
+          // kept when the plain reading had F1 on the pitch and the cut finds one well clear of it (an open vowel).
+          const tamed = read(tameH1(y, this.fsd, out.f0, h12));
+          const lockedOnPitch = !(fm.length && fm[0].f > F1_ON_PITCH_LOCK * out.f0);
+          if (out.f0 < H1_CUT_MAX || (lockedOnPitch && tamed.length && tamed[0].f >= H1_CLEAR * out.f0)) { fm = tamed; out.h1Cut = Math.round(h12 - H1_KEEP); }
+        }
         if (fm.wideF1) out.wideF1 = true;
         if (fm.length >= 3) {
           this.hist.push(fm.slice(0, 3).map(q => q.f));
@@ -1807,10 +1823,11 @@
       a = Math.max(0, a - 3); b = Math.min(frames.length, b + 3);
     }
     const fr = frames.slice(a, b), cols = fr.length, db = new Float32Array(cols * rows).fill(-200);
-    const fm = [], cog = [], sample = [];
+    const fm = [], cog = [], sample = [], f0 = [];
     fr.forEach((f, c) => {
       fm.push(f.kind === 'voiced' && f.formants ? f.formants.slice(0, 3) : f.whisperF ? [null, f.whisperF[1], f.whisperF[2]] : null);
       cog.push(f.kind === 'fricative' && f.cog > 0 ? f.cog : null);
+      f0.push(f.kind === 'voiced' && f.f0 > 0 ? f.f0 : null);
       const col = wide ? f.wide : f.spec;
       if (!sounding(f) || !col) return;
       const top = wide ? WIDE_HZ : (f.fsd || 11025) / 2, bin = top / (wide ? col.length : col.length - 1);
@@ -1825,23 +1842,27 @@
     });
     const top = sample.length ? quantile(sample, 0.99) : 0, v = new Uint8Array(cols * rows);
     for (let i = 0; i < db.length; i++) v[i] = db[i] <= -199 ? 0 : Math.max(0, Math.min(255, Math.round((db[i] - top + 60) / 60 * 255)));
-    return { rows, cols, fmax, wide, v, fm, cog, dur: cols * 1000 / fps };
+    return { rows, cols, fmax, wide, v, fm, cog, f0, dur: cols * 1000 / fps };
   }
   // What a strip read: median F1-F3 over its marked columns (null with fewer than 5) and the hiss's median centre.
   function stripReads(st) {
     const F = [0, 1, 2].map(i => { const a = st.fm.filter(f => f && f[i] > 0).map(f => f[i]); return a.length >= 5 ? median(a) : null; });
-    const c = st.cog.filter(x => x > 0);
-    return { F, cog: c.length >= 5 ? median(c) : null };
+    const c = st.cog.filter(x => x > 0), p = (st.f0 || []).filter(x => x > 0);
+    return { F, cog: c.length >= 5 ? median(c) : null, f0: p.length >= 5 ? median(p) : 0 };
   }
   // Target vs you in numbers: each formant (and the hiss) yours against the target's, as a ratio, and the one that
   // differs most (gaps under 4% don't count; in a vowel that is about one tenth of the way from a typical man to a
   // typical woman). Returns { rows: [{ k: 'F1'|'F2'|'F3'|'cog', t, y, r }], big }.
-  function compareStrips(tgt, you) {
+  // opt.vowel: the vowel being made; your F1 is then marked aside (and never the biggest difference) where the score
+  // sets it aside: your pitch past half its typical F1, or an "F1" under 1.5x your pitch.
+  function compareStrips(tgt, you, opt = {}) {
     const a = stripReads(tgt), b = stripReads(you), rows = [];
     [0, 1, 2].forEach(i => { if (a.F[i] && b.F[i]) rows.push({ k: 'F' + (i + 1), t: a.F[i], y: b.F[i], r: b.F[i] / a.F[i] }); });
     if (a.cog && b.cog) rows.push({ k: 'cog', t: a.cog, y: b.cog, r: b.cog / a.cog });
+    const v = opt.vowel, r1 = rows.find(x => x.k === 'F1');
+    if (v && r1 && b.f0 && (pitchLimited(v, b.f0) || f1OnPitch(b.F, b.f0))) { r1.aside = true; r1.f0 = Math.round(b.f0); r1.limitHz = pitchLimitHz(v); }
     let big = null;
-    for (const x of rows) if (Math.abs(Math.log(x.r)) >= Math.log(1.04) && (!big || Math.abs(Math.log(x.r)) > Math.abs(Math.log(big.r)))) big = x;
+    for (const x of rows) if (!x.aside && Math.abs(Math.log(x.r)) >= Math.log(1.04) && (!big || Math.abs(Math.log(x.r)) > Math.abs(Math.log(big.r)))) big = x;
     return { rows, big };
   }
   // Shorter vowels: in a reading, a frame whose formants didn't hold still is still read on its own (its own 30 ms,
@@ -2921,7 +2942,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

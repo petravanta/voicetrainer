@@ -1460,7 +1460,7 @@
   const foPctN = (r) => Math.max(1, Math.round(Math.abs(r.pct) * 100));
   const foHz = (r) => `${r.dHz > 0 ? '+' : '−'}${Math.round(Math.abs(r.dHz))} Hz`;
   function foVal(r, live) {
-    if (r.skip === 'pitch') return 'set aside (pitch)';
+    if (r.skip === 'pitch') return r.pitchWhy === 'high' ? `set aside: pitch ${r.f0} Hz (over ${r.limitHz})` : r.pitchWhy === 'onpitch' ? `set aside: on your pitch (${r.f0} Hz)` : 'set aside (pitch)';
     if (r.skip) return r.skip === 'none' ? '--' : "couldn't measure";
     if (!r.need) return live ? `✓ ${Math.round(r.hz)} Hz` : '✓ in zone';
     const q = r.unsure ? '?' : '';
@@ -1470,7 +1470,7 @@
   // one sentence on what to change, for the chosen formant (or the furthest off, or the whole tract)
   function foSay(off, live) {
     if (!off || off.rows.every(r => r.skip)) return live ? 'Hold a vowel to see F1, F2 and F3 one by one.' : '';
-    const one = (r) => r.skip === 'pitch' ? `${foName(r.i)} is set aside: at this pitch it can't be read reliably.`
+    const one = (r) => r.skip === 'pitch' ? (r.pitchWhy === 'high' ? `${foName(r.i)} is set aside: your pitch (${r.f0} Hz) is over ${r.limitHz} Hz, half this vowel's typical F1, where the harmonics are too far apart to show F1. Go a little lower to have it read.` : r.pitchWhy === 'onpitch' ? `${foName(r.i)} is set aside: what was found sits on your pitch (${r.f0} Hz), so it's the voice's own tone, not the jaw.` : `${foName(r.i)} is set aside: at this pitch it can't be read reliably.`)
       : r.skip ? `${foName(r.i)} couldn't be measured${live ? ' on this vowel' : ''}.`
       : !r.need ? `${foName(r.i)} is in the goal zone${live ? '. Keep it there' : ''}.`
       : `${foName(r.i)} needs to go ${r.need > 0 ? 'up' : 'down'} about ${foPctN(r)}%${live ? ` (${foHz(r)})` : ''}: ${FO_MOVE[r.i][r.need > 0 ? 0 : 1]}.${r.unsure ? ' F1 alone disagrees with F2 and F3. That is usually how open your jaw is, not your size (a tight, high "ee" lowers F1 in any voice, and the published averages disagree on it), so it is left out of the score but is yours to work on.' : ''}`;
@@ -3142,7 +3142,7 @@
       setTimeout(() => { if (T.cfg !== cfg || !T.frozen) return; T.youX = ring.slice(span.a, span.z); T.youFs = ring.fs; tvyPaintMine(T); }, 250);
     }
   }
-  function tvyFrozenCmp(T) { const t = tvyTgt(T); T.cmp = T.frozen && t && T.you && T.you.cols ? D.compareStrips(t, T.you) : null; }
+  function tvyFrozenCmp(T) { const t = tvyTgt(T); T.cmp = T.frozen && t && T.you && T.you.cols ? D.compareStrips(t, T.you, { vowel: T.cfg.def && T.cfg.def.type === 'vowel' ? D.VOWEL_BY_KEY[T.cfg.def.vowel] : null }) : null; }
   // the line under the pictures: the formant that differs most, in plain words
   function tvySay(T) {
     if (!T.cfg) return '';
@@ -3153,7 +3153,7 @@
     if (!c.big) return T.cfg.spot ? 'Across the phrase, your formants sit within 4% of the reference.' : tvyMineOn(T) ? 'Your formants sit within 4% of your kept take. Same sound again.' : of ? `Your formants sit within 4% of ${of}. Close match.` : 'Your formants sit within 4% of the target. Close match.';
     const b = c.big, fem = state.goal === 'fem', pc = Math.round(Math.abs(b.r - 1) * 100), up = b.r > 1;
     const past = T.cfg.goalish && !mine && (fem ? up : !up) ? ', past the typical voice, which still counts for your goal' : '';
-    const all = c.rows.length > 1 ? ` (${c.rows.map(r => `${r.k === 'cog' ? 'hiss' : r.k} ${r.r >= 1 ? '+' : '−'}${Math.round(Math.abs(r.r - 1) * 100)}%`).join(', ')})` : '';
+    const all = c.rows.length > 1 ? ` (${c.rows.map(r => r.aside ? `F1 set aside at ${r.f0} Hz` : `${r.k === 'cog' ? 'hiss' : r.k} ${r.r >= 1 ? '+' : '−'}${Math.round(Math.abs(r.r - 1) * 100)}%`).join(', ')})` : '';
     return `${T.cfg.spot ? 'Across the phrase, the' : of ? `Biggest difference from ${of}:` : 'Biggest difference:'} ${TVY_NAMES[b.k]}${T.cfg.spot ? ' sits' : ','} ${Math.round(b.y)} Hz against ${Math.round(b.t)} Hz, ${pc}% ${up ? 'higher' : 'lower'}${past}.${all}`;
   }
   function tvyAttach(T, host) {
