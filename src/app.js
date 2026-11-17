@@ -924,6 +924,7 @@
     if (pitchBuf.length > LIVE_KEEP) { pitchBuf.shift(); pitchT.shift(); tickBuf.shift(); }
     // While a reference example plays (and briefly after), show it but don't score it as the user.
     const gated = !!exSrc || !!Reader.tts || !!Reader.synth || performance.now() - exampleEnd < 400;
+    if (!gated && state.drill && state.drill.result && mode !== 'sing') watchRetake(state.drill, fr, now);
     const d = !gated && state.drill && !state.drill.result && mode !== 'sing' ? state.drill : null; // an open exercise doesn't grade your singing
     const dd = exSrc && state.drill && state.drill.demoOn ? state.drill : null; // a demo is playing for this exercise
     // your own voice takes the panel back from the demo
@@ -1186,6 +1187,28 @@
     renderDrillPanel();
     drawVowelChart();
   }
+  // After a take the microphone stays live: pause, then make the sound again, and the next take starts by itself
+  // (there's no "try again" button to press). The pause is what separates takes, so a sound you're still holding
+  // when a take finishes doesn't start the next one. The last take's result stays up until the new one replaces it.
+  const RETAKE_QUIET_MS = 500;
+  const takeSound = (def, fr) => def.type === 'whisper' ? !!fr.whisperF || fr.kind === 'voiced'
+    : def.type === 'sib' ? fr.kind === 'fricative' : def.type === 'word' ? fr.kind === 'voiced' || fr.kind === 'fricative' : fr.kind === 'voiced';
+  function watchRetake(d, fr, now) {
+    if (d.demoOn) return;
+    if (!takeSound(d.def, fr)) { if (d.quietAt == null) d.quietAt = now; return; }
+    if (d.quietAt != null && now - d.quietAt >= RETAKE_QUIET_MS) newTake(d);
+    else d.quietAt = null;
+  }
+  function newTake(d) {
+    const box = $('drill-result'), last = box && box.querySelector('.result') ? box.innerHTML : '';
+    selectDrill(d.def, true);
+    state.drill.prev = d.result;
+    const nb = $('drill-result');
+    if (nb && last) { nb.innerHTML = '<p class="eyebrow"><span>Last take</span></p>' + last; nb.classList.add('prev'); }
+    const pl = state.plan, s = planStep();
+    if (pl && pl.status === 'active' && s && s.def.id === d.def.id && s.after != null) addPlanNext(pl);
+  }
+  const againNote = () => Object.assign(document.createElement('span'), { className: 'again-note', textContent: ' Pause, then go again any time: the next take starts by itself.' });
   function drillInstruction(def) {
     if (def.type === 'vowel') {
       const v = D.VOWEL_BY_KEY[def.vowel];
@@ -1244,11 +1267,10 @@
       </div>
       <figure class="tvy" id="tvy"></figure>
       <div id="drill-result"></div>
-      <div><button type="button" class="btn" id="drill-again" hidden>Try this sound again</button></div>`;
+      <div id="drill-actions"></div>`;
     p.querySelector('.drill-title').textContent = d.def.title;
     p.querySelector('.drill-help').textContent = drillInstruction(d.def);
     $('drill-msg').textContent = state.running ? 'Listening...' : 'Start the microphone (or analyze a recording) to begin.';
-    $('drill-again').addEventListener('click', () => selectDrill(d.def));
     $('ex-compare').addEventListener('click', () => (exSrc && $('ex-compare').textContent.startsWith('Stop') ? stopExample() : playExample(d.def, 'compare')));
     renderProof($('proof'), d.def);
     renderExampleNote();
@@ -1850,14 +1872,13 @@
       </div>
       ${def.aim === 'band' ? '<div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>' : ''}
       <p class="drill-msg" id="drill-msg"></p>
-      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div id="drill-actions"></div>
       <div class="proof" id="proof" hidden></div>`;
     renderProof($('proof'), def);
     p.querySelector('.drill-title').textContent = def.title;
     shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
-    $('drill-again').addEventListener('click', () => selectDrill(def));
     $('drill-msg').textContent = state.running ? 'Listening...' : 'Start the microphone to see your breathiness live.';
     d.cue = { key: null, at: 0, pending: null, pendingAt: 0, eased: {} };
     updateBreath(d, true);
@@ -1911,8 +1932,8 @@
     state.lastScores[def.id] = score;
     session.drills.push({ id: def.id, label: def.cue, score: Math.round(score), at: d.result.at, kind: 'breath' });
     renderDrillGrid(); renderSession();
-    $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Do it again, or try another exercise.`;
-    $('drill-again').hidden = false;
+    $('drill-msg').textContent = `Done: three seconds in the zone. Your median breathiness was ${Math.round(score)} (${breathWord(score)}). Or try another exercise.`;
+    $('drill-msg').append(againNote());
     recordPractice(session.drills[session.drills.length - 1]);
   }
 
@@ -2094,7 +2115,7 @@
       </div>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
-      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>`;
+      <div id="drill-actions"></div>`;
     p.querySelector('.drill-title').textContent = def.title;
     p.querySelector('.pr-say').textContent = def.say;
     shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
@@ -2102,7 +2123,6 @@
     for (const t of (typeof def.steps === 'function' ? def.steps(fem) : def.steps)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
     renderProof($('proof'), def);
-    $('drill-again').addEventListener('click', () => selectDrill(def));
     d.passes = 0; d.step = 0; d.last = null; d.best = null;
     $('pr-cue').textContent = state.running ? `Say: ${def.say}` : 'Start the microphone, then say the phrase.';
     $('drill-msg').textContent = '';
@@ -2174,8 +2194,8 @@
     state.lastScores[def.id] = d.best;
     session.drills.push({ id: def.id, label: def.cue, score: Math.round(d.best * 10) / 10, at: d.result.at, kind: 'prosody' });
     renderDrillGrid(); renderSession();
-    $('drill-msg').textContent = def.pair ? 'Done: a clear fall and a clear rise on the same words. Do it again, or try another exercise.' : `Done: ${NEED_PROS} phrases on target. Do it again, or try another exercise.`;
-    $('drill-again').hidden = false;
+    $('drill-msg').textContent = def.pair ? 'Done: a clear fall and a clear rise on the same words. Or try another exercise.' : `Done: ${NEED_PROS} phrases on target. Or try another exercise.`;
+    $('drill-msg').append(againNote());
     recordPractice(session.drills[session.drills.length - 1]);
   }
 
@@ -2202,13 +2222,12 @@
       <figure class="tvy" id="tvy"></figure>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
-      <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div class="btn-row"><button type="button" class="btn" id="iso-reset">Set a new starting point</button></div>
       <div class="proof" id="proof" hidden></div>`;
     p.querySelector('.drill-title').textContent = def.title;
     shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
-    $('drill-again').addEventListener('click', () => selectDrill(def));
     $('iso-reset').addEventListener('click', () => { d.base = null; d.isoFr = []; d.inZone = 0; d.best = 0; d.eased = {}; tvyReset(TvY.drill); updateIso(d, true); });
     d.base = null; d.best = 0; d.eased = {};
     renderProof($('proof'), def);
@@ -2294,7 +2313,7 @@
       : def.kind === 'larynx' ? `Done. The jaw, tongue and lips readings all moved together, by up to ${pct}%: the feedback is tracking your larynx.`
         : def.kind === 'slide' ? `Done. Your resonance moved by up to ${pct}% while your pitch stayed within ${D.ISO_RULES.slide.hold} semitones of where you started.`
         : `Done. The ${def.kind} reading (${['F1', 'F2', 'F3'][ISO_MAIN[def.kind][0]]}) moved by up to ${pct}% while the others held steadier: the feedback is tracking your ${def.kind}.`;
-    $('drill-again').hidden = false;
+    $('drill-msg').append(againNote());
     recordPractice(session.drills[session.drills.length - 1]);
   }
 
@@ -2325,14 +2344,13 @@
       <figure class="tvy" id="tvy"></figure>
       <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
       <p class="drill-msg" id="drill-msg"></p>
-      <div><button type="button" class="btn" id="drill-again" hidden>Do this exercise again</button></div>
+      <div id="drill-actions"></div>
       <div class="proof" id="proof" hidden></div>`;
     p.querySelector('.drill-title').textContent = def.title;
     shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
     const ol = p.querySelector('.breath-steps');
     for (const t of def.steps(state.goal === 'fem')) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
     $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
-    $('drill-again').addEventListener('click', () => selectDrill(def));
     d.whFr = []; d.demoWh = []; d.legs = 0; d.span = 0; d.whScores = []; d.eased = {}; d.whc = null;
     renderProof($('proof'), def);
     tvyMountDrill($('tvy'), def);
@@ -2421,7 +2439,7 @@
     $('drill-msg').textContent = def.kind === 'siren'
       ? `Done: two full slides up and down, across ${score}% of brightness, with no voice. Try it again a little wider, or move on to the whispered "kee".`
       : `Done: two seconds in the zone, whispered. Your median was ${score}. Now say "kee" with a light voice and keep the same space.`;
-    $('drill-again').hidden = false;
+    $('drill-msg').append(againNote());
     recordPractice(session.drills[session.drills.length - 1]);
   }
   // the siren's brightness line, in percent around the middle of what you have whispered so far
@@ -2678,7 +2696,7 @@
     renderSession();
     const bar = $('drill-prog'); if (bar) bar.style.width = '100%';
     $('drill-msg').textContent = 'Done. Your result is below.';
-    $('drill-again').hidden = false;
+    $('drill-msg').append(againNote());
     planDrillFinished(def, res);
     recordPractice(session.drills[session.drills.length - 1]);
   }
@@ -2757,8 +2775,11 @@
     if (!pl || pl.status !== 'active' || !s || s.def.id !== def.id) return;
     s.after = res.score;
     renderPlan();
-    const box = $('drill-again') && $('drill-again').parentElement;
-    if (box) {
+    addPlanNext(pl);
+  }
+  function addPlanNext(pl) {
+    const box = $('drill-actions');
+    if (box && !$('plan-next')) {
       const nb = document.createElement('button');
       nb.type = 'button'; nb.className = 'btn primary'; nb.id = 'plan-next';
       nb.textContent = pl.idx + 1 < pl.steps.length ? 'Next step' : 'See results';
@@ -2859,6 +2880,7 @@
   }
   function renderDrillResult(res) {
     const box = $('drill-result');
+    box.classList.remove('prev');
     const parts = [];
     const pill = (s) => `<span class="pill ${onTarget(s) ? 'good' : 'warn'}">${onTarget(s) ? 'on target' : 'off target'}</span>`;
     if (res.vowelScore != null) {
