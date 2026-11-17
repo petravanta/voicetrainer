@@ -1382,7 +1382,7 @@
   const FO_ROLE = ['jaw', 'tongue', 'lips, larynx'];
   const FO_MOVE = [['open the jaw a little', 'close the jaw slightly, or open the throat'], ['tongue further forward', 'tongue further back'],
     ['less lip rounding, larynx up', 'round the lips slightly, larynx lower']];
-  const FO_HELP = 'Each bar is one formant on the same 0-100 scale as the resonance score, read against the averages for the vowel you are on: the dashed box is your goal zone and the marker is you. F1 follows mostly the jaw and throat, F2 the tongue (front or back), F3 the lips and larynx height. The numbers say how much that formant would need to move to reach the zone, in % and Hz. F1 gets a wider zone because it swings with jaw opening and is the hardest to measure: above about 200 Hz of pitch it is set aside, and when it alone disagrees with F2 and F3 it is marked with a ? and never picked first. Pick F1, F2 or F3 to work on just that one; Worst follows whichever is furthest off.';
+  const FO_HELP = 'Each bar is one formant on the same 0-100 scale as the resonance score, read against the averages for the vowel you are on: the dashed box is your goal zone and the marker is you. F1 follows mostly the jaw and throat, F2 the tongue (front or back), F3 the lips and larynx height. The numbers say how much that formant would need to move to reach the zone, in % and Hz. F1 gets a wider zone because it swings with jaw opening and is the hardest to measure: above about 195-210 Hz of pitch (on "ee" and "oo"; higher on open vowels) it is set aside, and when it alone disagrees with F2 and F3 it is marked with a ? (usually jaw opening rather than size) and left out of the score and the first pick, but still shown. Pick F1, F2 or F3 to work on just that one; Worst follows whichever is furthest off.';
   let foFocus = 'all';
   try { const f = localStorage.getItem(FO_KEY); if (FO_PICKS.some(p => p[0] === f)) foFocus = f; } catch (e) {}
   // the formant the feedback is about: one picked, the worst when asked for, or null for all three
@@ -1406,7 +1406,7 @@
     const one = (r) => r.skip === 'pitch' ? `${foName(r.i)} is set aside: at this pitch it can't be read reliably.`
       : r.skip ? `${foName(r.i)} couldn't be measured${live ? ' on this vowel' : ''}.`
       : !r.need ? `${foName(r.i)} is in the goal zone${live ? '. Keep it there' : ''}.`
-      : `${foName(r.i)} needs to go ${r.need > 0 ? 'up' : 'down'} about ${foPctN(r)}%${live ? ` (${foHz(r)})` : ''}: ${FO_MOVE[r.i][r.need > 0 ? 0 : 1]}.${r.unsure ? ' F1 alone disagrees with F2 and F3, so this may be a misreading.' : ''}`;
+      : `${foName(r.i)} needs to go ${r.need > 0 ? 'up' : 'down'} about ${foPctN(r)}%${live ? ` (${foHz(r)})` : ''}: ${FO_MOVE[r.i][r.need > 0 ? 0 : 1]}.${r.unsure ? ' F1 alone disagrees with F2 and F3. That is usually how open your jaw is, not your size (a tight, high "ee" lowers F1 in any voice, and the published averages disagree on it), so it is left out of the score but is yours to work on.' : ''}`;
     const ch = foChosen(off);
     if (ch != null) return one(off.rows[ch]);
     if (foFocus === 'worst') return 'Every formant measured is in the goal zone.';
