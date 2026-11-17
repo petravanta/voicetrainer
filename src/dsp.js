@@ -342,10 +342,17 @@
   // accuracy is about F0/4 at best; Shadle, Nam & Whalen 2016: every automatic method has this bias). Measured on
   // the synthetic voice, a male-average tract's "ee" scored ~40 at 220 Hz from F1 alone. So above this share of
   // the vowel's typical F1 the resonance score is read from F2 and F3 only, which hold up far better.
-  const F1_PITCH_RATIO = 0.45;
+  // Re-measured 2026-11 after tameH1 (12 vowels, both tracts, firm and breathy, 110-320 Hz): with the typical F1 at 2x
+  // the pitch or more, the full fit's score is off 2-3 points (median, 80th percentile 5-6), the same as F2 and F3 alone;
+  // under 1.75x it is off 5-18 (F2 and F3 alone: 2-3). It was 0.45 (2.2x) before; the error between 2x and 2.2x matched
+  // the error well clear of the pitch, so F1 now counts up to 2x: "ee" up to about 193 Hz, "oo" about 208 Hz.
+  // This limit is the harmonics being too far apart to show where F1 is, which tameH1 can't change.
+  const F1_PITCH_RATIO = 0.5;
   const PITCH_WEIGHTS = [0, 1, 0.8];
   // An "F1" this close to the pitch is usually the voice's own first harmonic, which LPC can take for a resonance
-  // (common in running speech with a strong fundamental); it says nothing about the vowel's F1.
+  // (common in running speech with a strong fundamental); it says nothing about the vowel's F1. Since tameH1 turns a
+  // dominant first harmonic down this rarely fires (0-4% of steady frames on real readings, from 44-62%), but an F1
+  // under 1.5x the pitch is past where the synthetic voice reads F1 within 20 points, so it stays as a guard.
   const F1_ON_PITCH = 1.5;
   function f1OnPitch(F, f0) { return f0 > 0 && F[0] < F1_ON_PITCH * f0; }
   function pitchLimited(v, f0) { return f0 > 0 && f0 > F1_PITCH_RATIO * Math.sqrt(v.M[0] * v.W[0]); }
@@ -409,6 +416,11 @@
   // When the three formants don't line up but F2 and F3 agree closely, only F1 is off. F1 is the least reliable
   // formant (a soft, wide F1, or a voice whose F1 sits outside both references, like a very closed "ee"), so the
   // score is then read from F2 and F3 as at high pitch, and marked f1Off.
+  // Kept after tameH1 (2026-11), for a different reason than it was added: F1 is now read right on a breathy voice, and
+  // when it alone disagrees it is usually a real difference of articulation, not size: a tight, high "ee" lowers F1 at any
+  // tract length, and the published averages disagree on it by more than men and women differ (Hillenbrand 1995 "ee" F1:
+  // men 342, women 437 Hz; Peterson & Barney 1952: 270 and 310). So the score, which is about size and shape, stays on
+  // F2 and F3, and Formant by formant still shows F1's own position (marked "?") as the jaw cue to work on.
   // F1_OFF_FULL was 0.1 before 2026-11; 0.08 sits under HOLD_RMS, so a fit pulled off by F1 alone (a closed "ee" whose F1
   // LPC drags towards the 2nd harmonic at 150-170 Hz) is read from F2 and F3 rather than scored ~12 points dark or dropped.
   const F1_OFF_RMS = 0.06, F1_OFF_FULL = 0.08;
@@ -2183,12 +2195,12 @@
     function vowelStats(x, key) {
       if (!x || x.length < sr * 0.5) return null;
       const an = new Analyzer(sr), hop = Math.round(sr / 60), v = VOWEL_BY_KEY[key];
-      let voiced = 0, steady = 0, ok = 0, airy = 0, withF = 0; const f0 = [], br = [], sc = [], Fs = [], why = { dark: 0, bright: 0, shape: 0 };
+      let voiced = 0, steady = 0, ok = 0, airy = 0, withF = 0; const f0 = [], br = [], sc = [], Fs = [], h12 = [], why = { dark: 0, bright: 0, shape: 0 };
       for (let end = an.needed; end <= x.length; end += hop) {
         const fr = an.analyze(x.subarray(0, end));
         if (fr.kind === 'other' && fr.breath != null) { airy++; br.push(fr.breath); }
         if (fr.kind !== 'voiced') continue;
-        voiced++; f0.push(fr.f0); if (fr.breath != null) br.push(fr.breath);
+        voiced++; f0.push(fr.f0); if (fr.breath != null) br.push(fr.breath); if (Number.isFinite(fr.h1h2)) h12.push(fr.h1h2);
         if (!fr.formants) continue;
         withF++;
         if (!fr.steady) continue;
@@ -2199,7 +2211,7 @@
       }
       return { voiced, airy, withF: voiced ? withF / voiced : 0, steady: voiced ? steady / voiced : 0, ok: voiced ? ok / voiced : 0, why,
         F: Fs.length ? [0, 1, 2].map(i => Math.round(median(Fs.map(f => f[i])))) : null,
-        f0: f0.length ? median(f0) : 0, breath: br.length ? median(br) : NaN, score: sc.length ? median(sc) : NaN };
+        f0: f0.length ? median(f0) : 0, breath: br.length ? median(br) : NaN, h1h2: h12.length ? median(h12) : NaN, score: sc.length ? median(sc) : NaN };
     }
     const ah = vowelStats(seg.ah, 'a'), ee = vowelStats(seg.ee, 'i');
     data.ah = ah; data.ee = ee;
@@ -2227,6 +2239,11 @@
       else add('vowels', 'good', 'Held vowels read well', `${Math.round(100 * okFrac)}% of your held "ah" and "ee" gave a reading${held.length === 2 && Number.isFinite(ah.score) && Number.isFinite(ee.score) ? ` (ah ${Math.round(ah.score)}, ee ${Math.round(ee.score)})` : ''}.`);
       const f0 = median(held.map(s => s.f0));
       data.f0 = Math.round(f0);
+      // H1-H2 on "ah" only: its F1 is far above the pitch, so the gap is the voice's own, not "ee"'s low F1 lifting H1
+      const g = ah && ah.voiced >= 30 ? ah.h1h2 : NaN;
+      data.h1h2 = Number.isFinite(g) ? Math.round(g) : null;
+      if (g > H1_KEEP + 6) add('h1', 'good', 'Strong fundamental', `On "ah" your first harmonic (your pitch itself) is about ${Math.round(g)} dB over the second; a firm voice is about 0-8. That's a light, soft-edged tone. It used to hide F1 from the formant finder; the app now turns it down to ${H1_KEEP} dB over the second before reading formants, so it's handled.`);
+      else if (Number.isFinite(g)) add('h1', 'good', 'Balanced fundamental', `On "ah" your first harmonic is about ${Math.round(g)} dB over the second, so the app reads your formants as they are.`);
       if (pitchLimited(VOWEL_BY_KEY.i, f0)) add('pitch', 'good', 'Pitch above F1 of "ee"', `At ${Math.round(f0)} Hz your pitch is close to the first formant of "ee" and "oo", so those are read from F2 and F3. That's expected for a higher voice and handled.`);
     }
     const bad = (lv) => MIC_PRIORITY.find(id => checks.some(c => c.id === id && c.level === lv));

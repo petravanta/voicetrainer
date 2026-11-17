@@ -104,7 +104,7 @@ console.log('\n# the ± widens with pitch');
   const v = D.VOWEL_BY_KEY.E, F = tract(v, 0.5);
   const a = D.scoreSpread(F, v, 110, [0.6, 1, 0.8]), b = D.scoreSpread(F, v, 250, [0.6, 1, 0.8]);
   check(a > 3 && b > 1.8 * a, `±${a.toFixed(0)} at 110 Hz, ±${b.toFixed(0)} at 250 Hz`);
-  check(!D.pitchLimited(D.VOWEL_BY_KEY.i, 160) && D.pitchLimited(D.VOWEL_BY_KEY.i, 190) && !D.pitchLimited(D.VOWEL_BY_KEY.a, 300), 'F1 is set aside for "ee" above ~175 Hz, not for "ah" at 300 Hz');
+  check(!D.pitchLimited(D.VOWEL_BY_KEY.i, 185) && D.pitchLimited(D.VOWEL_BY_KEY.i, 200) && !D.pitchLimited(D.VOWEL_BY_KEY.a, 300), 'F1 is set aside for "ee" above ~193 Hz, not for "ah" at 300 Hz');
 }
 
 // A closed "ee" (F1 260 Hz, under both references) at 150-170 Hz: LPC pulls F1 towards the 2nd harmonic, the
