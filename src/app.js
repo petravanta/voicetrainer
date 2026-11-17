@@ -877,6 +877,7 @@
     ensureLoop();
   }
   function stop() {
+    if (state.drill && state.drill.ready && !state.drill.result) state.drill.ready(); // the take you were in the middle of
     Free.end();
     if (Sing.on) { take = null; Sing.finish(true); }
     const hadRun = !!state.running;
@@ -1118,6 +1119,7 @@
       t: performance.now(), kd: fr.kind === 'voiced' ? 'v' : fr.kind === 'fricative' ? 's' : fr.kind === 'silence' ? '.' : 'o', e: fr.ve, a: Math.round(200 * Math.log10(fr.rms + 1e-9)) / 10, F: fr.kind === 'voiced' ? fr.formants : null, rawF: fr.kind === 'voiced' ? fr.rawF : null, st: !!fr.steady, w: frWord });
     if (frameCount % 6 === 0) { renderCoach(); renderTractLive(); }
     if (d) updateDrill(d);
+    if (d && d.ready && !d.result) watchTakeEnd(d, fr, now);
     else if (dd) updateDemo(dd);
     if (frameCount % 30 === 0) renderSession();
   }
@@ -1232,6 +1234,21 @@
     if (nb && last) { nb.innerHTML = '<p class="eyebrow"><span>Last take</span></p>' + last; nb.classList.add('prev'); }
     const pl = state.plan, s = planStep();
     if (pl && pl.status === 'active' && s && s.def.id === d.def.id && s.after != null) addPlanNext(pl);
+  }
+  // A take has enough once its goal is met (time in the zone, frames of a held sound, slides), but it keeps
+  // listening, and keeps scoring, for as long as you keep going: it ends when you stop (TAKE_END_MS of quiet) or
+  // stop the microphone. Ending the moment the goal was met cut you off part way through a sound.
+  const TAKE_END_MS = 600;
+  const TAKE_READY_MSG = 'Got it. Keep going as long as you like: your result shows when you stop.';
+  function takeReady(d, finish) {
+    if (d.ready || d.result) return;
+    d.ready = finish; d.readyQuiet = null;
+    const m = $('drill-msg'); if (m && !d.demoOn) m.textContent = TAKE_READY_MSG;
+  }
+  function watchTakeEnd(d, fr, now) {
+    if (takeSound(d.def, fr)) { d.readyQuiet = null; return; }
+    if (d.readyQuiet == null) d.readyQuiet = now;
+    else if (now - d.readyQuiet >= TAKE_END_MS) { const q = d.readyQuiet; d.ready(); d.quietAt = q; } // the quiet so far counts towards the next take's pause
   }
   const againNote = () => Object.assign(document.createElement('span'), { className: 'again-note', textContent: ' Pause, then go again any time: the next take starts by itself.' });
   function drillInstruction(def) {
@@ -1862,8 +1879,9 @@
       } else if (def.type === 'word') {
         msg.textContent = `Vowel ${Math.min(100, Math.round(d.vowelFr.length / NEED.wordVowel * 100))}% · consonant ${Math.min(100, Math.round(d.sibFr.length / NEED.wordSib * 100))}%`;
       } else msg.textContent = prog > 0 ? 'Good, keep holding...' : 'Listening...';
+      if (d.ready) msg.textContent = TAKE_READY_MSG;
     }
-    if (prog >= 1) finishDrill(d);
+    if (prog >= 1) takeReady(d, () => finishDrill(d));
   }
 
   // ---------------- breath exercises ----------------
@@ -1948,8 +1966,8 @@
     if (fresh && key === 'ok') d.inZone += 6;
     const prog = d.inZone / NEED.breathIn;
     const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
-    $('drill-msg').textContent = prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.breathIn / 60).toFixed(1)} seconds.` : state.running ? 'Listening...' : '';
-    if (prog >= 1) finishBreath(d);
+    $('drill-msg').textContent = d.ready ? TAKE_READY_MSG : prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.breathIn / 60).toFixed(1)} seconds.` : state.running ? 'Listening...' : '';
+    if (prog >= 1) takeReady(d, () => finishBreath(d));
   }
   function finishBreath(d) {
     const def = d.def, score = D.median(d.breathFr);
@@ -2323,8 +2341,8 @@
     if (r.ok) d.inZone += 6;
     const prog = d.inZone / NEED.isoIn;
     const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
-    $('drill-msg').textContent = prog > 0 ? `Isolated for ${(d.inZone / 60).toFixed(1)} of ${(NEED.isoIn / 60).toFixed(1)} seconds.` : '';
-    if (prog >= 1) finishIso(d);
+    $('drill-msg').textContent = d.ready ? TAKE_READY_MSG : prog > 0 ? `Isolated for ${(d.inZone / 60).toFixed(1)} of ${(NEED.isoIn / 60).toFixed(1)} seconds.` : '';
+    if (prog >= 1) takeReady(d, () => finishIso(d));
   }
   function finishIso(d) {
     const def = d.def, pct = def.kind === 'pitch' ? null : Math.round(d.best * 100);
@@ -2347,7 +2365,6 @@
   // noise (dsp whisperFormants, frames carry whisperF). A siren counts slides of the whisper's
   // brightness (F2 and F3 together); a hold scores a whispered vowel on the usual 0-100 scale.
   const NEED_LEGS = 4; // up, down, up, down
-  const SIREN_SETTLE = 15; // whisper frames (~0.25 s) the last slide goes no further before the take ends
   function renderWhisperPanel(d) {
     const p = $('drill-panel'), def = d.def, [lo, hi] = target(), siren = def.kind === 'siren';
     p.innerHTML = `
@@ -2418,9 +2435,8 @@
       if (demo || d.result) return;
       d.legs = Math.max(d.legs, s.legs); d.span = Math.max(d.span, s.span);
       const bar = $('drill-prog'); if (bar) bar.style.width = clamp(d.legs / NEED_LEGS * 100, 0, 100) + '%';
-      // The last slide counts once it has moved far enough, but the take ends only when that slide is over:
-      // you stop whispering, it stops going further for a moment, or you turn into another slide.
-      if (d.legs >= NEED_LEGS && (s.legs > NEED_LEGS || s.since >= SIREN_SETTLE || !wh.length)) finishWhisper(d, Math.round((Math.exp(d.span) - 1) * 100), 'whisper');
+      // The last slide counts once it has moved far enough; the take ends when you stop (see takeReady).
+      if (d.legs >= NEED_LEGS) takeReady(d, () => finishWhisper(d, Math.round((Math.exp(d.span) - 1) * 100), 'whisper'));
       return;
     }
     // hold: the whispered vowel on the 0-100 scale
@@ -2454,8 +2470,8 @@
     if (key === 'ok') d.inZone += 6;
     const prog = d.inZone / NEED.whIn;
     const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
-    $('drill-msg').textContent = prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.whIn / 60).toFixed(1)} seconds.` : '';
-    if (prog >= 1) finishWhisper(d, Math.round(D.median(d.whScores)), 'sound');
+    $('drill-msg').textContent = d.ready ? TAKE_READY_MSG : prog > 0 ? `In the zone for ${(d.inZone / 60).toFixed(1)} of ${(NEED.whIn / 60).toFixed(1)} seconds.` : '';
+    if (prog >= 1) takeReady(d, () => finishWhisper(d, Math.round(D.median(d.whScores)), 'sound'));
   }
   function finishWhisper(d, score, kind) {
     const def = d.def;

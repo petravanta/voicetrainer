@@ -39,21 +39,18 @@ for (const goal of ['fem', 'masc']) {
     const b = run(S.whisperExample(fs, siren, goal, D.VOWELS, D.WHISPER_SHIFT, o), fs).filter(f => f.whisperF).map(f => D.whisperBrightness(f.whisperF));
     return D.sirenLegs(b);
   };
-  // the take must not end part way through the last slide: the 4th leg is counted once it has moved 13%,
-  // but the exercise finishes only when that slide stops going further (app: SIREN_SETTLE frames) or turns
+  // the 4th slide is counted part way down it, before the whisper ends: why the app doesn't end the take
+  // when the count is reached but when you go quiet (takeReady / TAKE_END_MS)
   {
     const all = run(S.whisperExample(fs, siren, goal, D.VOWELS, D.WHISPER_SHIFT), fs), b = [];
-    let counted = -1, done = -1, last = -1;
+    let counted = -1, last = -1;
     all.forEach((f, i) => {
       if (!f.whisperF) return;
       last = i; b.push(D.whisperBrightness(f.whisperF));
-      const s = D.sirenLegs(b);
-      if (s.legs >= 4 && counted < 0) counted = i;
-      if (s.legs >= 4 && done < 0 && (s.legs > 4 || s.since >= 15)) done = i;
+      if (counted < 0 && D.sirenLegs(b).legs >= 4) counted = i;
     });
-    if (done < 0) done = last + 30; // whispering stopped: the app ends the take half a second later
     const T = (i) => (i / 60).toFixed(2);
-    check(counted > 0 && done - counted > 20 && done >= last - 25, `${goal} siren demo: 4th slide counted at ${T(counted)} s, take ends at ${T(done)} s, whisper ends ${T(last)} s`);
+    check(counted > 0 && last - counted > 20, `${goal} siren demo: 4th slide counted at ${T(counted)} s, whisper goes on to ${T(last)} s`);
   }
   const ok = legs({}), flat = legs({ wrong: 'flat' }), vo = legs({ wrong: 'voiced' });
   check(ok.legs >= 4, `${goal} siren demo: ${ok.legs} legs, span ${pct(ok.span)}%`);
