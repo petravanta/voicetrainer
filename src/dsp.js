@@ -280,6 +280,29 @@
     return cands.slice(0, maxN);
   }
 
+  // ---------- a dominant first harmonic ----------
+  // In a light, breathy or "flutey" voice the first harmonic (the pitch itself) can stand 15-35 dB above the second
+  // (a firm modal voice: about 0-8 dB). A 10-pole LPC then spends a pole pair on that one harmonic and puts "F1"
+  // at the pitch, and the real F1 above it, far weaker, gets no pole at all. Measured on Petra's readings (Nov 2026):
+  // 55-65% of steady frames had F1 within 1.35 x the pitch and H1-H2 ~19 dB, against 12% and 5 dB for the neural
+  // voice reading the same passage. On the synthetic voice, a breathy source read F1 26% low on average.
+  // So before LPC, a first harmonic more than H1_KEEP dB above the second is cut back to that (a peaking EQ at the
+  // pitch, Q 2), which leaves the vocal tract's own shape for LPC to fit. A firm voice (H1-H2 under H1_KEEP) is
+  // untouched; on the synthetic grid this took a breathy source's F1 error from 27% to 7% and left modal ones as
+  // they were. When F1 really sits on the first harmonic (a closed "ee" at a high pitch) the cut can't undo that:
+  // the score's own F1 rules (pitchLimited, f1OnPitch) still apply there.
+  const H1_KEEP = 4, H1_Q = 2;
+  function tameH1(y, fs, f0, h1h2) {
+    if (!(f0 > 0) || !Number.isFinite(h1h2) || h1h2 <= H1_KEEP) return y;
+    const A = Math.pow(10, -(h1h2 - H1_KEEP) / 40), w0 = 2 * Math.PI * f0 / fs, al = Math.sin(w0) / (2 * H1_Q), cw = Math.cos(w0);
+    const a0 = 1 + al / A, b0 = (1 + al * A) / a0, b1 = -2 * cw / a0, b2 = (1 - al * A) / a0, a1 = -2 * cw / a0, a2 = (1 - al / A) / a0;
+    // over the whole buffer, so the filter has settled by the analysis window at its end
+    const z = new Float32Array(y.length);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < y.length; i++) { const v = b0 * y[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = y[i]; y2 = y1; y1 = v; z[i] = v; }
+    return z;
+  }
+
   // Formants from all candidate poles (sorted by frequency, up to WIDE_F1_BW wide): the narrow ones (< VOICED_MAX_BW),
   // except that some voices have a soft, wide first resonance (an open "ah" with a lot of air): when no narrow pole
   // sits low enough to be F1, the clearest wide one there is taken instead of letting F2 slide into F1's place.
@@ -975,7 +998,11 @@
         } else out.breathUneven = true;
         const ln = Math.round(this.fsd * this.winMs / 1000);
         const lag = typeof this.lagHz === 'function' ? this.lagHz(out.f0) : this.lagHz;
-        const all = formants(y.subarray(y.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8);
+        // a first harmonic far above the second is turned down first, or LPC spends its F1 on it (see tameH1)
+        const h12 = Number.isFinite(out.h1h2) ? out.h1h2 : voiceQuality(y, this.fsd, out.f0).h1h2;
+        const yt = tameH1(y, this.fsd, out.f0, h12);
+        if (yt !== y) out.h1Cut = Math.round(h12 - H1_KEEP);
+        const all = formants(yt.subarray(yt.length - ln), this.fsd, this.lpcOrder, lag, WIDE_F1_BW, 8);
         const fm = pickFormants(all);
         if (fm.wideF1) out.wideF1 = true;
         if (fm.length >= 3) {
@@ -2832,7 +2859,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
