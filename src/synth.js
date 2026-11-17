@@ -473,16 +473,21 @@
   const WORD_CODA = { sit: 't', sat: 't', shed: 'd', shop: 'p', shirt: 't', sun: 'n' };
   const SIB_LOCUS = { s: 1750, sh: 2100 };
 
-  // Reference recording for a drill, at the typical values of the chosen goal.
+  // What a drill's sound is made of: the typical values of the goal, or, with `voice` (the demo voice's
+  // settings: pitch in Hz, res 0 = typical masculine to 100 = typical feminine and past either end, bright 0..100),
+  // formants and hiss mixed between the two on a log scale the way the demo voice mixes them, at its own pitch.
+  function soundVals(def, goal, VOWELS, SIBILANTS, voice) {
+    const fem = goal === 'fem', V = def.vowel && VOWELS.find(v => v.key === def.vowel), S = def.sib && SIBILANTS[def.sib];
+    if (!voice) return { F: V && (fem ? V.W : V.M), peak: S && (fem ? S.W : S.M), f0a: fem ? 215 : 122, f0b: fem ? 180 : 100, f0: fem ? 200 : 112 };
+    const t = voice.res / 100, tc = Math.max(-0.3, Math.min(1.3, t)), mix = (m, w, k) => Math.exp(Math.log(m) + k * Math.log(w / m));
+    return { F: V && V.M.map((m, i) => mix(m, V.W[i], t)), peak: S && mix(S.M, S.W, tc), f0a: voice.pitch * 1.06, f0b: voice.pitch * 0.89, f0: voice.pitch * 0.97, bright: clamp01(voice.bright / 100) };
+  }
+  // Reference recording for a drill, at the typical values of the chosen goal (or in the demo voice: o.voice).
   // def: {type:'vowel'|'sib'|'word', vowel, sib, cue}; goal: 'fem'|'masc'.
-  function example(fs, def, goal, VOWELS, SIBILANTS) {
-    const fem = goal === 'fem';
-    const f0a = fem ? 215 : 122, f0b = fem ? 180 : 100;
-    const V = def.vowel && VOWELS.find(v => v.key === def.vowel);
-    const F = V && (fem ? V.W : V.M);
-    const peak = def.sib && (fem ? SIBILANTS[def.sib].W : SIBILANTS[def.sib].M);
+  function example(fs, def, goal, VOWELS, SIBILANTS, o = {}) {
+    const { F, peak, f0a, f0b, bright } = soundVals(def, goal, VOWELS, SIBILANTS, o.voice);
     const lead = silence(fs, 0.12);
-    if (def.type === 'vowel') return concat([lead, voiced(fs, 1.2, f0a, f0b, F, { ramp: 0.06 }), lead]);
+    if (def.type === 'vowel') return concat([lead, voiced(fs, 1.2, f0a, f0b, F, { ramp: 0.06, bright }), lead]);
     if (def.type === 'sib') return concat([lead, sibilant(fs, 1.0, peak, { level: 0.12 }), lead]);
     // word, said twice
     const codaKey = WORD_CODA[def.cue], coda = CODAS[codaKey];
@@ -490,7 +495,7 @@
       const from = [300, SIB_LOCUS[def.sib], F[2]];
       const to = coda ? [coda.locus[0], coda.locus[1], F[2]] : codaKey === 'n' ? [300, 1700, F[2]] : F;
       const vowelDur = coda || codaKey === 'n' ? 0.32 : 0.45;
-      const parts = [sibilant(fs, 0.26, peak, { level: 0.11, seed: 31 }), voiced(fs, vowelDur, f0a, f0b, F, { from, to, trans: 0.08, ramp: 0.012 })];
+      const parts = [sibilant(fs, 0.26, peak, { level: 0.11, seed: 31 }), voiced(fs, vowelDur, f0a, f0b, F, { from, to, trans: 0.08, ramp: 0.012, bright })];
       if (coda) parts.push(...coda.parts(fs));
       if (codaKey === 'n') parts.push(voiced(fs, 0.13, f0b, f0b * 0.95, [270, 1500, 2500], { level: 0.12, bws: [90, 200, 250, 300, 350], ramp: 0.01 }));
       return concat(parts);
@@ -513,16 +518,14 @@
   }
   function sustain(fs, def, goal, VOWELS, SIBILANTS, o = {}) {
     if (!canSustain(def)) return null;
-    const fem = goal === 'fem', f0 = fem ? 200 : 112;
-    const V = def.vowel && VOWELS.find(v => v.key === def.vowel), F = V && (fem ? V.W : V.M);
-    const peak = def.sib && (fem ? SIBILANTS[def.sib].W : SIBILANTS[def.sib].M);
+    const { F, peak, f0, bright } = soundVals(def, goal, VOWELS, SIBILANTS, o.voice);
     const lead = 0.12, settle = 0.3, body = settle + HOLD_LOOP + HOLD_XF + 0.15;
     let head = [], x;
-    if (def.type === 'vowel') x = voiced(fs, body, f0, f0, F, { ramp: 0.06 });
+    if (def.type === 'vowel') x = voiced(fs, body, f0, f0, F, { ramp: 0.06, bright });
     else if (def.type === 'sib') x = sibilant(fs, body, peak, { level: 0.12 });
     else if (def.type === 'word') {
       head = [sibilant(fs, 0.26, peak, { level: 0.11, seed: 31 })];
-      x = voiced(fs, body, f0, f0, F, { from: [300, SIB_LOCUS[def.sib], F[2]], trans: 0.08, ramp: 0.012 });
+      x = voiced(fs, body, f0, f0, F, { from: [300, SIB_LOCUS[def.sib], F[2]], trans: 0.08, ramp: 0.012, bright });
     } else {
       const shift = o.shift || [1, 1, 1], base = F.map((f, i) => f * shift[i]);
       x = whispered(fs, body, () => base, { seed: 45 });
@@ -554,7 +557,7 @@
   // formants of `goal`, raised by the usual whisper shift (shift = [k1, k2, k3]).
   // o.wrong: 'flat' = a siren that does not move; 'voiced' = the same sound with tone.
   function whisperExample(fs, def, goal, VOWELS, shift, o = {}) {
-    const V = VOWELS.find(v => v.key === def.vowel), base = (goal === 'fem' ? V.W : V.M).map((f, i) => f * shift[i]);
+    const base = soundVals(def, goal, VOWELS, {}, o.voice).F.map((f, i) => f * shift[i]);
     const lead = silence(fs, 0.12);
     if (def.kind === 'siren') {
       // the whole tract shortens and lengthens: up and down twice, about 13% to either side
@@ -596,7 +599,7 @@
     return concat(parts);
   }
 
-  const api = { canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
+  const api = { soundVals, canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
