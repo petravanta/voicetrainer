@@ -34,4 +34,19 @@ for (const [k, f0] of [['i', 166], ['a', 200], ['u', 110]]) {
   check(Math.abs(d - D.H1_KEEP) < 2.5, `H1 20 dB over H2 is cut to ${d.toFixed(1)} dB over it (aim ${D.H1_KEEP})`);
   check(D.tameH1(y, fs, f0, 3) === y, 'H1-H2 under the limit: signal untouched');
 }
+// above 200 Hz a closed vowel's F1 can sit on the first harmonic: the cut must not take it and read the next pole up
+for (const f0 of [250, 320]) for (const br of [0, 1]) {
+  const r = read([300, 2830, 3400], f0, br);
+  check(err(r.F1, 300) < 0.15, `closed "ee" (F1 300 Hz) at ${f0} Hz${br ? ', breathy' : ''}: F1 read ${Math.round(r.F1)}, not pushed up to a harmonic`);
+}
+{ // a set-aside F1 says why and at what pitch, and is never the biggest difference in Target vs you
+  const v = D.VOWEL_BY_KEY.i, o = D.formantOffsets([644, 2936, 3431], v, 'fem', { f0: 215 });
+  check(o.rows[0].skip === 'pitch' && o.rows[0].pitchWhy === 'high' && o.rows[0].f0 === 215 && o.rows[0].limitHz === D.pitchLimitHz(v) && D.pitchLimitHz(v) === 193,
+    `"ee" at 215 Hz: F1 set aside as pitch ${o.rows[0].f0} Hz over ${o.rows[0].limitHz} Hz`);
+  const strip = (F, f0) => ({ fm: Array(10).fill(F), cog: [], f0: Array(10).fill(f0) });
+  const c = D.compareStrips(strip([411, 2749, 3362], 210), strip([644, 2936, 3431], 215), { vowel: v });
+  check(c.rows[0].aside && c.big && c.big.k !== 'F1', `Target vs you at 215 Hz: F1 marked aside, biggest difference ${c.big && c.big.k}`);
+  const low = D.compareStrips(strip([411, 2749, 3362], 180), strip([300, 2936, 3431], 180), { vowel: v });
+  check(!low.rows[0].aside && low.big.k === 'F1', 'at 180 Hz F1 counts and can be the biggest difference');
+}
 if (fails) { console.log(`${fails} failed`); process.exit(1); }
