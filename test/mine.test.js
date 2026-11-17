@@ -32,5 +32,18 @@ check(Math.abs(kept.length - ee.length * 44100 / 48000) <= 1, 'resampled to the 
 const a0 = D.stripReads(D.specStrip(frames(ee, 48000), { trim: true })), a1 = D.stripReads(D.specStrip(frames(kept, 44100), { trim: true }));
 check(a0.F.every((f, i) => Math.abs(a1.F[i] / f - 1) < 0.03), `kept "ee" reads F1-F3 ${a1.F.map(Math.round).join('/')} vs ${a0.F.map(Math.round).join('/')}`);
 check(D.resample(x, 48000, 48000) === x, 'same rate leaves it alone');
+// ---- the demo voice as a reference: the drill's sound at the demo voice's pitch and resonance ----
+for (const style of ['classic', 'natural']) {
+  S.setStyle(style);
+  const def = { type: 'vowel', vowel: 'a' }, V = D.VOWEL_BY_KEY.a;
+  const at = (voice) => D.stripReads(D.specStrip(frames(S.example(48000, def, 'fem', D.VOWELS, D.SIBILANTS, { voice }), 48000), { trim: true }));
+  const typ = D.stripReads(D.specStrip(frames(S.example(48000, def, 'fem', D.VOWELS, D.SIBILANTS), 48000), { trim: true }));
+  const fem = at({ pitch: 205, res: 100, bright: 65 }), mid = at({ pitch: 160, res: 50, bright: 52 });
+  check(fem.F.every((f, i) => Math.abs(f / typ.F[i] - 1) < 0.06), `${style}: demo voice at res 100 reads like typical feminine (${fem.F.map(Math.round).join('/')} vs ${typ.F.map(Math.round).join('/')})`);
+  const want = V.M.map((m, i) => Math.sqrt(m * V.W[i]));
+  check(mid.F.every((f, i) => Math.abs(f / want[i] - 1) < 0.08), `${style}: demo voice at res 50 sits halfway (${mid.F.map(Math.round).join('/')} vs ${want.map(Math.round).join('/')})`);
+  const sv = S.soundVals({ type: 'sib', sib: 's' }, 'fem', D.VOWELS, D.SIBILANTS, { pitch: 115, res: 0, bright: 40 });
+  check(Math.abs(sv.peak - D.SIBILANTS.s.M) < 1 && Math.abs(sv.f0 / 115 - 0.97) < 1e-9, `${style}: a masculine demo voice hisses at the masculine peak, at its own pitch`);
+}
 if (fails) { console.log(`\n${fails} failed`); process.exit(1); }
 console.log('\nall passed');
