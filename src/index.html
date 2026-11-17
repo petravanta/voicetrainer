@@ -215,22 +215,16 @@
     <div class="section-head">
       <h2 id="h-session">This session</h2>
       <div class="session-actions">
-        <span class="muted small">Not saved. Freestyle is for noodling.</span>
+        <span class="muted small"><span id="sess-drills"></span> Not saved. Freestyle is for noodling.</span>
         <button type="button" id="btn-reset" class="btn sm">Clear</button>
       </div>
     </div>
-    <div class="session-grid">
-      <div>
-        <h3>Resonance score by vowel<button type="button" class="info-btn inline" data-info aria-controls="info-sess-vowels" aria-describedby="info-sess-vowels" aria-expanded="false" aria-label="How vowels are recognised here">i</button><span class="info-pop" id="info-sess-vowels" role="note" hidden>Without a text, each vowel is recognised by sound alone, so one can land under the wrong vowel. A reading checks every vowel against the word you're on.</span></h3>
+    <div id="sess-dims" class="sess-dims"></div>
+    <div class="sess-vowels-wrap">
+      <div class="section-head"><h3>Resonance score by vowel<button type="button" class="info-btn inline" data-info aria-controls="info-sess-vowels" aria-describedby="info-sess-vowels" aria-expanded="false" aria-label="How vowels are recognised here">i</button><span class="info-pop" id="info-sess-vowels" role="note" hidden>Without a text, each vowel is recognised by sound alone, so one can land under the wrong vowel. A reading checks every vowel against the word you're on.</span></h3></div>
+      <div class="session-grid">
         <div id="sess-vmap" class="vm-chart" hidden></div>
-        <div id="sess-fo"></div>
         <div id="sess-vowels" class="bars"><p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p></div>
-      </div>
-      <div>
-        <h3>Sibilants</h3>
-        <div id="sess-sibs" class="bars"><p class="empty">Hold an "sss" or "shh" to measure how bright your sibilants are.</p></div>
-        <h3>Summary</h3>
-        <dl id="sess-summary" class="summary"></dl>
       </div>
     </div>
   </section>
