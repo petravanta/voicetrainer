@@ -708,7 +708,10 @@
     },
     open() { this.paint(); Reader.fillVoices(); $('voice-dlg').showModal(); },
     // Target vs you showing the demo voice follows new settings when the dialog closes
-    closed() { const T = TvY.drill; if (T.el && tvyDemoOn(T)) { tvyMakeDemo(T); tvyFrozenCmp(T); tvyDraw(T); } },
+    closed() {
+      const T = TvY.drill; if (T.el && tvyDemoOn(T)) { tvyMakeDemo(T); tvyFrozenCmp(T); tvyDraw(T); }
+      const pf = $('proof'); if (pf && state.drill && pf.proofDef === state.drill.def && !pf.hidden) renderProof(pf, state.drill.def);
+    },
     init() {
       for (const t of ['fem', 'masc']) $('vd-' + t).addEventListener('click', () => this.setType(t));
       for (const t of ['natural', 'classic']) $('vd-' + t).addEventListener('click', () => { this.get().style = t; Synth.setStyle(t); this.save(); this.paint(); });
@@ -2059,7 +2062,17 @@
     return { ok: r.ok, big: r.ok ? '✓' : '✗', text: r.text };
   }
   // The demo sounds for each kind of exercise: one that should pass and one that should not.
-  function proofItems(def) {
+  function proofItems(def, mine) {
+    const items = proofBase(def);
+    if (!items.length || !(TVY_TYPES.has(def.type) && def.type !== 'iso')) return items;
+    // the demo voice from Settings, and a take you kept in Target vs you, graded the same way
+    const v = DemoVoice.get(), voice = { pitch: v.pitch, res: v.res, bright: v.bright }, grade = items[0].grade;
+    if (def.kind !== 'siren') items.push({ label: 'Your demo voice', ck: ['demo', voice.pitch, voice.res, voice.bright, Synth.getStyle()].join(':'), grade,
+      make: (fs) => def.type === 'whisper' ? Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT, { voice }) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS, { voice }) });
+    if (mine) items.push({ label: 'Your kept take', ck: 'mine:' + mine.at, grade, dry: true, make: (fs) => D.resample(D.fromPcm16(mine.pcm), mine.fs, fs) });
+    return items;
+  }
+  function proofBase(def) {
     const fem = state.goal === 'fem', goalName = fem ? 'feminine' : 'masculine', other = fem ? 'masc' : 'fem';
     if (def.type === 'vowel' || def.type === 'sib' || def.type === 'word') return [
       { label: `Typical ${goalName}`, make: (fs) => Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS), grade: (fr) => gradeSound(def, fr) },
@@ -2104,26 +2117,29 @@
     return Synth.concat([Synth.silence(fs, 0.1), Synth.voiced(fs, 1.0, f0, f0, base, { ramp: 0.05, seed: 3 }),
       Synth.voiced(fs, 1.8, f0, f1, moved, { from: base, trans: 0.6, ramp: 0.05, seed: 5 }), Synth.silence(fs, 0.1)]);
   }
-  function renderProof(host, def) {
+  function renderProof(host, def, mine) {
     if (!host) return;
-    const items = proofItems(def); if (!items.length) { host.hidden = true; return; }
+    const items = proofItems(def, mine); if (!items.length) { host.hidden = true; return; }
+    host.proofDef = def;
+    // a kept take joins the list once it has been read from storage
+    if (mine === undefined && TVY_TYPES.has(def.type) && def.type !== 'iso') Mine.get(Mine.key(def)).then(r => { if (r && host.proofDef === def && host.isConnected) renderProof(host, def, r); });
     host.hidden = false;
     host.innerHTML = `<p class="eyebrow"><span>Check the checker</span><span>demo sounds, graded by the app</span></p>
       <p class="proof-lead">Listen, then compare the grades.</p>
       <div class="proof-rows">${items.map((it, i) => `<div class="proof-row" id="proof-${i}">
         <button type="button" class="btn proof-play" data-i="${i}" aria-label="Play: ${it.label}">▶</button>
         <span class="proof-label">${it.label}</span><b class="proof-big">…</b><span class="proof-text">grading…</span></div>`).join('')}</div>`;
-    host.querySelector('.proof-lead').append(infoBadge('About these demo sounds', 'Each demo is scored by exactly the same check as your voice. Listen, then compare the grades.'));
+    host.querySelector('.proof-lead').append(infoBadge('About these demo sounds', `Each demo is scored by exactly the same check as your voice. Listen, then compare the grades.${items.some(it => it.ck) ? ' Your demo voice is this sound made by the demo voice set in Settings, at its pitch, resonance and brightness; change them there and this row follows.' : ''}${mine ? ' Your kept take is the take you kept under Target vs you, graded again here.' : ''}`));
     host.querySelectorAll('.proof-play').forEach(b => b.addEventListener('click', () => {
       const it = items[+b.dataset.i];
       if (exSrc && b.classList.contains('playing')) { stopExample(); return; }
-      ensureCtx(); playSamples(it.make(ctx.sampleRate), null, it.label);
+      ensureCtx(); playSamples(it.make(ctx.sampleRate), null, it.label, null, it.dry);
       host.querySelectorAll('.proof-play').forEach(x => { x.classList.remove('playing'); x.textContent = '▶'; });
       b.classList.add('playing'); b.textContent = '■';
     }));
     // grade after the panel has painted
     setTimeout(() => items.forEach((it, i) => {
-      const key = `${def.id}|${state.goal}|${i}`;
+      const key = `${def.id}|${state.goal}|${it.ck || i}`;
       let g = proofCache.get(key);
       if (!g) { g = it.grade(analyzeSamples(it.make(PROOF_FS), PROOF_FS)); proofCache.set(key, g); }
       const row = $('proof-' + i); if (!row || !host.contains(row)) return;
@@ -3198,12 +3214,14 @@
         const res = state.drill && state.drill.result, sc = res && Number(res.score);
         const rec = { key: Mine.key(T.cfg.def), pcm: D.toPcm16(T.youX), fs: T.youFs, at: Date.now(), score: Number.isFinite(sc) ? Math.round(sc) : null };
         Mine.put(rec); tvyLoadMine(T, rec); T.which = 'mine'; T.kept = true; setRefPref('mine');
+        if ($('proof') && $('proof').proofDef === T.cfg.def) renderProof($('proof'), T.cfg.def, rec);
         tvyFrozenCmp(T); tvyDraw(T);
       };
       row.querySelector('.tvy-forget').onclick = () => {
         if (!T.mine || !T.cfg || !T.cfg.def) return;
         if (exSrc) stopExample();
         Mine.forget(Mine.key(T.cfg.def)); tvyLoadMine(T, null); T.kept = false;
+        if ($('proof') && $('proof').proofDef === T.cfg.def) renderProof($('proof'), T.cfg.def, null);
         tvyFrozenCmp(T); tvyDraw(T);
       };
       row.append(infoBadge('About the references', "The switch picks the left picture. Typical: this exercise's sound at typical values for your goal. Demo voice: the same sound in the demo voice set in Settings, at its pitch, resonance and brightness (change them there). Your take: a take of yours you kept with Keep this take, so you can aim to repeat a sound you already made. Hear plays whichever is shown, and the line under the pictures compares your try with it. The dashed goal lines stay the same whatever you pick, and the score is always against the goal. A kept take is one per exercise and goal (keeping another replaces it, ✕ forgets it), stays in this browser only and is never synced, since it is your voice."));;
