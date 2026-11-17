@@ -2322,6 +2322,7 @@
   // noise (dsp whisperFormants, frames carry whisperF). A siren counts slides of the whisper's
   // brightness (F2 and F3 together); a hold scores a whispered vowel on the usual 0-100 scale.
   const NEED_LEGS = 4; // up, down, up, down
+  const SIREN_SETTLE = 15; // whisper frames (~0.25 s) the last slide goes no further before the take ends
   function renderWhisperPanel(d) {
     const p = $('drill-panel'), def = d.def, [lo, hi] = target(), siren = def.kind === 'siren';
     p.innerHTML = `
@@ -2392,7 +2393,9 @@
       if (demo || d.result) return;
       d.legs = Math.max(d.legs, s.legs); d.span = Math.max(d.span, s.span);
       const bar = $('drill-prog'); if (bar) bar.style.width = clamp(d.legs / NEED_LEGS * 100, 0, 100) + '%';
-      if (d.legs >= NEED_LEGS) finishWhisper(d, Math.round((Math.exp(d.span) - 1) * 100), 'whisper');
+      // The last slide counts once it has moved far enough, but the take ends only when that slide is over:
+      // you stop whispering, it stops going further for a moment, or you turn into another slide.
+      if (d.legs >= NEED_LEGS && (s.legs > NEED_LEGS || s.since >= SIREN_SETTLE || !wh.length)) finishWhisper(d, Math.round((Math.exp(d.span) - 1) * 100), 'whisper');
       return;
     }
     // hold: the whispered vowel on the 0-100 scale
@@ -2911,7 +2914,7 @@
   const TVY_TYPES = new Set(['vowel', 'sib', 'word', 'whisper', 'iso']);
   const TvY = { drill: { kind: 'drill' }, spot: { kind: 'spot' }, cache: new Map() };
   const TVY_NAMES = { F1: 'jaw opening (F1)', F2: 'tongue front/back (F2)', F3: 'lips and larynx (F3)', cog: "the hiss's centre" };
-  function tvyReset(T) { T.live = []; T.you = null; T.frozen = false; T.cmp = null; tvyDraw(T); }
+  function tvyReset(T) { T.live = []; T.quiet = 0; T.you = null; T.frozen = false; T.cmp = null; tvyDraw(T); }
   // what to draw for an exercise: chart top, which spectrum, where the goal sits, and the target sound itself
   function tvyDrillCfg(def) {
     const fem = state.goal === 'fem', v = def.vowel && D.VOWEL_BY_KEY[def.vowel], goalF = v && (fem ? v.W : v.M), lines = [];
@@ -2963,8 +2966,16 @@
       setTimeout(() => { if (T.cfg !== cfg) return; T.tgt = tvyStrip(T, analyzeSamples(cfg.x, c.fs), true); T.note = ''; tvyFrozenCmp(T); tvyDraw(T); }, 30);
     }, () => { if (T.cfg === cfg) { T.note = "The reference voice couldn't be loaded"; tvyDraw(T); } });
   }
+  // In an exercise the live picture holds still while nothing is coming in: a short stretch of quiet is kept
+  // (it shows where one try ended and the next began, and lets a consonant's gap through), then it stops scrolling.
+  const TVY_QUIET_KEEP = 12; // frames, ~0.2 s
+  const tvyQuiet = (fr) => fr.kind === 'silence' || (fr.kind === 'other' && !fr.whisperF);
   function tvyPush(T, fr) {
     if (!T.el || !T.cfg || T.frozen) return;
+    if (!T.cfg.spot) {
+      T.quiet = tvyQuiet(fr) ? (T.quiet || 0) + 1 : 0;
+      if (T.quiet > TVY_QUIET_KEEP || (T.quiet && !T.live.length)) return;
+    }
     T.live.push({ kind: fr.kind, spec: fr.spec, wide: fr.wide, formants: fr.formants, whisperF: fr.whisperF, cog: fr.cog, fsd: fr.fsd });
     if (T.live.length > (T.cfg.spot ? 2 * TVY_KEEP : TVY_KEEP)) T.live.shift();
     if (frameCount % 3 === 0) tvyDraw(T);
@@ -2982,7 +2993,7 @@
   // the line under the pictures: the formant that differs most, in plain words
   function tvySay(T) {
     if (!T.cfg) return '';
-    if (!T.frozen) return T.cfg.spot ? (T.tgt ? 'Read the line: your try fills in on the right.' : '') : 'Make the sound: it scrolls in on the right.';
+    if (!T.frozen) return T.cfg.spot ? (T.tgt ? 'Read the line: your try fills in on the right.' : '') : 'Make the sound: it scrolls in on the right and holds still while you are quiet.';
     const c = T.cmp;
     if (!c || !c.rows.length) return 'Too little of your sound was read to compare in numbers; the picture still shows it.';
     if (!c.big) return T.cfg.spot ? 'Across the phrase, your formants sit within 4% of the reference.' : 'Your formants sit within 4% of the target. Close match.';
@@ -6936,5 +6947,5 @@
   init();
 
   // test hook for automated checks
-  window.__vt = { onFrame, state, sessionStats, Sing, showReadingResult, startReading, finishReading, get runFrames() { return Run.frames; }, get readerWords() { return Reader.words.map(w => w.text); }, get analyzer() { return an; }, setAnalyzer(a) { an = a; } };
+  window.__vt = { onFrame, state, sessionStats, Sing, showReadingResult, startReading, finishReading, get runFrames() { return Run.frames; }, get readerWords() { return Reader.words.map(w => w.text); }, get analyzer() { return an; }, setAnalyzer(a) { an = a; }, get tvyDrill() { return TvY.drill; } };
 })();

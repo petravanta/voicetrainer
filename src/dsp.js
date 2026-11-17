@@ -871,17 +871,21 @@
   // Counts the legs of a siren in a brightness series: alternating rises and falls of at least
   // `step` (natural log units, 0.12 is about 13%), with hysteresis so small wobbles do not count.
   const SIREN_STEP = 0.12;
+  const SIREN_FURTHER = 0.015; // a slide still going: a new extreme at least this far (~1.5%) past the last one
   function sirenLegs(vals, step = SIREN_STEP) {
-    let lo = Infinity, hi = -Infinity, dir = 0, ext = 0, legs = 0;
-    for (const v of vals) {
+    let lo = Infinity, hi = -Infinity, dir = 0, ext = 0, legs = 0, extAt = -1, far = 0;
+    const go = (i) => { if (Math.abs(ext - far) >= SIREN_FURTHER) { far = ext; extAt = i; } };
+    vals.forEach((v, i) => {
       lo = Math.min(lo, v); hi = Math.max(hi, v);
       if (dir === 0) {
-        if (v - lo >= step) { dir = 1; legs = 1; ext = v; } else if (hi - v >= step) { dir = -1; legs = 1; ext = v; }
+        if (v - lo >= step) { dir = 1; legs = 1; ext = far = v; extAt = i; } else if (hi - v >= step) { dir = -1; legs = 1; ext = far = v; extAt = i; }
       } else if (dir === 1) {
-        if (v > ext) ext = v; else if (ext - v >= step) { dir = -1; legs++; ext = v; }
-      } else if (v < ext) ext = v; else if (v - ext >= step) { dir = 1; legs++; ext = v; }
-    }
-    return { legs, span: vals.length ? hi - lo : 0, dir };
+        if (v > ext) { ext = v; go(i); } else if (ext - v >= step) { dir = -1; legs++; ext = far = v; extAt = i; }
+      } else if (v < ext) { ext = v; go(i); } else if (v - ext >= step) { dir = 1; legs++; ext = far = v; extAt = i; }
+    });
+    // extAt: where the leg in progress last went clearly further (SIREN_FURTHER, so a wobbly end doesn't count). A leg is counted as soon as it has moved `step`,
+    // part way through the slide; it is only finished once it stops going further (see the whisper siren).
+    return { legs, span: vals.length ? hi - lo : 0, dir, extAt, since: extAt < 0 ? 0 : vals.length - 1 - extAt };
   }
 
   // ---------- embodied voice (unscored) ----------
