@@ -233,6 +233,8 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .progress { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.1s linear; }
 .drill-msg { min-height: 1.5em; }
+#drill-result.prev .result { opacity: .6; }
+.again-note { color: var(--muted); }
 .result { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
 .result-score { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .result-score strong { font-family: var(--font-mono); font-weight: 500; font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; }
