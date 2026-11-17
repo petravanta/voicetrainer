@@ -716,6 +716,65 @@
     return { pos, dir, distance: pos < lo ? lo - pos : pos > hi ? pos - hi : 0, onTarget: dir === 0 };
   }
 
+
+  // ---------- voice dimensions: one model for every summary (readings, Freestyle sessions, drills) ----------
+  // Groups what the app measured by the knob it belongs to (pitch, resonance, voice quality, melody, articulation),
+  // each with a value, where it sits against the goal, and a 0-100 position for a bar. Only what was measured
+  // is listed; the knobs the app can't read yet are named in notMeasured so nothing is faked.
+  // m: { goal, pitchBand: [lo, hi] Hz, pitch: { median, p10?, p90?, share? (0..1 in target) } | null,
+  //      res: { score, pm?, shaky?, why? } | null, fo: formantSummary(...) or formantOffsets(...) | null,
+  //      breath: number | null (scale 2), sib: { s?, sh? } scores }
+  const DIM_PITCH_AXIS = [70, 400]; // Hz, log scale, for the pitch bar
+  const DIM_SPREAD_MAX = 24; // semitones, for the pitch movement bar
+  const DIMS_NOT_MEASURED = ['larynx height on its own', 'vocal weight', 'twang', 'loudness', 'rhythm'];
+  function voiceDims(m) {
+    const goal = m.goal === 'masc' ? 'masc' : 'fem', fem = goal === 'fem', fin = (x) => typeof x === 'number' && Number.isFinite(x);
+    const oneSided = (v, [lo, hi], unit = '') => {
+      const ok = fem ? v >= lo : v <= hi, gap = fem ? lo - v : v - hi;
+      return { status: ok ? 'ok' : 'off', dir: ok ? 0 : fem ? 1 : -1, gap: ok ? 0 : gap, verdict: ok ? 'on goal' : `${fem ? '↑' : '↓'} ${Math.max(1, Math.round(gap))}${unit} to goal` };
+    };
+    const groups = [];
+    // pitch
+    const p = m.pitch, pb = m.pitchBand || PITCH_BANDS[goal];
+    if (p && fin(p.median) && p.median > 0) {
+      const ax = (hz) => 100 * (Math.log(Math.min(Math.max(hz, DIM_PITCH_AXIS[0]), DIM_PITCH_AXIS[1])) - Math.log(DIM_PITCH_AXIS[0])) / (Math.log(DIM_PITCH_AXIS[1]) - Math.log(DIM_PITCH_AXIS[0]));
+      const j = oneSided(p.median, pb, ' Hz');
+      const sub = fin(p.p10) && fin(p.p90) ? `${Math.round(p.p10)}-${Math.round(p.p90)} Hz` : '';
+      const rows = [{ key: 'pitch', label: 'Pitch', sub: 'median', value: `${Math.round(p.median)} Hz`, more: sub, pos: ax(p.median), zone: [ax(pb[0]), ax(pb[1])], goal: `${pb[0]}-${pb[1]} Hz`, ...j }];
+      if (fin(p.share)) rows.push({ key: 'share', label: 'Time in target', sub: '', value: `${Math.round(p.share * 100)}%`, pos: p.share * 100, zone: null, goal: `${pb[0]}-${pb[1]} Hz`, status: 'info', dir: 0, gap: 0, verdict: 'of voiced time' });
+      groups.push({ key: 'pitch', title: 'Pitch', rows });
+    }
+    // resonance: the score, then the three formants it is made from
+    const res = m.res, rb = RES_BANDS[goal];
+    if (res && (fin(res.score) || res.why)) {
+      const rows = [];
+      if (fin(res.score)) rows.push({ key: 'res', label: 'Resonance score', sub: '', value: (res.shaky ? '≈' : '') + Math.round(res.score), more: fin(res.pm) ? `± ${res.pm}` : '', pos: res.score, zone: rb, goal: `${rb[0]}-${rb[1]}`, ...oneSided(res.score, rb) });
+      else rows.push({ key: 'res', label: 'Resonance score', sub: '', value: '--', pos: null, zone: rb, goal: `${rb[0]}-${rb[1]}`, status: 'na', dir: 0, gap: 0, verdict: 'no reading', why: res.why });
+      const fo = m.fo, hasFo = fo && fo.rows && fo.rows.some(r => r.score != null || r.skip === 'pitch');
+      let note = '';
+      if (hasFo) {
+        const together = fo.together != null ? fo.together : fo.focus && fo.focus.formant === 'all' ? fo.focus.dir : 0;
+        if (together) note = together > 0 ? 'F2 and F3 are low together: that points to throat length, so a slightly higher larynx moves both.' : 'F2 and F3 are high together: that points to throat length, so a slightly lower larynx moves both.';
+      }
+      groups.push({ key: 'res', title: 'Resonance', rows, fo: hasFo ? fo : null, note, larynx: hasFo ? (note ? (note.includes('higher') ? 1 : -1) : 0) : null });
+    }
+    // voice quality
+    if (fin(m.breath)) {
+      const [lo, hi] = BREATH_BAND[goal], b = m.breath, ok = b >= lo && b <= hi;
+      groups.push({ key: 'quality', title: 'Voice quality', rows: [{ key: 'breath', label: 'Breathiness', sub: '', value: String(Math.round(b)), pos: b, zone: [lo, hi], goal: `${lo}-${hi}`,
+        status: ok ? 'ok' : 'off', dir: ok ? 0 : b < lo ? 1 : -1, gap: ok ? 0 : b < lo ? lo - b : b - hi, verdict: ok ? 'in zone' : b < lo ? `↑ ${Math.max(1, Math.round(lo - b))} airier` : `↓ ${Math.max(1, Math.round(b - hi))} firmer` }] });
+    }
+    // melody: how far the pitch moves (10th to 90th percentile); no goal, a style rather than a size
+    if (p && fin(p.p10) && fin(p.p90) && p.p10 > 0 && p.p90 >= p.p10) {
+      const st = 12 * Math.log2(p.p90 / p.p10);
+      groups.push({ key: 'melody', title: 'Melody', rows: [{ key: 'spread', label: 'Pitch movement', sub: 'low to high', value: `${st.toFixed(1)} st`, pos: 100 * Math.min(st, DIM_SPREAD_MAX) / DIM_SPREAD_MAX, zone: null, goal: '', status: 'info', dir: 0, gap: 0, verdict: 'no goal' }] });
+    }
+    // articulation: sibilant brightness, on the resonance scale and bands
+    const sib = m.sib || {}, srows = [];
+    for (const [k, lab] of [['s', '/s/ brightness'], ['sh', '/ʃ/ brightness']]) if (fin(sib[k])) srows.push({ key: k, label: lab, sub: '', value: String(Math.round(sib[k])), pos: sib[k], zone: rb, goal: `${rb[0]}-${rb[1]}`, ...oneSided(sib[k], rb) });
+    if (srows.length) groups.push({ key: 'artic', title: 'Articulation', rows: srows });
+    return { goal, groups, notMeasured: DIMS_NOT_MEASURED.slice() };
+  }
   // ---------- reading-along helpers ----------
   // Rough English syllable count for a written word (vowel groups, silent final e).
   function countSyllables(word) {
@@ -2942,7 +3001,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,

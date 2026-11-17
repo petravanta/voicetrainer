@@ -1548,6 +1548,59 @@
     return `<div class="fo fo-sum"><div class="section-head"><h4>${title}${infoHtml('How the formants are compared', FO_HELP + ' Here each vowel is compared with its own averages, then the vowels are pooled, weighted by how long each was heard; "3 of 5" counts the vowels where that formant was off.')}</h4></div>
       <p class="fo-say">${say}${tg}${aside}</p><div class="fo-rows">${rows}</div></div>`;
   }
+  // ---------------- voice dimensions panel ----------------
+  // One panel for every summary (a reading's result, Freestyle's session, a drill's result): what was measured,
+  // grouped by the knob it belongs to, each with its value, a bar with the goal zone, and where it sits against
+  // the goal. The model comes from D.voiceDims; the knobs the app can't read yet are named once at the foot.
+  const DIM_INFO = {
+    pitch: 'The middle of your speaking pitch, with the range most of it sat in underneath (10th to 90th percentile). The dashed box is your target band from Settings; for a feminine goal anything above it counts too, for a masculine one anything below.',
+    share: 'How much of the time your voice was in the target pitch band (or past it on the goal side).',
+    res: 'How your vowels\' formants sit between the average man (37.5) and the average woman (62.5), each vowel against its own averages. The dashed box is your goal band; past its far end still counts. The three rows under it are the formants it is made from.',
+    fo: FO_HELP,
+    breath: 'How much air comes through with the tone, from 0 (firm, pressed) to 100 (mostly air). The dashed box is the zone the Breath exercises use for your goal. A rough guide: it notices a lot of air but can miss mild airiness.',
+    spread: 'How far your pitch moves from low to high (10th to 90th percentile), in semitones. There is no target: a wider spread usually sounds livelier, and feminine speech tends to move more, but melody is a style, not a size. The Prosody exercises practise rises and falls.',
+    s: 'Where the hiss of /s/ has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands.',
+    sh: 'Where the hiss of /ʃ/ ("sh") has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands.',
+    none: 'Larynx height shows only as a hint, when F2 and F3 move together (the note under Resonance). Vocal weight (how heavy or light the folds vibrate), twang, loudness and rhythm need measures the app doesn\'t have yet, so they are left out rather than guessed.',
+  };
+  const DIM_RB = new Set(['res', 's', 'sh']); // rows on the resonance scale: the rainbow marker when on target
+  const dimPct = (x) => clamp(x, 0, 100).toFixed(1);
+  function dimTrack(pos, zone, avgs, plain) {
+    return `<span class="fo-track dim-track${plain ? ' plain' : ''}">${avgs ? '<i class="fo-avg m"></i><i class="fo-avg w"></i>' : ''}`
+      + `${zone ? `<span class="fo-zone" style="left:${dimPct(zone[0])}%;width:${(clamp(zone[1], 0, 100) - clamp(zone[0], 0, 100)).toFixed(1)}%"></span>` : ''}`
+      + `${pos != null ? `<span class="fo-mark" style="left:${dimPct(pos)}%"></span>` : ''}</span>`;
+  }
+  // model: D.voiceDims(...); opt.extra: { rowKey: html } shown under a row's verdict (a change since last time,
+  // the reference voice's number); opt.more: { rowKey: text } under its value; opt.live: formants in Hz (one take);
+  // opt.F: the take's F1-F3 (Hz) for opt.live; opt.title
+  function dimsHtml(model, opt = {}) {
+    if (!model || !model.groups.length) return '';
+    const ex = opt.extra || {}, more = opt.more || {};
+    const row = (r) => {
+      const m = more[r.key] != null ? more[r.key] : r.more || '';
+      return `<div class="dim-row ${r.status}${DIM_RB.has(r.key) ? ' rb' : ''}" data-dim="${r.key}">`
+        + `<span class="dim-lab">${r.label}${r.sub ? ` <small>${r.sub}</small>` : ''}${DIM_INFO[r.key] ? infoHtml(`About ${r.label.toLowerCase()}`, DIM_INFO[r.key]) : ''}</span>`
+        + `<span class="dim-val"><b>${r.value}</b>${m ? `<small>${m}</small>` : ''}</span>`
+        + dimTrack(r.pos, r.zone, DIM_RB.has(r.key), r.key === 'breath' || r.key === 'spread' || r.key === 'share')
+        + `<span class="dim-vs"><span class="dim-verdict">${r.status === 'ok' ? '✓ ' : ''}${r.verdict}</span>${r.goal ? `<small class="dim-goal">goal ${r.goal}</small>` : ''}${ex[r.key] ? `<span class="dim-ex">${ex[r.key]}</span>` : ''}</span></div>`;
+    };
+    const foRow = (x, worst) => {
+      const cls = x.skip ? 'na' : x.unsure ? 'unsure' : x.need ? 'off' : 'ok', i = x.i;
+      const val = opt.live && opt.F ? `${Math.round(opt.F[i])} Hz` : x.score != null ? String(Math.round(x.score)) : '--';
+      return `<div class="dim-row dim-fo ${cls}${i === worst ? ' worst' : ''}${cls === 'ok' ? ' rb' : ''}" data-dim="F${i + 1}">`
+        + `<span class="dim-lab"><b>F${i + 1}</b> <small>${FO_ROLE[i]}</small></span><span class="dim-val">${val}</span>`
+        + dimTrack(x.score, x.zone, true, false) + `<span class="dim-vs"><span class="dim-verdict">${!x.skip && !x.need ? '✓ in zone' : foVal(x, !!opt.live)}</span></span></div>`;
+    };
+    const groups = model.groups.map(g => {
+      let body = g.rows.map(row).join('');
+      if (g.fo) body += `<div class="dim-sub" role="group" aria-label="The three formants">${g.fo.rows.map(x => foRow(x, g.fo.worst)).join('')}</div>`
+        + (g.note ? `<p class="dim-note small">${g.note}</p>` : '');
+      return `<section class="dim-g" data-g="${g.key}"><h5 class="dim-h">${g.title}${g.fo ? infoHtml('How the formants are compared', DIM_INFO.fo) : ''}</h5>${body}</section>`;
+    }).join('');
+    return `<div class="dims"><div class="section-head"><h4>${opt.title || 'Voice dimensions'}</h4><span class="muted small">goal: ${model.goal === 'fem' ? 'feminine' : 'masculine'}</span></div>
+      <div class="dims-grid">${groups}</div>
+      <p class="dims-nm small muted">Not measured yet: ${model.notMeasured.join(', ')}.${infoHtml('What the app does not measure yet', DIM_INFO.none)}</p></div>`;
+  }
   // the off formants of one vowel, as a short line for its row in the vowel list
   function foVowelLine(off) {
     if (!off) return '';
@@ -2945,23 +2998,24 @@
     const box = $('drill-result');
     box.classList.remove('prev');
     const parts = [];
-    const pill = (s) => `<span class="pill ${onTarget(s) ? 'good' : 'warn'}">${onTarget(s) ? 'on target' : 'off target'}</span>`;
-    if (res.vowelScore != null) {
-      const v = D.VOWEL_BY_KEY[res.vowel], fo = D.formantOffsets(res.F, v, state.goal, { f0: res.f0 || 0 });
-      parts.push(`<div class="result">
-        <div class="result-score"><strong>${Math.round(res.vowelScore)}</strong><span>vowel "${v.cue}" resonance score</span>${pill(res.vowelScore)}</div>
-        <table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th><th>Scale</th><th>To goal</th></tr></thead><tbody>
-        ${fo.rows.map((r, i) => `<tr class="${r.skip ? 'na' : r.need ? 'off' : 'ok'}${i === fo.worst ? ' worst' : ''}"><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td><td>${r.score == null ? '--' : Math.round(r.score)}</td><td>${foVal(r, true)}</td></tr>`).join('')}
-        </tbody></table>
-        ${fo.worst != null ? `<p class="fo-say small">Furthest off: ${foName(fo.worst)}, ${FO_MOVE[fo.worst][fo.rows[fo.worst].need > 0 ? 0 : 1]}.${infoHtml('How the formants are compared', FO_HELP)}</p>` : ''}
-        <p class="tip">${vowelTip(res)}</p></div>`);
-    }
-    if (res.sibScore != null) {
-      const s = D.SIBILANTS[res.sib];
-      parts.push(`<div class="result">
-        <div class="result-score"><strong>${Math.round(res.sibScore)}</strong><span>/${res.sib === 's' ? 's' : 'ʃ'}/ brightness · ${(res.cog / 1000).toFixed(1)} kHz (masc avg ${(s.M / 1000).toFixed(1)}, fem avg ${(s.W / 1000).toFixed(1)})</span>${pill(res.sibScore)}</div>
-        <p class="tip">${sibTip(res)}</p></div>`);
-    }
+    const v = res.vowelScore != null ? D.VOWEL_BY_KEY[res.vowel] : null, fo = v ? D.formantOffsets(res.F, v, state.goal, { f0: res.f0 || 0 }) : null;
+    const s = res.sibScore != null ? D.SIBILANTS[res.sib] : null;
+    // the take's dimensions: the scored sound's resonance score and formants, its hiss, and the pitch it was held at
+    const model = D.voiceDims({ goal: state.goal, pitchBand: pitchBand(),
+      pitch: res.f0 > 0 ? { median: res.f0 } : null,
+      res: v ? { score: res.vowelScore } : null, fo,
+      sib: s ? { [res.sib]: res.sibScore } : {} });
+    const label = v ? `vowel "${v.cue}" resonance score` : s ? `/${res.sib === 's' ? 's' : 'ʃ'}/ brightness` : 'score';
+    const sc = res.score != null && Number.isFinite(res.score) ? res.score : (res.vowelScore ?? res.sibScore);
+    parts.push(`<div class="result">
+      <div class="result-score"><strong>${Math.round(sc)}</strong><span>${res.type === 'word' ? 'word score (vowel and hiss)' : label}</span><span class="pill ${onTarget(sc) ? 'good' : 'warn'}">${onTarget(sc) ? 'on target' : 'off target'}</span></div>
+      ${dimsHtml(model, { title: 'This take', live: true, F: res.F, more: { s: s && res.sib === 's' ? `${(res.cog / 1000).toFixed(1)} kHz` : '', sh: s && res.sib === 'sh' ? `${(res.cog / 1000).toFixed(1)} kHz` : '' } })}
+      ${fo && fo.worst != null ? `<p class="fo-say small">Furthest off: ${foName(fo.worst)}, ${FO_MOVE[fo.worst][fo.rows[fo.worst].need > 0 ? 0 : 1]}.</p>` : ''}
+      ${v ? `<details class="dim-hz"><summary>Formants in Hz, against the averages</summary><table class="formant-table"><thead><tr><th></th><th>You</th><th>Masc avg</th><th>Fem avg</th></tr></thead><tbody>
+        ${fo.rows.map((r, i) => `<tr class="${r.skip ? 'na' : r.need ? 'off' : 'ok'}${i === fo.worst ? ' worst' : ''}"><td>${['Jaw', 'Tongue', 'Lips, larynx'][i]} <small>F${i + 1}</small></td><td>${Math.round(res.F[i])}</td><td>${v.M[i]}</td><td>${v.W[i]}</td></tr>`).join('')}
+        </tbody></table></details>` : ''}
+      ${s ? `<p class="small muted">Hiss centre ${(res.cog / 1000).toFixed(1)} kHz; masc avg ${(s.M / 1000).toFixed(1)}, fem avg ${(s.W / 1000).toFixed(1)}.</p>` : ''}
+      ${v ? `<p class="tip">${vowelTip(res)}</p>` : ''}${s ? `<p class="tip">${sibTip(res)}</p>` : ''}</div>`);
     box.innerHTML = parts.join('');
   }
 
@@ -3347,35 +3401,26 @@
     }
     const vm = $('sess-vmap');
     if (vm) { vm.hidden = !st.map.length; if (st.map.length) vm.innerHTML = vowelMapSvg(st.map.map(m => ({ k: m.k, F: m.F, s: m.s, n: m.n }))); }
-    const sf = $('sess-fo');
-    if (sf) sf.innerHTML = st.map.length ? foSummaryHtml(D.formantSummary(st.map, state.goal, st.pitch ? st.pitch.median : 0)) : '';
-    const sb = $('sess-sibs');
-    if (Object.keys(st.sib).length) {
-      sb.innerHTML = '';
-      for (const k of Object.keys(st.sib)) sb.appendChild(barRow(k === 's' ? '/s/' : '/ʃ/', k === 's' ? 'see' : 'she', st.sib[k].score));
+    const dm = $('sess-dims');
+    if (dm) {
+      const vp = session.pitch.filter(p => p > 0), [plo, phi] = pitchBand();
+      const share = vp.length >= 10 ? vp.filter(p => (state.goal === 'fem' ? p >= plo : p <= phi)).length / vp.length : NaN;
+      const model = D.voiceDims({ goal: state.goal, pitchBand: pitchBand(),
+        pitch: st.pitch ? { median: st.pitch.median, p10: st.pitch.p10, p90: st.pitch.p90, share } : null,
+        res: Number.isFinite(st.resonance) ? { score: st.resonance } : null,
+        fo: st.map.length ? D.formantSummary(st.map, state.goal, st.pitch ? st.pitch.median : 0) : null,
+        breath: Number.isFinite(st.breath) ? st.breath : null, sib: { s: st.sib.s && st.sib.s.score, sh: st.sib.sh && st.sib.sh.score } });
+      const html = model.groups.length ? dimsHtml(model, { title: 'This session so far', more: { breath: Number.isFinite(st.breath) ? breathWord(st.breath) : '' } })
+        : '<p class="empty">Speak, hold a vowel or an "sss": pitch, resonance score, formants, breathiness and sibilants appear here, each against your goal.</p>';
+      // redrawn twice a second while you speak: not while one of its info badges is open, nor when nothing changed
+      const key = html.replace(/info-dyn-\d+/g, '');
+      if (dm._key !== key && !dm.querySelector('.info-btn[aria-expanded="true"]')) { dm._key = key; dm.innerHTML = html; }
     }
-    const sum = $('sess-summary');
-    const rows = [
-      ['Overall resonance', Number.isFinite(st.resonance) ? Math.round(st.resonance) : '--'],
-      ['Median pitch', st.pitch ? `${Math.round(st.pitch.median)} Hz` : '--'],
-      ['Pitch in target', pitchInTarget(session.pitch)],
-      ['Pitch range (10-90%)', st.pitch ? `${Math.round(st.pitch.p10)}-${Math.round(st.pitch.p90)} Hz` : '--'],
-      ['Median breathiness', Number.isFinite(st.breath) ? `${Math.round(st.breath)} (${breathWord(st.breath)})` : '--'],
-      ['Drills completed', session.drills.length],
-    ];
-    sum.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    const dn = $('sess-drills'); if (dn) dn.textContent = session.drills.length ? `${session.drills.length} drill${session.drills.length > 1 ? 's' : ''} done ·` : '';
   }
 
-  // share of voiced frames inside the target pitch band (above it counts for a feminine goal, below it for a masculine one)
-  function pitchInTarget(ps) {
-    const [lo, hi] = pitchBand(), v = (ps || []).filter(p => p > 0);
-    if (v.length < 10) return `-- <small class="muted">(${lo}-${hi} Hz)</small>`;
-    const ok = v.filter(p => (state.goal === 'fem' ? p >= lo : p <= hi)).length;
-    return `${Math.round(ok / v.length * 100)}% <small class="muted">(${lo}-${hi} Hz)</small>`;
-  }
   function resetSessionViews() {
     $('sess-vowels').innerHTML = '<p class="empty">Vowels you use will appear here with their own score, so you can see which ones pull your resonance down.</p>';
-    $('sess-sibs').innerHTML = '<p class="empty">Hold an "sss" or "shh" to measure how bright your sibilants are.</p>';
     renderSession();
   }
 
@@ -4638,6 +4683,17 @@
     }[rec.resWhy];
     return `<small>${D.SING_WHY[rec.resWhy]}${more ? infoHtml('Why no resonance', more) : ''}</small>`;
   }
+  // the formant summary of a reading (its vowel map pooled), or null for readings saved before the map
+  function readingFoSum(rec) {
+    if (!rec.vmap) return null;
+    return D.formantSummary(Object.entries(rec.vmap).map(([k, a]) => ({ k, F: a.slice(0, 3), s: a[3], n: a[4] })), state.goal, rec.pitchMedian || 0);
+  }
+  function readingDims(rec) {
+    return D.voiceDims({ goal: state.goal, pitchBand: pitchBand(),
+      pitch: rec.pitchMedian != null ? { median: rec.pitchMedian, p10: rec.pitchP10, p90: rec.pitchP90 } : null,
+      res: { score: rec.resonance, pm: rec.resPm, shaky: rec.resShaky, why: rec.resWhy || (rec.resonance == null ? 'none' : undefined) },
+      fo: readingFoSum(rec), breath: rec.breath, sib: { s: rec.sibS, sh: rec.sibSh } });
+  }
   const REF_KEY = 'voicetrainer.refcompare';
   const refOn = () => { try { return localStorage.getItem(REF_KEY) === '1'; } catch (e) { return false; } };
   // A reading's result, or (rec.ref) the demo voice's measured reading of a passage. opt.ref: the demo voice's
@@ -4653,7 +4709,6 @@
     const [lo, hi] = target();
     const weak = isRef ? [] : Object.entries(rec.vowels || {}).filter(([, s]) => !onTarget(Math.round(s))).sort((a, b) => gapOf(b[1]) - gapOf(a[1])).slice(0, 3);
     const spots = isRef ? [] : spotsFor(rec);
-    const stat = (label, v, extra = '') => `<div class="stat"><b>${v}</b><span>${label}</span>${extra}</div>`;
     const vv = rec.voice, clip = !!(vv && vv.clip), setRes = vv && !clip ? Math.round(D.resScore(vv.res / 100)) : null;
     const text = Texts.all().find(x => x.id === rec.text), refWho = ref ? RefRead.who(ref) : RefRead.whoFor(text);
     const refSet = !ref ? '' : ref.voice.clip ? ` A neural voice (${ref.voice.name}) made ahead of time; Voice settings picks feminine or masculine.` : `, set to ${ref.voice.pitch} Hz and resonance ${Math.round(D.resScore(ref.voice.res / 100))} in Voice settings.`;
@@ -4663,12 +4718,11 @@
         ? "A neural text-to-speech voice (Kokoro) read this passage ahead of time, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. It sounds like a person, with a person's melody, so it is a good target to aim at. It is one voice, though, not the only way to sound feminine or masculine. Pick Demo voice under Voice settings for the app's own synthetic voice, whose pitch and resonance you can set."
         : "The app's demo voice reads the same passage at the pitch, resonance and brightness set in Voice settings, and the app measures it exactly the way it measures you. Its words are laid over yours word by word, so a different pace doesn't matter. Use it as a target to aim at, and as a check: where the demo voice reads close to what it was set to, the measuring works for that bit of the passage. It is a machine voice, so its melody is simpler than real speech.") + '</div>';
     box.innerHTML = `<div class="section-head"><h3>${escapeHtml(rec.title)}${isRef ? `: the ${RefRead.who(rec)}` : ''}</h3><span class="muted small">${isRef ? `Not saved · ${clockOf(rec.seconds)} long` : rec.partial ? `Partial reading (${rec.cover}% read), kept out of the trend` : `${rec.cover}% read in ${Math.round(rec.seconds / 6) / 10} min`}</span></div>
-      <div class="stats">
-        ${stat('Resonance score', rec.resonance != null ? (rec.resShaky ? '≈' : '') + Math.round(rec.resonance) : '--', resNote(rec) + (isRef ? (clip ? '' : `<small>set to ${setRes}</small>`) : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${Math.round(ref.resonance)}</small>` : '')))}
-        ${stat('/s/ brightness', rec.sibS != null ? Math.round(rec.sibS) : '--', isRef ? '' : delta(rec.sibS, last && last.sibS))}
-        ${stat('Pitch', rec.pitchMedian != null ? rec.pitchMedian + ' Hz' : '--', `${rec.pitchP10 != null ? `<small>${rec.pitchP10}-${rec.pitchP90} Hz</small>` : ''}${isRef ? (clip ? '' : `<small>set to ${vv.pitch} Hz</small>`) : `<small>target ${pitchBand().join('-')} Hz</small>`}${ref && ref.pitchMedian != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${ref.pitchMedian} Hz</small>` : ''}`)}
-        ${stat('Breathiness', rec.breath != null ? Math.round(rec.breath) : '--', rec.breath != null ? `<small>${breathWord(rec.breath)}</small>` : '')}
-      </div>
+      ${dimsHtml(readingDims(rec), { more: { breath: rec.breath != null ? breathWord(rec.breath) : '' }, extra: {
+        res: (rec.resShaky || rec.resonance == null ? resNote(rec) : '') + (isRef ? (clip ? '' : `<small>set to ${setRes}</small>`) : delta(rec.resonance, last && last.resonance) + (ref && ref.resonance != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${Math.round(ref.resonance)}</small>` : '')),
+        s: isRef ? '' : delta(rec.sibS, last && last.sibS),
+        pitch: (isRef ? (clip ? '' : `<small>set to ${vv.pitch} Hz</small>`) : '') + (ref && ref.pitchMedian != null ? `<small class="ref-num">${ref.voice.clip ? 'neural' : 'demo'} ${ref.pitchMedian} Hz</small>` : ''),
+      } })}
       ${isRef && clip ? `<p class="small">A neural voice (${escapeHtml(vv.name)}, Kokoro) reading this passage, made ahead of time and measured exactly the way your readings are. It sounds like a person, so its pitch moves and its vowels vary the way real speech does. Your own readings of this passage can show it as a dashed line: Compare with the neural voice.${infoHtml('About the neural voice reading', "Kokoro-82M, an open text-to-speech model, read each built-in passage once, and the model itself gave the moment each word starts, so the app knows where every word is. It reads in a feminine or a masculine voice, following the voice type in Voice settings; its pitch and resonance are its own. Your own passages use the demo voice, whose pitch and resonance you can set. Nothing here is saved.")}</p>`
         : isRef ? `<p class="small">The demo voice reading this passage at ${vv.pitch} Hz, resonance ${setRes} and brightness ${vv.bright} (${vv.style === 'natural' ? 'Natural' : 'Classic'}), measured exactly the way your readings are. Where a word reads far from what the voice was set to, the measuring falls short there, not the voice. Your own readings of this passage can show it as a dashed line: Compare with the demo voice.${infoHtml('About the demo voice reading', "The app makes this voice itself, from the passage's spelling and a pronunciation dictionary, so it knows exactly when each word starts and which vowels it should have. It is not a real speaker: its melody is simple and its consonants are rough, but its pitch and resonance are exactly what Voice settings asks for. Change those there and open this again to hear and measure another voice. Nothing here is saved.")}</p>`
         : `<p class="small muted">${rec.partial ? 'Read at least 70% of the passage for a reading to count in the trend.' : best != null ? (better(rec.resonance, best) || rec.resonance === best ? 'Your best resonance on this passage so far.' : `Your best on this passage is ${Math.round(best)}.`) : 'Your first full reading of this passage. Read it again another day to see the trend.'}</p>`}
@@ -4779,7 +4833,6 @@
     return `<div class="vm"><div class="section-head"><h4>${rec.ref ? `The ${RefRead.who(rec)}'s vowels` : 'Your vowels'}${infoHtml('How your vowels are scored', `${rec.vsrc === 'text' ? 'Each vowel you held steadily on a word that has it, scored on its own. A vowel only counts when it sounds like the vowel the word should have; short words like "the" and "of", and gliding vowels like in "sign" or "round", are left out.' : vm ? 'Each vowel you held steadily, scored on its own. This reading was saved before vowels were checked against the text, so a vowel and the words listed under it may be mismatched.' : 'Each vowel you held steadily, scored on its own (consonants are left out).'} ${vm ? 'On the chart, each dot is your average for that vowel; the dashed line points to the typical value for your goal.' : 'This reading was saved before the vowel chart existed, so only the scores are shown.'}`)}</h4><span class="muted small">${rows.length} vowel${rows.length > 1 ? 's' : ''} heard · goal ${lo}-${hi}</span></div>
       ${vm ? `<div class="vm-chart">${vowelMapSvg(rows, refRows, rec.ref ? RefRead.who(rec) : 'you', ref ? RefRead.who(ref) : '')}</div>` : ''}
       <ul class="vm-list">${list}</ul>
-      ${fsum ? foSummaryHtml(fsum) : ''}
       <p class="small muted">Tap a vowel to practise it.${infoHtml('Why some vowels are missing', 'Short vowels in quick speech are rarely held long enough to score, so some may be missing.')}</p></div>`;
   }
   // ---- word by word: pitch and resonance under each word of the passage ----
