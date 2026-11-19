@@ -4624,6 +4624,9 @@
         || D.alignWords(fa, heardTo >= 0 ? script.slice(0, heardTo + 1) : script, { ref: clip ? clip.words : null, free: heardTo < 0, guess: live.reach + 1 });
     }
     if (al) fl = D.retagFrames(fl, al.ws);
+    // the vowel map from the re-placed words: live, the highlight was often a word off, so few vowels matched their word
+    const rv = D.readingVowels(fl, script, PRON); fl = rv.frames;
+    const vmap = D.vowelMap(rv.vf, D.READ_VMAP_MIN);
     const reach = al ? Math.max(al.last, heardTo) : Math.max(live.reach, sm ? sm.last : -1);
     const mw = al ? Object.assign(D.missedWords(fl, Reader.words.length), { reach }) : live;
     const cover = Reader.words.length ? clamp((Math.max(Run.maxIdx, reach) + 1) / Reader.words.length, 0, 1) : 0;
@@ -4639,7 +4642,7 @@
       breath: round(st.breath),
       // word by word: [word, pitch Hz, resonance, sibilant score], for the report after the reading
       // vowel map: { vowel: [F1, F2, F3, score, frames, [words it was heard in]] }
-      vmap: readingVowelMap(st.map, Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
+      vmap: readingVowelMap(vmap.length ? vmap : st.map, vmap.length ? fl : Run.frames, Reader.words), vsrc: 'text', // vowels checked against the text's words
       gates: Run.gates || undefined, // how many voiced moments passed each step, for "How word by word works"
       // Check words: script words the speech recogniser didn't hear (indices); without it, none (missBy says which)
       miss: sm && sm.miss.length ? sm.miss : undefined, missBy: sm ? (sm.lost ? 'lost' : 'speech') : undefined,
