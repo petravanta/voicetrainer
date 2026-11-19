@@ -1523,6 +1523,30 @@
     });
   }
 
+  // A reading's vowels, sorted again once its word edges have been re-placed (retagFrames), for the vowel map.
+  // Each voiced frame is checked against the vowels its aligned word should have (matchWordVowel, the same rule
+  // as live). Two things kept the map down to a vowel or two in a short reading (Petra, 2026-11-19, 14 s of the
+  // Rainbow passage: one vowel shown from ~25 matched frames): live, the highlight lags or runs ahead, so a vowel
+  // was checked against the wrong word; and only steady frames counted, under half of the voiced ones in running
+  // speech. Short vowels now count from their single-frame formants (rawF), as word scores already do, since the
+  // word's own vowels filter them. On her readings this gives 5 vowels in 16 s instead of 1-2.
+  // frames: Run.frames form ({ i, F, rawF, f0, st, k }); texts: the passage's words.
+  // Returns { frames (k set from the aligned word, or cleared), vf: { key: [[F1, F2, F3, score]] } }.
+  const READ_VMAP_MIN = 6; // frames (~100 ms) a vowel needs in a reading before the map shows it
+  function readingVowels(frames, texts, pron) {
+    const wv = texts.map(t => wordVowels(t, pron)), vf = {};
+    const out = frames.map(f => {
+      const w = wv[f.i], F = f.st && f.F ? f.F : f.rawF;
+      let k = null;
+      if (w && w.why === 'ok' && F && f.f0 > 0) {
+        const m = matchWordVowel(F, w.keys, classifyVowel(F, VOWELS, f.f0), f.f0);
+        if (m) { k = m.vowel.key; (vf[k] = vf[k] || []).push([F[0], F[1], F[2], Math.max(0, Math.min(100, resScore(m.alpha)))]); }
+      }
+      return f.k === k ? f : Object.assign({}, f, { k });
+    });
+    return { frames: out, vf };
+  }
+
   // ---------- word labels for the pitch track ----------
   // Speech recognition gives words but no timings. Spread the words over the voiced frames heard
   // since the previous result: one word per voiced stretch when the counts match, otherwise by
@@ -3001,7 +3025,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, readingVowels, READ_VMAP_MIN, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
