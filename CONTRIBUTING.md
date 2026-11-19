@@ -61,7 +61,7 @@ Feelings are dealt at random in the Embody exercise. `family` is a rough group (
 
 ## Data or code?
 
-Anything you can describe with the existing fields is data. A new vowel or sibilant target needs measured formant data in `src/dsp.js`, a new kind of control exercise needs a scoring rule there, a new kind of whisper exercise needs its own check in `src/app.js`, and prosody exercises each have their own pitch check in `src/app.js`, so those are code changes. Open an issue or a pull request for that.
+Anything you can describe with the existing fields is data. A new vowel or sibilant target needs measured formant data in `src/dsp.js`, a new kind of control exercise needs a scoring rule there, a new kind of whisper exercise needs its own check in `src/app.js`, a new kind of sibilant exercise (beyond glide, ladder and pairs) needs its own check in `src/dsp.js`, and prosody exercises each have their own pitch check in `src/app.js`, so those are code changes. Open an issue or a pull request for that.
 
 ## Checking locally
 
