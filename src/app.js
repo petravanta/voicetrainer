@@ -14,6 +14,8 @@
     sibilants: [
       { id: 's-s', type: 'sib', sib: 's', cue: 'sss', sub: 'as in "see"', title: 'Sustained "sss"' },
       { id: 's-sh', type: 'sib', sib: 'sh', cue: 'shh', sub: 'as in "she"', title: 'Sustained "shh"' },
+      // brightness exercises (data/sibex.json): a glide, ladders and word pairs, read from the hiss's centre
+      ...DATA.sibex.map(x => ({ ...x, type: 'sibex', steps: (fem) => x.steps.map(st => (typeof st === 'string' ? st : fem ? st.feminine : st.masculine)) })),
     ],
     words: DATA.words.map(({ word: w, sibilant: sib, vowel: v }) => ({ id: 'w-' + w, type: 'word', sib, vowel: v, cue: w, sub: `/${sib === 's' ? 's' : 'ʃ'}/ + ${D.VOWEL_BY_KEY[v].cue}`, title: `Say "${w}" a few times` })),
   };
@@ -99,6 +101,7 @@
     drawVowelChart(); drawPitch(); drawRes(); drawHistory(); renderTractLive();
     Sing.cols = null; Sing.draw();
     if (state.drill && state.drill.def.type === 'whisper') drawSiren(state.drill);
+    if (state.drill && state.drill.def.type === 'sibex') drawGlide(state.drill);
     if (state.drill && state.drill.def.type === 'embody') drawEmbody(state.drill);
     if (typeof TvY !== 'undefined') { tvyDraw(TvY.drill); tvyDraw(TvY.spot); }
   }
@@ -748,6 +751,7 @@
     const fs = ctx.sampleRate;
     const fem = state.goal === 'fem';
     if (def.type === 'embody') return playSamples(Synth.uwu(fs, state.goal, D.VOWELS), mode, `plain "${def.say}", typical ${fem ? 'feminine' : 'masculine'}`);
+    if (def.type === 'sibex') return playSamples(Synth.sibExercise(fs, def, state.goal, D.VOWELS, D.SIBILANTS), mode, SX_DEMO[def.kind]);
     if (def.type === 'whisper') return playSamples(Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT), mode, def.kind === 'siren' ? 'whisper sliding up and down' : `typical ${fem ? 'feminine' : 'masculine'} whisper`);
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
@@ -835,7 +839,7 @@
   function startDemoView(d, label) {
     if (!d) return;
     demoLabel = label ? label[0].toLowerCase() + label.slice(1) : 'demo';
-    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
+    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
     d.offTarget = null; // a "sounds closer to..." note from before the demo no longer applies
@@ -847,7 +851,7 @@
     const m = $('drill-msg');
     if (m && m.classList.contains('demo-msg')) { m.classList.remove('demo-msg'); m.textContent = d.result ? (d.msgBefore || '') : state.running ? 'Listening...' : ''; }
     d.offTarget = null;
-    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
+    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
   }
@@ -856,6 +860,7 @@
     if (t === 'breath') updateBreath(d, force);
     else if (t === 'iso') updateIso(d, force);
     else if (t === 'whisper') updateWhisper(d, force);
+    else if (t === 'sibex') updateSibex(d, force);
     else if (t === 'embody') updateEmbody(d, force);
     else if (t === 'prosody' && !force) updateProsody(d);
   }
@@ -1094,6 +1099,8 @@
     if (dd && dd.def.type === 'iso' && fr.kind === 'voiced' && fr.formants) dd.demoIso.push({ F: fr.formants, f0: fr.f0, n: frameCount });
     if (d && d.def.type === 'whisper' && d.whFr) { d.whFr.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount }); if (d.whFr.length > 3600) d.whFr.shift(); }
     if (dd && dd.def.type === 'whisper' && dd.demoWh) dd.demoWh.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount });
+    if (d && d.def.type === 'sibex' && d.sxFr) { d.sxFr.push({ cog: fr.kind === 'fricative' ? fr.cog : null, voiced: fr.kind === 'voiced' }); if (d.sxFr.length > 7200) d.sxFr.shift(); }
+    if (dd && dd.def.type === 'sibex' && dd.demoSx) dd.demoSx.push({ cog: fr.kind === 'fricative' ? fr.cog : null, voiced: fr.kind === 'voiced' });
     if ((d || dd) && (d || dd).def.type === 'embody') {
       const e = d ? d.emb : dd.demoEmb;
       if (e) { e.push({ n: frameCount, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frAny }); if (e.length > 900) e.shift(); }
@@ -1225,6 +1232,7 @@
   // when a take finishes doesn't start the next one. The last take's result stays up until the new one replaces it.
   const RETAKE_QUIET_MS = 500;
   const takeSound = (def, fr) => def.type === 'whisper' ? !!fr.whisperF || fr.kind === 'voiced'
+    : def.type === 'sibex' ? fr.kind === 'fricative' || (def.kind === 'pairs' && fr.kind === 'voiced')
     : def.type === 'sib' ? fr.kind === 'fricative' : def.type === 'word' ? fr.kind === 'voiced' || fr.kind === 'fricative' : fr.kind === 'voiced';
   function watchRetake(d, fr, now) {
     if (d.demoOn) return;
@@ -1269,7 +1277,7 @@
     const d = state.drill;
     if (!d) return;
     const t = d.def.type;
-    (t === 'breath' ? renderBreathPanel : t === 'iso' ? renderIsoPanel : t === 'whisper' ? renderWhisperPanel
+    (t === 'breath' ? renderBreathPanel : t === 'iso' ? renderIsoPanel : t === 'whisper' ? renderWhisperPanel : t === 'sibex' ? renderSibexPanel
       : t === 'embody' ? renderEmbodyPanel : t === 'prosody' ? renderProsodyPanel : renderSoundPanel)(d);
     arrangeDrillPanel($('drill-panel'));
   }
@@ -1391,13 +1399,22 @@
     jawOpen: { title: 'Opening the jaw', steps: [
       'Let your bottom jaw drop by about a finger\'s width, keeping the tongue where it is.',
       'Keep the jaw loose, not pushed down. The jaw marker moves right as the mouth opens.'] },
+    sibBright: { title: 'Brightening a hiss', steps: [
+      'The hiss is made where the air stream hits the front teeth; a smaller space in front of the tongue makes it higher and brighter.',
+      'Bring the tongue tip forward: just behind the top teeth for "s", and only a small step back from there for "sh".',
+      'Bring the teeth lightly closer together, without clenching.',
+      'Spread the lips into a slight smile instead of pushing them forward. The s to sh glide and the two ladders in this tab practise exactly these moves.'] },
+    sibDark: { title: 'Darkening a hiss', steps: [
+      'A bigger space in front of the tongue makes a lower, darker hiss.',
+      'Let the tongue tip ease back a little from the teeth, and open the teeth slightly.',
+      'Round the lips and push them forward a little, as in "shoe".'] },
     jawClose: { title: 'Closing the jaw slightly', steps: [
       'Bring your teeth a little closer together without clenching.',
       'Keep the tongue position the same. The jaw marker moves left as the mouth closes.'] },
   };
   const CUE_HOWTO = {
-    fem: { '0:1': ['jawOpen', 'throatLight'], '0:-1': ['jawClose'], '1:1': ['tongueForward', 'smile'], '1:-1': ['tongueBack'], '2:1': ['smile', 'larynxUp'], '2:-1': ['smile'], 'all:1': ['larynxUp', 'smile'], 'all:-1': ['larynxDown'] },
-    masc: { '0:1': ['jawOpen'], '0:-1': ['larynxDown'], '1:1': ['tongueForward'], '1:-1': ['tongueBack'], '2:1': ['round'], '2:-1': ['round', 'larynxDown'], 'all:1': ['larynxUp'], 'all:-1': ['larynxDown', 'round'] },
+    fem: { 'sib:1': ['sibBright'], 'sib:-1': ['sibDark'], '0:1': ['jawOpen', 'throatLight'], '0:-1': ['jawClose'], '1:1': ['tongueForward', 'smile'], '1:-1': ['tongueBack'], '2:1': ['smile', 'larynxUp'], '2:-1': ['smile'], 'all:1': ['larynxUp', 'smile'], 'all:-1': ['larynxDown'] },
+    masc: { 'sib:1': ['sibBright'], 'sib:-1': ['sibDark'], '0:1': ['jawOpen'], '0:-1': ['larynxDown'], '1:1': ['tongueForward'], '1:-1': ['tongueBack'], '2:1': ['round'], '2:-1': ['round', 'larynxDown'], 'all:1': ['larynxUp'], 'all:-1': ['larynxDown', 'round'] },
   };
   function renderHowto(key) {
     const box = $('coach-how');
@@ -1559,8 +1576,8 @@
     fo: FO_HELP,
     breath: 'How much air comes through with the tone, from 0 (firm, pressed) to 100 (mostly air). The dashed box is the zone the Breath exercises use for your goal. A rough guide: it notices a lot of air but can miss mild airiness.',
     spread: 'How far your pitch moves from low to high (10th to 90th percentile), in semitones. There is no target: a wider spread usually sounds livelier, and feminine speech tends to move more, but melody is a style, not a size. The Prosody exercises practise rises and falls.',
-    s: 'Where the hiss of /s/ has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands.',
-    sh: 'Where the hiss of /ʃ/ ("sh") has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands.',
+    s: 'Where the hiss of /s/ has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands. Practice > Sibilants has exercises for it.',
+    sh: 'Where the hiss of /ʃ/ ("sh") has its energy, on the same 0-100 scale as the resonance score: higher reads brighter. It uses the resonance goal band, a rough choice, as there is no published data for hiss bands. Practice > Sibilants has exercises for it.',
     none: 'Larynx height shows only as a hint, when F2 and F3 move together (the note under Resonance). Vocal weight (how heavy or light the folds vibrate), twang, loudness and rhythm need measures the app doesn\'t have yet, so they are left out rather than guessed.',
   };
   const DIM_RB = new Set(['res', 's', 'sh']); // rows on the resonance scale: the rainbow marker when on target
@@ -1922,6 +1939,7 @@
     if (def.type === 'breath') return updateBreath(d);
     if (def.type === 'iso') return updateIso(d);
     if (def.type === 'whisper') return updateWhisper(d);
+    if (def.type === 'sibex') return updateSibex(d);
     if (def.type === 'embody') return updateEmbody(d);
     if (def.type === 'prosody') return updateProsody(d);
     let prog;
@@ -2141,6 +2159,7 @@
       { label: 'Pressed', make: (fs) => breathExample(fs, fem, 0), grade: gradeBreath },
     ];
     if (def.type === 'whisper') return whisperProofItems(def);
+    if (def.type === 'sibex') return sibexProofItems(def);
     if (def.type === 'iso') return [
       { label: 'Right movement', make: (fs) => isoExample(fs, def, fem, true), grade: (fr) => gradeIso(def, fr) },
       { label: ISO_WRONG[def.kind].label, make: (fs) => isoExample(fs, def, fem, false), grade: (fr) => gradeIso(def, fr) },
@@ -2599,6 +2618,256 @@
       { label: `Typical ${fem ? 'feminine' : 'masculine'} whisper`, make: mk(state.goal), grade },
       { label: `Typical ${fem ? 'masculine' : 'feminine'} whisper`, make: mk(fem ? 'masc' : 'fem'), grade },
       { label: 'Voiced, not whispered', make: mk(state.goal, { wrong: 'voiced' }), grade },
+    ];
+  }
+
+  // ---------------- sibilant brightness exercises ----------------
+  // From data/sibex.json, under Practice > Sibilants after the sustained hisses. All read the hiss's spectral centre
+  // (frames carry cog) and score it on the resonance scale and bands, like the sustained drills: a glide between /s/
+  // and /ʃ/ (its /ʃ/ ends scored), a ladder (one held hiss per rung, darkest to brightest, or back for a masculine
+  // goal) and pairs (every hiss sorted into /s/ or /ʃ/). The checks are D.glideCheck, D.ladderCheck, D.pairsCheck.
+  const SX_LEGS = 4; // down, up, down, up
+  const SX_PAIRS_NEED = 5; // hisses of each kind
+  const SX_DEMO = { glide: 'a hiss gliding between "sss" and "shh"', ladder: 'three steps of the ladder', pairs: '"sip, ship" three times' };
+  const SX_KIND = { glide: 'slide and listen', ladder: 'step by step', pairs: 'words with both hisses' };
+  const SX_TIP = {
+    s: { 1: 'Teeth a little closer and the tongue tip close behind the top teeth.', '-1': 'Open the teeth a little and let the tongue tip ease back.' },
+    sh: { 1: 'Lips less rounded, a slight smile, tongue a touch further forward.', '-1': 'Round the lips forward and let the tongue sit a little further back.' },
+  };
+  const sibName = (k) => (k === 's' ? '/s/' : '/ʃ/');
+  const sxRungs = (def) => (state.goal === 'fem' ? def.rungs : def.rungs.slice().reverse());
+  // where a score sits against the goal band: 1 needs brighter, -1 darker, 0 in the zone (past the far end counts)
+  const sxDir = (score) => (onTarget(score) ? 0 : score < target()[0] ? 1 : -1);
+  function sxGauge(id, label, sub) {
+    const [lo, hi] = target();
+    return `<div class="gauge sx-g" id="${id}"><span class="g-label">${label} <small>${sub}</small></span>
+      <span class="g-track"><span class="g-band" style="left:${lo}%;width:${hi - lo}%"></span><span class="sx-dots"></span><span class="g-mark" hidden></span></span>
+      <span class="g-need"></span></div>`;
+  }
+  function sxPaint(el, score, dots) {
+    if (!el) return;
+    const mark = el.querySelector('.g-mark'), need = el.querySelector('.g-need');
+    if (dots) el.querySelector('.sx-dots').innerHTML = dots.map(v => `<i style="left:${clamp(v, 0, 100).toFixed(1)}%"></i>`).join('');
+    if (!Number.isFinite(score)) { mark.hidden = true; need.textContent = ''; return; }
+    const dir = sxDir(score);
+    mark.hidden = false; mark.style.left = clamp(score, 0, 100) + '%'; mark.classList.toggle('ok', !dir);
+    need.textContent = `${Math.round(score)} ${dir ? (dir > 0 ? '→' : '←') : '✓'}`;
+    need.className = 'g-need ' + (dir ? 'off' : 'ok');
+  }
+  function renderSibexPanel(d) {
+    const p = $('drill-panel'), def = d.def, fem = state.goal === 'fem';
+    const live = def.kind === 'glide' ? '<canvas id="cv-glide" height="170" role="img" aria-label="Your hiss gliding between /s/ (top) and /ʃ/ (bottom), with the goal zones shaded"></canvas>'
+      : def.kind === 'ladder' ? `<div class="gauges">${sxRungs(def).map((r, i) => sxGauge('sx-r' + i, `${i + 1}. ${r.name}`, '')).join('')}</div>`
+      : `<div class="gauges">${sxGauge('sx-s', '/s/', 'sss')}${sxGauge('sx-sh', '/ʃ/', 'shh')}</div>`;
+    const why = def.kind === 'glide' ? `Up is a higher, brighter hiss. Shaded: the goal zones for /s/ (top) and /ʃ/ (bottom); dots: each "shh" end, scored.`
+      : def.kind === 'ladder' ? `Each row is one held ${def.sib === 's' ? '"sss"' : '"shh"'} on the ${sibName(def.sib)} scale; the dashed box is your goal zone.`
+      : 'Every hiss is sorted into /s/ or /ʃ/ by where it sits. Dots: each hiss; bar: their middle.';
+    p.innerHTML = `
+      <p class="eyebrow"><span>Sibilant exercise</span><span>${SX_KIND[def.kind]}</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      <ol class="breath-steps"></ol>
+      ${def.kind === 'pairs' ? '<ul class="sx-say"></ul>' : ''}
+      <div class="btn-row"><button type="button" class="btn" id="ex-play">Play example</button></div>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>Hiss brightness</span><span id="sx-num" class="trend"></span></p>
+        <p class="coach-cue" id="sx-cue"></p>
+        ${live}
+        <p class="coach-why" id="sx-why"></p>
+      </div>
+      <figure class="tvy" id="tvy"></figure>
+      <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
+      <p class="drill-msg" id="drill-msg"></p>
+      <div id="drill-actions"></div>
+      <div class="proof" id="proof" hidden></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps(fem)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    const say = p.querySelector('.sx-say');
+    if (say) for (const t of def.say) { const li = document.createElement('li'); li.textContent = t; say.appendChild(li); }
+    const w = $('sx-why'); w.textContent = why;
+    w.append(infoBadge('About hiss brightness', `The app reads where the hiss has its energy (its spectral centre) and puts it on the same 0-100 scale as the resonance score: 0 typical masculine, 100 typical feminine for that hiss (${(D.SIBILANTS.s.M / 1000).toFixed(1)} to ${(D.SIBILANTS.s.W / 1000).toFixed(1)} kHz for /s/, ${(D.SIBILANTS.sh.M / 1000).toFixed(1)} to ${(D.SIBILANTS.sh.W / 1000).toFixed(1)} kHz for /ʃ/). Those typical values are rough midpoints of published averages and speakers vary a lot; the goal zone reuses the resonance band, and for /ʃ/ there is no data of its own behind it. Treat the zone as a direction to move in, not a line to cross. A hiss centred above ${(D.SIB_SPLIT / 1000).toFixed(1)} kHz counts as /s/, below as /ʃ/; mics and rooms shift it, so compare within one setup.`));
+    $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    d.sxFr = []; d.demoSx = [];
+    renderProof($('proof'), def);
+    // Target vs you: the hiss the exercise aims at, held (Sustain works on it), against your take. Not for the glide,
+    // whose own chart shows the slide: a whole slide set against one steady hiss compares nothing useful.
+    tvyMountDrill($('tvy'), def.kind === 'glide' ? def : { id: def.id, type: 'sib', sib: def.kind === 'ladder' ? def.sib : 'sh', cue: def.cue });
+    $('drill-msg').textContent = '';
+    updateSibex(d, true);
+  }
+  function updateSibex(d, force) {
+    if (!force && frameCount % 6) return;
+    const def = d.def, cue = $('sx-cue'); if (!cue) return;
+    const demo = !!d.demoOn, fr = (demo ? d.demoSx : d.sxFr) || [], fem = state.goal === 'fem';
+    const who = demo ? `Demo voice, ${demoLabel}: ` : '';
+    const hissNow = fr.slice(-9).some(f => f.cog);
+    let text = '', ok = false, num = '', prog = 0, ready = null;
+    if (!state.running && !demo && !fr.length) text = 'Start the microphone to begin.';
+    if (def.kind === 'glide') {
+      const r = D.glideCheck(fr);
+      d.sxGlide = r; drawGlide(d);
+      const done = r.dir === -1 ? r.ends.slice(0, -1) : r.ends, last = done[done.length - 1];
+      if (!text) {
+        if (!r.legs) text = fr.some(f => f.cog) ? 'Good, a hiss. Now slide slowly from "sss" back toward "shh".' : 'Start with a steady "sss".';
+        else if (r.dir === -1) text = 'Sliding toward "shh". Stop as soon as it turns into "shh".';
+        else if (last && !last.sh) text = 'That end stayed an /s/. Slide a little further back, until it really turns into "shh".';
+        else if (last) text = sxDir(last.score) === 0 ? `That "shh" end read ${Math.round(last.score)}: in the zone. Back up to "sss" and do it again.`
+          : sxDir(last.score) > 0 ? `That "shh" end read ${Math.round(last.score)}, darker than the zone. Stop the slide sooner and keep the lips spread.`
+          : `That "shh" end read ${Math.round(last.score)}, brighter than the zone. Let the slide go a little further back and round the lips.`;
+        else text = 'Going up to "sss". Now slide back down to "shh".';
+      }
+      ok = !!last && last.sh && sxDir(last.score) === 0;
+      num = r.legs ? `${Math.min(r.legs, SX_LEGS)} of ${SX_LEGS} slides` : '';
+      prog = r.legs / SX_LEGS;
+      if (r.legs >= SX_LEGS) ready = () => {
+        const ends = r.ends.filter(e => e.sh), sc = Number.isFinite(r.score) ? Math.round(r.score) : null;
+        finishSibex(d, sc, sc == null ? 'Done, but no slide reached "shh". Slide further back next time, until the hiss really turns into "shh".'
+          : `Done: your "shh" ends read ${ends.map(e => Math.round(e.score)).join(', ')} (middle ${sc}, goal ${target().join('-')}).${r.missed ? ` ${r.missed} end${r.missed > 1 ? 's' : ''} stayed /s/.` : ''} ${sxDir(sc) === 0 ? 'Carry that "shh" into "she", "shine", "wish".' : sxDir(sc) > 0 ? 'Next time stop each slide a little sooner, while it has only just turned into "shh".' : 'Next time let each slide go a little further back.'}`);
+      };
+    } else if (def.kind === 'ladder') {
+      const rungs = sxRungs(def), all = D.ladderCheck(fr, def.sib);
+      const holding = hissNow && all.length && all[all.length - 1].b >= fr.length - 9;
+      const doneN = Math.min(rungs.length, all.length - (holding ? 1 : 0));
+      const recent = fr.slice(-30).filter(f => f.cog).map(f => f.cog);
+      const liveSc = hissNow && recent.length >= 5 ? D.sibScore(D.median(recent), def.sib) : NaN;
+      rungs.forEach((r, i) => {
+        const el = $('sx-r' + i); if (!el) return;
+        el.classList.toggle('cur', i === doneN && doneN < rungs.length);
+        sxPaint(el, i < doneN ? all[i].score : i === doneN ? liveSc : NaN);
+      });
+      const cur = rungs[Math.min(doneN, rungs.length - 1)];
+      if (!text) {
+        if (doneN >= rungs.length) {
+          const v = all.slice(0, rungs.length).map(b => b.score), moved = (v[v.length - 1] - v[0]) * (fem ? 1 : -1);
+          text = moved >= 8 ? `${v.map(Math.round).join(' → ')}: your ${def.sib === 's' ? '"sss"' : '"shh"'} moved ${Math.round(Math.abs(v[v.length - 1] - v[0]))} points.` : `${v.map(Math.round).join(' → ')}: not much change yet. Make each shape bigger.`;
+          ok = moved >= 8;
+        } else text = `Step ${doneN + 1} of ${rungs.length}, ${cur.name}: ${cur.say} ${hissNow ? (all.length && all[all.length - 1].n >= D.RUNG_MIN ? 'Got it: pause, then the next step.' : 'Hold it about a second.') : `Hold a ${def.sib === 's' ? '"sss"' : '"shh"'} for about a second.`}`;
+      }
+      num = `${doneN} of ${rungs.length}`;
+      prog = doneN / rungs.length;
+      if (doneN >= rungs.length) ready = () => {
+        const v = all.slice(0, rungs.length).map(b => Math.round(b.score)), moved = (v[v.length - 1] - v[0]) * (fem ? 1 : -1), last = v[v.length - 1];
+        const best = v.reduce((b, x, i) => (sxDir(x) === 0 && b < 0 ? i : b), -1);
+        finishSibex(d, last, `Done: ${rungs.map((r, i) => `${r.name} ${v[i]}`).join(', ')} (goal ${target().join('-')}). ${moved >= 8 ? `Your ${fem ? 'brightest' : 'darkest'} shape moved it ${Math.abs(v[v.length - 1] - v[0])} points.` : `It moved only ${Math.abs(v[v.length - 1] - v[0])} points; exaggerate the shapes and try again.`}${best >= 0 ? ` "${rungs[best].name}" already lands in the zone: use that shape in words.` : ''}`);
+      };
+    } else {
+      const pr = D.pairsCheck(fr), med = (a) => (a.length ? D.median(a.map(b => b.score)) : NaN);
+      sxPaint($('sx-s'), med(pr.s.slice(-12)), pr.s.slice(-12).map(b => b.score));
+      sxPaint($('sx-sh'), med(pr.sh.slice(-12)), pr.sh.slice(-12).map(b => b.score));
+      const n = pr.s.length + pr.sh.length;
+      if (!text) {
+        if (!n) text = `Say the ${def.say[0].split(' ').length > 3 ? 'phrases' : 'pairs'} below, with a small pause after each word.`;
+        else {
+          // the newest hiss: what it was and which way to move it
+          const all = D.sibBursts(fr, { gap: 3, min: 5 }), k = all[all.length - 1].sib, b = pr[k][pr[k].length - 1], dir = sxDir(b.score);
+          text = `Last hiss: ${sibName(k)} ${Math.round(b.score)}${dir ? `, ${dir > 0 ? 'darker' : 'brighter'} than the zone. ${SX_TIP[k][dir]}` : ', in the zone.'}`;
+          ok = !dir;
+        }
+      }
+      num = `/s/ ${Math.min(pr.s.length, SX_PAIRS_NEED)} of ${SX_PAIRS_NEED} · /ʃ/ ${Math.min(pr.sh.length, SX_PAIRS_NEED)} of ${SX_PAIRS_NEED}`;
+      prog = (Math.min(pr.s.length, SX_PAIRS_NEED) + Math.min(pr.sh.length, SX_PAIRS_NEED)) / (2 * SX_PAIRS_NEED);
+      if (pr.s.length >= SX_PAIRS_NEED && pr.sh.length >= SX_PAIRS_NEED) ready = () => {
+        const ms = Math.round(med(pr.s)), mh = Math.round(med(pr.sh));
+        // the score kept is the weaker of the two against the goal
+        const weak = fem ? Math.min(ms, mh) : Math.max(ms, mh), wk = weak === ms ? 's' : 'sh';
+        const gap = D.median(pr.s.map(b => b.cog)) / 1000, gsh = D.median(pr.sh.map(b => b.cog)) / 1000;
+        finishSibex(d, weak, `Done: /s/ ${ms} and /ʃ/ ${mh} across ${pr.s.length} and ${pr.sh.length} hisses (goal ${target().join('-')}; centres ${gap.toFixed(1)} and ${gsh.toFixed(1)} kHz). ${sxDir(weak) === 0 ? 'Both in the zone.' : `${sibName(wk)} is the one to work on: ${SX_TIP[wk][sxDir(weak)].charAt(0).toLowerCase() + SX_TIP[wk][sxDir(weak)].slice(1)}`} The score kept is the weaker of the two.`);
+      };
+    }
+    cue.textContent = who + (demo && !text ? 'playing.' : text);
+    cue.classList.toggle('ok', ok);
+    $('sx-num').textContent = (demo ? 'demo voice · ' : '') + num;
+    if (demo || d.result) return;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
+    // the finish is worked out afresh on every update, so a take that keeps going is scored on all of it
+    d.sxFinish = ready;
+    if (ready) { takeReady(d, () => d.sxFinish && d.sxFinish()); const m = $('drill-msg'); if (m) m.textContent = TAKE_READY_MSG; }
+  }
+  function finishSibex(d, score, text) {
+    const def = d.def, ok = Number.isFinite(score);
+    d.result = { id: def.id, score: ok ? score : null, at: Date.now() };
+    tvyFreeze(TvY.drill);
+    $('drill-msg').textContent = text;
+    $('drill-msg').append(againNote());
+    if (!ok) return;
+    state.lastScores[def.id] = score;
+    session.drills.push({ id: def.id, label: def.cue, score, at: d.result.at, kind: 'sound' });
+    renderDrillGrid(); renderSession();
+    recordPractice(session.drills[session.drills.length - 1]);
+  }
+  // the glide: your hiss's centre on a log scale (only the hiss frames, joined up), the two goal zones, the /ʃ/ ends
+  function drawGlide(d) {
+    const cv = $('cv-glide'); if (!cv || !C.ink) return;
+    fitCanvas(cv);
+    const g = cv.getContext('2d'), dpr = dprOf(), w = cv.width, h = cv.height, ax = 40 * dpr, top = 8 * dpr, bot = h - 8 * dpr;
+    const fr = (d.demoOn ? d.demoSx : d.sxFr) || [], r = d.sxGlide || D.glideCheck(fr);
+    const lo = Math.log(2600), hi = Math.log(10500), y = (hz) => bot - (clamp(Math.log(hz), lo, hi) - lo) / (hi - lo) * (bot - top);
+    const hzAt = (score, sib) => { const S = D.SIBILANTS[sib]; return S.M * Math.pow(S.W / S.M, D.resAlpha(score)); };
+    g.clearRect(0, 0, w, h);
+    const [blo, bhi] = target(), col = state.goal === 'fem' ? C.fem : C.masc;
+    g.font = `${10 * dpr}px ${C.font}`;
+    for (const sib of ['s', 'sh']) {
+      const y1 = y(hzAt(bhi, sib)), y2 = y(hzAt(blo, sib));
+      g.globalAlpha = 0.16; g.fillStyle = col; g.fillRect(ax, y1, w - ax, y2 - y1); g.globalAlpha = 1;
+      g.fillStyle = C.muted; g.textAlign = 'right'; g.fillText(sib === 's' ? '/s/ zone' : '/ʃ/ zone', w - 4 * dpr, y1 + 11 * dpr);
+    }
+    g.strokeStyle = C.line; g.lineWidth = dpr; g.textAlign = 'right'; g.fillStyle = C.muted;
+    for (const k of [3, 4, 6, 8]) { const yy = y(k * 1000); g.beginPath(); g.moveTo(ax, yy); g.lineTo(w, yy); g.stroke(); g.fillText(k + ' kHz', ax - 5 * dpr, yy + 4 * dpr); }
+    g.setLineDash([4 * dpr, 4 * dpr]); g.strokeStyle = C.muted; const ys = y(D.SIB_SPLIT); g.beginPath(); g.moveTo(ax, ys); g.lineTo(w, ys); g.stroke(); g.setLineDash([]);
+    g.textAlign = 'left'; g.fillText('s ↑ · sh ↓', ax + 6 * dpr, ys - 4 * dpr);
+    const v = r.smooth || [], n = v.length, show = Math.min(n, 480), off = n - show;
+    if (show < 2) { g.textAlign = 'center'; g.fillStyle = C.muted; g.fillText(d.demoOn ? 'Demo playing' : 'Start with a steady "sss"', (w + ax) / 2, top + 14 * dpr); return; }
+    const x = (i) => ax + 6 * dpr + (i - off) / Math.max(1, show - 1) * (w - ax - 12 * dpr);
+    g.strokeStyle = C.accent; g.lineWidth = 2.4 * dpr; g.lineJoin = 'round';
+    g.beginPath(); for (let i = off; i < n; i++) { const py = y(Math.exp(v[i])); i > off ? g.lineTo(x(i), py) : g.moveTo(x(i), py); } g.stroke();
+    g.textAlign = 'center';
+    for (const e of r.ends) {
+      if (e.at < off) continue;
+      const good = e.sh && sxDir(e.score) === 0;
+      g.fillStyle = good ? C.good : C.warn;
+      g.beginPath(); g.arc(x(e.at), y(e.cog), 4.5 * dpr, 0, 2 * Math.PI); g.fill();
+      g.fillText(e.sh ? String(Math.round(e.score)) : 's', x(e.at), Math.min(bot, y(e.cog) + 16 * dpr));
+    }
+    if (d.demoOn) { g.textAlign = 'left'; g.fillStyle = C.muted; g.fillText('demo voice', ax + 6 * dpr, top + 10 * dpr); }
+  }
+  // graded demos: the same checks, run on synthesized hisses
+  function gradeSibex(def, frames) {
+    const fr = frames.map(f => ({ cog: f.kind === 'fricative' ? f.cog : null })), fem = state.goal === 'fem';
+    if (def.kind === 'glide') {
+      const r = D.glideCheck(fr);
+      if (r.legs < SX_LEGS) return { ok: false, big: Math.min(r.legs, SX_LEGS), text: `${Math.min(r.legs, SX_LEGS)} of ${SX_LEGS} slides` };
+      if (!Number.isFinite(r.score)) return { ok: false, big: '✗', text: 'no end reached /ʃ/' };
+      return { ok: sxDir(r.score) === 0, big: Math.round(r.score), text: `"shh" ends ${r.ends.filter(e => e.sh).map(e => Math.round(e.score)).join(', ')} · ${sxDir(r.score) === 0 ? 'in' : 'outside'} the zone` };
+    }
+    if (def.kind === 'ladder') {
+      const v = D.ladderCheck(fr, def.sib).map(b => Math.round(b.score)), k = def.rungs.length;
+      if (v.length < k) return { ok: false, big: '✗', text: `${v.length} of ${k} steps held` };
+      const moved = (v[k - 1] - v[0]) * (fem ? 1 : -1);
+      return { ok: moved >= 8, big: v[k - 1], text: `${v.slice(0, k).join(' → ')} · ${moved >= 8 ? 'moved' : 'barely moved'}` };
+    }
+    const pr = D.pairsCheck(fr), med = (a) => Math.round(D.median(a.map(b => b.score)));
+    if (pr.s.length < SX_PAIRS_NEED || pr.sh.length < SX_PAIRS_NEED) return { ok: false, big: '✗', text: `${pr.s.length} /s/, ${pr.sh.length} /ʃ/ heard` };
+    const ms = med(pr.s), mh = med(pr.sh), weak = fem ? Math.min(ms, mh) : Math.max(ms, mh);
+    return { ok: sxDir(weak) === 0, big: weak, text: `/s/ ${ms} · /ʃ/ ${mh}` };
+  }
+  function sibexProofItems(def) {
+    const fem = state.goal === 'fem', g = fem ? 'W' : 'M', grade = (fr) => gradeSibex(def, fr);
+    const mk = (o) => (fs) => Synth.sibExercise(fs, def, state.goal, D.VOWELS, D.SIBILANTS, o);
+    // the "off" demo: a /ʃ/ (and /s/) at the other goal's typical values
+    const other = { s: D.SIBILANTS.s[fem ? 'M' : 'W'], sh: D.SIBILANTS.sh[fem ? 'M' : 'W'] * (fem ? 0.92 : 1.05) };
+    if (def.kind === 'glide') return [
+      { label: `Glide, ${fem ? 'bright' : 'full'} "shh" ends`, make: mk({}), grade },
+      { label: `Glide, ${fem ? 'dark' : 'bright'} "shh" ends`, make: mk({ sh: other.sh }), grade },
+    ];
+    if (def.kind === 'ladder') return [
+      { label: 'Each step moves it', make: mk({}), grade },
+      { label: 'All steps the same', make: mk({ flat: true }), grade },
+    ];
+    return [
+      { label: `Typical ${fem ? 'feminine' : 'masculine'}`, make: mk({}), grade },
+      { label: `${fem ? 'Dark' : 'Bright'} "sh"`, make: mk({ sh: other.sh, s: D.SIBILANTS.s[g] }), grade },
     ];
   }
 

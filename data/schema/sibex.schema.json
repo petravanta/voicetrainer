@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sibilant exercises",
+  "description": "Exercises for the brightness of /s/ and /ʃ/ (\"sh\"), shown after the sustained hisses under Practice > Sibilants, in file order. Read from the hiss's spectral centre, scored on the resonance scale and bands.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "title", "cue", "sub", "kind", "why", "steps"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^sb-[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with sb-. Practice history refers to it, so never change or reuse one that has shipped."},
+      "title": {"type": "string", "description": "Heading on the exercise."},
+      "cue": {"type": "string", "description": "Short name on the exercise card."},
+      "sub": {"type": "string", "description": "A few words under the name on the card."},
+      "kind": {"enum": ["glide", "ladder", "pairs"], "description": "glide: slide between /s/ and /ʃ/ twice; the /ʃ/ end of each slide is scored. ladder: one held hiss per rung, in order (reversed for a masculine goal); done when every rung is held. pairs: say words or phrases with both hisses; every hiss is sorted into /s/ or /ʃ/ and scored. Each kind has its own check in src/dsp.js, so a new kind is a code change."},
+      "sib": {"enum": ["s", "sh"], "description": "ladder only: the hiss the rungs are scored as."},
+      "rungs": {
+        "type": "array", "minItems": 2, "maxItems": 5,
+        "items": {"type": "object", "additionalProperties": false, "required": ["name", "say"],
+          "properties": {"name": {"type": "string", "description": "One or two words shown on the rung."}, "say": {"type": "string", "description": "The shape to hold on this rung."}}},
+        "description": "ladder only: the rungs from darkest to brightest. A masculine goal goes through them the other way."
+      },
+      "say": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "pairs only: the words or phrases to say."},
+      "why": {"type": "string", "description": "One or two sentences on what the exercise is for."},
+      "steps": {
+        "type": "array", "minItems": 1,
+        "items": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object", "additionalProperties": false, "required": ["feminine", "masculine"],
+             "properties": {"feminine": {"type": "string"}, "masculine": {"type": "string"}},
+             "description": "A step that depends on the training goal."}
+          ]
+        },
+        "description": "Steps shown in order. Use an object with feminine and masculine for a step that differs by goal."
+      }
+    },
+    "allOf": [
+      {"if": {"properties": {"kind": {"const": "ladder"}}}, "then": {"required": ["sib", "rungs"]}},
+      {"if": {"properties": {"kind": {"const": "pairs"}}}, "then": {"required": ["say"]}}
+    ]
+  }
+}
