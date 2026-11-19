@@ -1,0 +1,97 @@
+[
+  {
+    "id": "sb-glide",
+    "title": "Glide from \"sss\" to \"shh\"",
+    "cue": "s to sh glide",
+    "sub": "find the front edge of \"shh\"",
+    "kind": "glide",
+    "why": "/s/ and /ʃ/ (\"sh\") are made in nearly the same place: for /ʃ/ the tongue sits a little further back and the lips round a little. Sliding slowly from \"sss\" back to \"shh\" lets you find the most forward \"shh\" that still sounds like \"shh\", which is also the brightest one.",
+    "steps": [
+      "Start a steady \"sss\" with the tongue tip just behind your top teeth.",
+      {
+        "feminine": "Slowly slide the tongue back until the hiss just turns into \"shh\", and stop there: that first \"shh\" is the bright one. Keep the lips spread, not pushed out.",
+        "masculine": "Slowly slide the tongue back until it turns into \"shh\", then round the lips forward a little and let it settle into a fuller, darker \"shh\"."
+      },
+      "Slide back up to \"sss\" and down again, twice. The app scores the \"shh\" end of each slide.",
+      "Stay on one breath per slide if you can, and keep it quiet: it's a hiss, not a push."
+    ]
+  },
+  {
+    "id": "sb-ladder-sh",
+    "title": "Lip ladder for \"shh\"",
+    "cue": "Lip ladder: shh",
+    "sub": "rounded, neutral, smile",
+    "kind": "ladder",
+    "sib": "sh",
+    "rungs": [
+      {"name": "rounded", "say": "Lips pushed forward and rounded, as in \"shoe\"."},
+      {"name": "neutral", "say": "Lips relaxed, just parted."},
+      {"name": "smile", "say": "A slight smile with the corners back, and the tongue tip a touch further forward."}
+    ],
+    "why": "Rounded lips make a longer space in front of the tongue, which lowers the hiss; spread lips make it shorter, which raises it. Three steps from rounded to a smile show how far your lips alone can move \"shh\", so you can pick the shape that lands in the zone.",
+    "steps": [
+      "Hold each \"shh\" for about a second, then pause. The app moves to the next step by itself.",
+      {
+        "feminine": "Go from rounded to smile: each step should read brighter than the last.",
+        "masculine": "Go from smile to rounded: each step should read darker than the last."
+      },
+      "Note which step lands in the zone and use that lip shape in words like \"she\", \"shine\" and \"wish\"."
+    ]
+  },
+  {
+    "id": "sb-ladder-s",
+    "title": "Teeth ladder for \"sss\"",
+    "cue": "Teeth ladder: sss",
+    "sub": "open, closer, together",
+    "kind": "ladder",
+    "sib": "s",
+    "rungs": [
+      {"name": "open", "say": "Jaw dropped about a finger's width, teeth apart."},
+      {"name": "closer", "say": "Teeth a little closer, about a pencil's width apart."},
+      {"name": "together", "say": "Teeth lightly together, a slight smile, tongue tip close behind the top teeth."}
+    ],
+    "why": "The hiss of /s/ is made where the air stream hits the front teeth. The closer the teeth and the smaller the space in front of the tongue, the higher and brighter it gets. Three steps from an open jaw to teeth together show how far that alone moves your /s/.",
+    "steps": [
+      "Hold each \"sss\" for about a second, then pause. The app moves to the next step by itself.",
+      {
+        "feminine": "Go from open to teeth together: each step should read brighter than the last.",
+        "masculine": "Go from teeth together to open: each step should read darker than the last."
+      },
+      "Keep the jaw loose: close the gap, don't clench."
+    ]
+  },
+  {
+    "id": "sb-pairs",
+    "title": "Pairs: \"sip\" and \"ship\"",
+    "cue": "s / sh pairs",
+    "sub": "sip ship · sue shoe",
+    "kind": "pairs",
+    "say": ["sip, ship", "sue, shoe", "sell, shell", "seat, sheet", "sock, shock", "save, shave", "sign, shine", "mass, mash"],
+    "why": "In running speech \"sh\" easily slips darker than \"s\". Pairs that differ only in the hiss make you form both on purpose, one after the other, while the app sorts each hiss into /s/ or /ʃ/ by its sound and scores it.",
+    "steps": [
+      "Say the pairs at an easy pace, with a small pause after each word.",
+      {
+        "feminine": "Keep both hisses forward: tongue tip close to the top teeth for \"s\", and only a small step back, lips barely rounded, for \"sh\".",
+        "masculine": "Let \"s\" sit a little lower and give \"sh\" rounded lips and a fuller space."
+      },
+      "Go through the list in any order until both counters are full."
+    ]
+  },
+  {
+    "id": "sb-phrases",
+    "title": "Phrases full of \"s\" and \"sh\"",
+    "cue": "s / sh phrases",
+    "sub": "she sells sea shells",
+    "kind": "pairs",
+    "say": ["She sells sea shells by the seashore.", "Sushi shop on Sunday.", "Six fresh fish on six shiny dishes.", "Sunshine on the station.", "She says she's sure."],
+    "why": "The same hisses in connected speech, where they are hardest to keep: one after another, at speaking speed, next to different vowels. The app scores every /s/ and /ʃ/ it hears.",
+    "steps": [
+      "Read the phrases at your normal speaking speed, not slowed down.",
+      {
+        "feminine": "Keep a slight smile and the tongue tip forward through the whole phrase, especially on the \"sh\" words.",
+        "masculine": "Keep the lips relaxed or slightly rounded and let the \"sh\" words sound full."
+      },
+      "Go through them in any order until both counters are full."
+    ]
+  }
+]

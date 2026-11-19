@@ -957,6 +957,77 @@
     return { legs, span: vals.length ? hi - lo : 0, dir, extAt, since: extAt < 0 ? 0 : vals.length - 1 - extAt };
   }
 
+  // ---------- sibilant exercises (Practice > Sibilants) ----------
+  // A hiss centred above SIB_SPLIT reads as /s/, below as /ʃ/, the same split the analyzer labels frames with.
+  const SIB_SPLIT = 5200;
+  // Hisses in a run of frames: fricative frames close together (gaps up to `gap` frames) make one burst, and a
+  // burst shorter than `min` frames is dropped. frames: [{ cog: Hz | null }] in order (null: not a hiss).
+  // Each burst: { a, b (first and last frame index), n (hiss frames), cog (median Hz of its middle 80%), sib }.
+  function sibBursts(frames, { gap = 4, min = 6 } = {}) {
+    const out = [];
+    let cur = null;
+    const close = () => {
+      if (cur && cur.c.length >= min) {
+        const c = cur.c, cut = Math.floor(c.length * 0.1), mid = c.slice(cut, c.length - cut);
+        const cog = median(mid.length ? mid : c);
+        out.push({ a: cur.a, b: cur.b, n: c.length, cog, sib: cog > SIB_SPLIT ? 's' : 'sh' });
+      }
+      cur = null;
+    };
+    frames.forEach((f, i) => {
+      if (f && f.cog > 0) {
+        if (cur && i - cur.b > gap + 1) close();
+        if (!cur) cur = { a: i, b: i, c: [] };
+        cur.b = i; cur.c.push(f.cog);
+      }
+    });
+    close();
+    return out;
+  }
+  // Turning points of a glide between /s/ and /ʃ/. vals: log(hiss centre) of each hiss frame in order.
+  // Smoothed (running median of 5) so a single odd frame doesn't turn it, then a turn is counted once the
+  // line has come back `step` from its extreme. lows: the /ʃ/ end of each slide (the one in progress included),
+  // highs: the /s/ end of each. legs: slides of at least `step`.
+  const GLIDE_STEP = 0.25; // log units, about 28%; /s/ and /ʃ/ sit about 70% apart
+  function glideTurns(vals, step = GLIDE_STEP) {
+    const v = vals.map((_, i) => median(vals.slice(Math.max(0, i - 2), i + 3)));
+    let lo = Infinity, hi = -Infinity, loAt = -1, hiAt = -1, dir = 0, ext = 0, extAt = -1, legs = 0;
+    const lows = [], highs = [], lowAt = [];
+    v.forEach((x, i) => {
+      if (dir === 0) {
+        if (x < lo) { lo = x; loAt = i; }
+        if (x > hi) { hi = x; hiAt = i; }
+        if (x - lo >= step) { dir = 1; legs = 1; lows.push(lo); lowAt.push(loAt); ext = x; extAt = i; } else if (hi - x >= step) { dir = -1; legs = 1; highs.push(hi); ext = x; extAt = i; }
+      } else if (dir === 1) {
+        if (x > ext) { ext = x; extAt = i; } else if (ext - x >= step) { highs.push(ext); dir = -1; legs++; ext = x; extAt = i; }
+      } else if (x < ext) { ext = x; extAt = i; } else if (x - ext >= step) { lows.push(ext); lowAt.push(extAt); dir = 1; legs++; ext = x; extAt = i; }
+    });
+    if (dir === 1) highs.push(ext); else if (dir === -1) { lows.push(ext); lowAt.push(extAt); }
+    return { legs, lows, lowAt, highs, dir, smooth: v };
+  }
+
+  // A hiss on the 0-100 scale against its own sibilant's typical values (as the drills and readings score it).
+  const sibScore = (cog, sib) => Math.max(0, Math.min(100, resScore(sibilantAlpha(cog, SIBILANTS[sib]))));
+  // The checks behind the sibilant exercises; frames: [{ cog: Hz | null }] in order, one per analyzer frame.
+  // glide: each /ʃ/ end of the slides, scored as /ʃ/ (an end still above SIB_SPLIT never reached /ʃ/).
+  function glideCheck(frames) {
+    const t = glideTurns(frames.filter(f => f && f.cog > 0).map(f => Math.log(f.cog)));
+    const ends = t.lows.map((l, i) => { const cog = Math.exp(l); return { cog, at: t.lowAt[i], sh: cog <= SIB_SPLIT, score: sibScore(cog, 'sh') }; });
+    const sh = ends.filter(e => e.sh);
+    return { legs: t.legs, dir: t.dir, smooth: t.smooth, ends, score: sh.length ? median(sh.map(e => e.score)) : NaN, missed: ends.length - sh.length };
+  }
+  // ladder: each held hiss (RUNG_MIN frames or more, pauses between them) is one rung, scored as `sib`.
+  const RUNG_MIN = 30; // frames, about half a second
+  function ladderCheck(frames, sib) {
+    return sibBursts(frames, { gap: 8, min: RUNG_MIN }).map(b => ({ a: b.a, b: b.b, cog: b.cog, n: b.n, score: sibScore(b.cog, sib) }));
+  }
+  // pairs: every hiss, sorted into /s/ or /ʃ/ by where it sits, each scored as what it is.
+  function pairsCheck(frames) {
+    const out = { s: [], sh: [] };
+    for (const b of sibBursts(frames, { gap: 3, min: 5 })) out[b.sib].push({ cog: b.cog, score: sibScore(b.cog, b.sib) });
+    return out;
+  }
+
   // ---------- embodied voice (unscored) ----------
   // Deals the next feeling: never one of the `recent` ids, and from a family other than the last
   // one's where it can. rand() returns [0, 1).
@@ -1125,7 +1196,7 @@
         this.softReset();
       } else if (hfRatio > 0.6 && p.aperiodicity > 0.3) {
         out.kind = 'fricative';
-        out.sib = out.cog > 5200 ? 's' : 'sh';
+        out.sib = out.cog > SIB_SPLIT ? 's' : 'sh';
         this.softReset();
       } else {
         out.kind = 'other';
@@ -3026,7 +3097,7 @@
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, readingVowels, READ_VMAP_MIN, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
-    whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT,
+    whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT, SIB_SPLIT, sibBursts, glideTurns, GLIDE_STEP, sibScore, glideCheck, ladderCheck, pairsCheck, RUNG_MIN,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, APP_BUILT, buildLabel, newerBuild, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,

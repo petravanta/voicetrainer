@@ -1117,3 +1117,11 @@ a { color: var(--accent); }
   .dim-sub { padding-left: 8px; }
 }
 .sess-vowels-wrap .session-grid { align-items: start; }
+/* sibilant exercises: a dot per hiss on the gauge, the ladder step in progress, the words to say */
+.sx-dots { position: absolute; inset: 0; }
+.sx-dots i { position: absolute; top: 2px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--ink); opacity: 0.45; }
+.sx-g.cur .g-label { font-weight: 700; }
+.sx-g.cur .g-track { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sx-say { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.sx-say li { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 0.92rem; }
+#cv-glide { width: 100%; height: 170px; display: block; }

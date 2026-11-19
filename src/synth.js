@@ -50,6 +50,50 @@
     return normalize(x, opts.level || 0.12, fs, STYLE === 'natural' ? 0.035 : 0.02);
   }
 
+  // A hiss whose centre moves: peak(t) gives it in Hz at t seconds (the /s/-/ʃ/ glide in Practice > Sibilants).
+  function sibilantGlide(fs, dur, peak, opts = {}) {
+    const n = Math.round(fs * dur), x = new Float32Array(n), rand = rng(opts.seed || 13), bw = new Float32Array(n);
+    for (let i = 0; i < n; i++) x[i] = rand() * 2 - 1;
+    const track = (i) => Math.min(peak(i / fs), fs / 2 - 200);
+    for (let i = 0; i < n; i++) bw[i] = track(i) * 0.3;
+    resonateArr(x, fs, track, bw); resonateArr(x, fs, track, bw);
+    let prev = 0;
+    for (let i = 0; i < n; i++) { const v = x[i]; x[i] = v - 0.95 * prev; prev = v; }
+    return normalize(x, opts.level || 0.12, fs, 0.03);
+  }
+  // Demo of a sibilant exercise (def.kind glide, ladder or pairs) at the typical values of the goal.
+  // o.sh / o.s: the hiss centres to use instead (Hz); o.flat: a ladder that doesn't move.
+  function sibExercise(fs, def, goal, VOWELS, SIBILANTS, o = {}) {
+    const g = goal === 'fem' ? 'W' : 'M', s = o.s || SIBILANTS.s[g], sh = o.sh || SIBILANTS.sh[g], gap = silence(fs, 0.45), lead = silence(fs, 0.12);
+    if (def.kind === 'glide') {
+      // s, slide to sh, hold, slide back, twice, ending on s
+      const hold = 0.35, slide = 0.7, seg = [[s, s, hold]];
+      for (let k = 0; k < 2; k++) seg.push([s, sh, slide], [sh, sh, hold], [sh, s, slide], [s, s, hold]);
+      const T = seg.reduce((a, q) => a + q[2], 0);
+      const peak = (t) => {
+        for (const [a, b, d] of seg) { if (t <= d) { const u = (1 - Math.cos(Math.PI * t / d)) / 2; return Math.exp(Math.log(a) + u * Math.log(b / a)); } t -= d; }
+        return s;
+      };
+      return concat([lead, sibilantGlide(fs, T, peak), lead]);
+    }
+    if (def.kind === 'ladder') {
+      const k = (def.rungs || []).length || 3, S = SIBILANTS[def.sib || 'sh'], fem = goal === 'fem';
+      // from typical masculine to a little past typical feminine (or back, for a masculine goal)
+      const lo = S.M * 0.97, hi = S.W * 1.03, parts = [lead];
+      for (let i = 0; i < k; i++) {
+        const u = o.flat ? 0.5 : (fem ? i : k - 1 - i) / Math.max(1, k - 1);
+        parts.push(sibilant(fs, 0.9, Math.exp(Math.log(lo) + u * Math.log(hi / lo)), { level: 0.12, seed: 21 + i }), gap);
+      }
+      return concat(parts);
+    }
+    // pairs: "sip, ship" three times
+    const SIB = { s: { ...SIBILANTS.s, [g]: s }, sh: { ...SIBILANTS.sh, [g]: sh } };
+    const word = (sib, cue) => example(fs, { type: 'word', sib, vowel: 'I', cue }, goal, VOWELS, SIB);
+    const parts = [lead];
+    for (let i = 0; i < 3; i++) parts.push(word('s', 'sip'), word('sh', 'ship'));
+    return concat(parts);
+  }
+
   function silence(fs, dur) { return new Float32Array(Math.round(fs * dur)); }
 
   function normalize(x, level, fs, rampSec = 0.02) {
@@ -599,7 +643,7 @@
     return concat(parts);
   }
 
-  const api = { soundVals, canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu };
+  const api = { soundVals, canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu, sibilantGlide, sibExercise };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
