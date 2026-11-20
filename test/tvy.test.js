@@ -60,5 +60,20 @@ for (const sib of ['s', 'sh']) {
 }
 // ---- empty input ----
 check(D.specStrip([], { trim: true }).cols === 0 && D.compareStrips(D.specStrip([]), D.specStrip([])).big === null, 'no frames: an empty strip and no gap');
+// ---- the reference's spectrogram on your clock: each word stretched onto yours, blank between and past them ----
+{
+  const rows = 4, hop = 10, cols = 100, v = new Uint8Array(cols * rows);
+  for (let c = 0; c < cols; c++) v.fill(c + 1, c * rows, c * rows + rows); // each column says which it was
+  const spec = { hop, rows, cols, fmax: 5000, v };
+  const ref = { ws: [0, 500], dur: 1000, bin: 50, fm: Array.from({ length: 20 }, (_, i) => [500 + i, 1500, 2500]) };
+  // you: word 1 twice as slow (0-1000 ms), a pause, word 2 from 1300 to 1800
+  const w = D.warpSpectrogram(spec, ref, [0, 1300], 1800, [1000, 1800]);
+  const at = (ms) => w.v[Math.round(ms / hop) * rows];
+  check(w.cols === 180 && at(0) === 1 && at(400) === 21 && at(980) === 50, `word 1 stretched 2x: your 400 ms shows the reference's 200 ms (column ${at(400) - 1})`);
+  check(at(1100) === 0 && at(1250) === 0, 'the pause between your words is blank');
+  check(at(1300) === 51 && at(1500) === 71, `word 2 starts with the reference's word 2 (column ${at(1300) - 1})`);
+  const m = w.fm.find(f => f[0] >= 1300);
+  check(w.fm.length > 0 && m && m[1][1] === 1500 && w.fm.every(f => f[0] < 1800), `formant marks follow the words (${w.fm.length} marks)`);
+}
 console.log(fails ? `${fails} failed` : 'all passed');
 process.exit(fails ? 1 : 0);
