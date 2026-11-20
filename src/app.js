@@ -4484,9 +4484,10 @@
   let tlPxs = null; // the zoom picked last, kept while the page is open
   // The tall timeline's lanes, top to bottom, each [top, height] in px. They all share one time axis.
   // A reading has two more lanes for its words; a Freestyle take has none.
-  function tlLanes(words) {
+  // rsp: a lane for the reference's spectrogram under yours (Readings, when switched on)
+  function tlLanes(words, rsp) {
     const y = {}; let at = 38;
-    for (const [k, h] of [['p', 80], ['r', 56], ['s', 110]].concat(words ? [['wp', 40], ['wr', 44]] : [])) { y[k] = [at, h]; at += h + 24; }
+    for (const [k, h] of [['p', 80], ['r', 56], ['s', 110]].concat(rsp ? [['rsp', 110]] : [], words ? [['wp', 40], ['wr', 44]] : [])) { y[k] = [at, h]; at += h + 24; }
     y.lab = at - 10; y.H = words ? y.lab + 22 : at - 12; return y;
   }
   const TL_LANES = tlLanes(true);
@@ -4508,8 +4509,8 @@
   // stretch of time with its pitch and resonance. words is the reading's byWord, or null for a Freestyle take.
   // pxs is the zoom; spec the recording's spectrogram, or note says why there's none.
   // ref: the demo voice laid on this clock (D.warpTimeline, plus its words' byWord), drawn dashed.
-  function timelineSvg(words, tl, pxs, spec, note, gone, ref, unsure) { // gone(i): 'miss' for a word the word check didn't hear; unsure(i): a heard word the recogniser wasn't sure of
-    const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = words ? TL_LANES : tlLanes(false);
+  function timelineSvg(words, tl, pxs, spec, note, gone, ref, unsure, rspec) { // gone(i): 'miss' for a word the word check didn't hear; unsure(i): a heard word the recogniser wasn't sure of
+    const [lo, hi0] = target(), hi = Math.min(hi0, 100), [plo, phi] = pitchBand(), Y = rspec ? tlLanes(!!words, true) : words ? TL_LANES : tlLanes(false);
     const L = 6, W = Math.ceil(L + tl.dur / 1000 * pxs + 40), x = (ms) => L + ms / 1000 * pxs;
     const ps = tl.f0.filter(v => v > 0);
     const pmin = Math.max(50, Math.min(plo, ps.length ? D.quantile(ps, 0.03) : plo) - 15), pmax = Math.max(phi, ps.length ? D.quantile(ps, 0.97) : phi) + 15;
@@ -4529,6 +4530,14 @@
       if (!F) return;
       F.forEach((f, j) => { if (f < fmax) g += `<rect class="tl-fm f${j + 1}" x="${f1(x(i * tl.bin))}" y="${f1(S0 + (1 - f / fmax) * SH - 1)}" width="${f1(Math.max(1.5, tl.bin / 1000 * pxs))}" height="2"/>`; });
     });
+    // the reference's spectrogram, word by word on your clock (D.warpSpectrogram), with its formants
+    if (rspec) {
+      const [R0, RH] = Y.rsp;
+      g += `<rect class="tl-spbg" x="${L}" y="${R0}" width="${f1(W - L - 40)}" height="${RH}"/>`;
+      if (rspec.cols) g += `<image class="tl-spec" href="${specImage(rspec)}" x="${L}" y="${R0}" width="${f1(rspec.cols * rspec.hop / 1000 * pxs)}" height="${RH}" preserveAspectRatio="none"/>`;
+      const bw = f1(Math.max(1.5, tl.bin / 1000 * pxs));
+      for (const [ms, F] of rspec.fm) F.forEach((f, j) => { if (f > 0 && f < rspec.fmax) g += `<rect class="tl-fm f${j + 1}" x="${f1(x(ms))}" y="${f1(R0 + (1 - f / rspec.fmax) * RH - 1)}" width="${bw}" height="2"/>`; });
+    }
     // time ticks, closer together when zoomed in
     const step = [1, 2, 5, 10, 15, 30].find(s => s * pxs >= 110) || 60;
     for (let s = 0; s * 1000 <= tl.dur; s += step) g += `<line class="tl-tick" x1="${f1(x(s * 1000))}" x2="${f1(x(s * 1000))}" y1="16" y2="${Y.H - 4}"/><text class="wr-lane" x="${f1(x(s * 1000) + 3)}" y="12">${clockOf(s)}</text>`;
@@ -4616,7 +4625,7 @@
       noAudio: 'No recording on this device, so no spectrogram',
       hint: blob ? 'Tap the timeline (or a word) to cue it and see the numbers there, then ▶ Play from it.' : 'Tap the timeline or a word for the numbers there.',
       wordInfo: (i) => wordReadout(rec, i, ref), gone: (i) => wordGone(rec, i),
-      ref: ref ? Object.assign(D.warpTimeline(ref.tl, got.tl.ws, got.tl.dur), { words: ref.byWord }) : null, refWho: ref ? RefRead.who(ref) : null,
+      ref: ref ? Object.assign(D.warpTimeline(ref.tl, got.tl.ws, got.tl.dur), { words: ref.byWord }) : null, refWho: ref ? RefRead.who(ref) : null, refRec: ref || null,
     });
     timelineTakesOver(box, el, T);
     if (!blob) return;
@@ -4670,17 +4679,22 @@
       + `<span class="tr-fm">${fm}</span>${ref}<span class="tr-n">${c.note || ''}</span>`;
   }
   function mountTimeline(el, o) {
-    const tl = o.tl, words = o.words || null, Y = words ? TL_LANES : tlLanes(false), [lo, hi] = target(), [plo, phi] = pitchBand();
+    const tl = o.tl, words = o.words || null, [lo, hi] = target(), [plo, phi] = pitchBand();
+    let Y = words ? TL_LANES : tlLanes(false);
     const hasAudio = !!(o.blob || o.buf), live = () => el.isConnected && o.alive();
     const V = { cue: null, info: null, pxs: tlPxs || TL_PX_S, spec: TLSpec.id === o.id ? TLSpec.spec : null, note: hasAudio ? 'Reading the recording…' : o.noAudio, view: null, sel: -1, on: -1, head: null, hold: false };
     const lab = (k, txt) => `<span style="top:${Y[k][0] - 17}px">${txt}</span>`;
+    // the reference's spectrogram as a lane of its own: off unless asked for (remembered in this browser)
+    const canRsp = !!(o.refRec && o.refRec.x && o.refRec.tl && words);
+    V.rsOn = canRsp && rspOn(); V.rspec = null;
+    const lanesHtml = () => `${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance score · goal ${lo}-${hi}`)}${lab('s', V.rsOn ? 'Your spectrogram · 0-5 kHz' : 'Spectrogram · 0-5 kHz')}${V.rsOn ? lab('rsp', `${escapeHtml((o.refWho || 'demo voice').replace(/^./, c => c.toUpperCase()))}'s spectrogram · stretched to your pace`) : ''}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance score' : 'Each word: resonance score') : ''}
+          ${(V.rsOn ? ['s', 'rsp'] : ['s']).map(k => [4, 3, 2, 1].map(f => `<span class="tl-hz" style="top:${Y[k][0] + (1 - f / 5) * Y[k][1] - 7}px">${f}k</span>`).join('')).join('')}`;
     el.innerHTML = `<div class="section-head"><h4>${o.heading}${infoHtml('About the timeline', o.about)}</h4>
-        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.unsure ? '<span><u class="unsure-key">word</u>unsure</span>' : ''}${o.ref ? '<span><i class="ref-key"></i>demo voice</span>' : ''}</span></div>
-      <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}
+        <span class="muted small legend"><span><i class="dot masc-fill"></i>darker</span><span><i class="dot fem"></i>brighter</span><span><i class="dot you"></i>no vowel read</span>${words ? '<span><i class="wr-key off"></i>off your goal</span>' : ''}${o.unsure ? '<span><u class="unsure-key">word</u>unsure</span>' : ''}${o.ref ? `<span><i class="ref-key"></i>${escapeHtml(o.refWho || 'demo voice')}</span>` : ''}</span></div>
+      <div class="tl-ctl">${hasAudio ? `<button type="button" class="btn sm primary" id="tl-play" disabled>▶ Play</button><span class="small muted tl-clock" id="tl-clock">loading…</span>` : ''}${o.extraBtns || ''}${canRsp ? `<button type="button" class="btn sm ghost" id="tl-rsp" aria-pressed="${V.rsOn}" title="Show the ${escapeHtml(o.refWho || 'demo voice')}'s spectrogram under yours, stretched word by word to your pace">${V.rsOn ? '✓ ' : ''}Reference spectrogram</button>` : ''}
         <span class="tl-zoom" role="group" aria-label="Zoom"><button type="button" class="btn sm ghost" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn sm ghost" data-z="fit">Fit</button><button type="button" class="btn sm ghost" data-z="in" aria-label="Zoom in">+</button></span></div>
       <div class="tl-wrap"><div class="tl-scroll" tabindex="0" aria-label="Timeline, scrolls sideways"></div>
-        <div class="tl-lanes" aria-hidden="true">${lab('p', `Pitch · goal ${plo}-${phi} Hz`)}${lab('r', `Resonance score · goal ${lo}-${hi}`)}${lab('s', 'Spectrogram · 0-5 kHz')}${words ? lab('wp', o.unsure ? 'Words heard: pitch' : 'Each word: pitch') + lab('wr', o.unsure ? 'Words heard: resonance score' : 'Each word: resonance score') : ''}
-          ${[4, 3, 2, 1].map(k => `<span class="tl-hz" style="top:${Y.s[0] + (1 - k / 5) * Y.s[1] - 7}px">${k}k</span>`).join('')}</div></div>
+        <div class="tl-lanes" aria-hidden="true"></div></div>
       <div class="tl-readbox"><div class="tl-read${o.ref ? ' has-ref' : ''}${words ? '' : ' no-words'}" id="tl-read" aria-live="polite">${cueHtml({ note: o.hint, refWho: o.ref ? (o.refWho || 'demo voice') : null })}</div></div>`;
     const scroll = el.querySelector('.tl-scroll'), read = el.querySelector('#tl-read');
     let svg = null, head = null, cueG = null, playable = false, drag = null, grab = null, noClick = false;
@@ -4723,8 +4737,17 @@
       V.hold = mine() && Player.playing;
       if (mine() && !Player.playing) { Player.off = ms / 1000; restClock(); }
     };
+    const lanesEl = el.querySelector('.tl-lanes');
     const draw = () => {
-      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref, o.unsure);
+      if (V.rsOn && !V.rspec) {
+        try {
+          const r = o.refRec; if (!r._spec) r._spec = D.spectrogram(r.x, r.fs);
+          V.rspec = D.warpSpectrogram(r._spec, r.tl, tl.ws, tl.dur, tl.we);
+        } catch (e) { V.rsOn = false; }
+      }
+      Y = V.rsOn ? tlLanes(!!words, true) : words ? TL_LANES : tlLanes(false);
+      lanesEl.innerHTML = lanesHtml();
+      V.view = timelineSvg(words, tl, V.pxs, V.spec, V.note, o.gone, o.ref, o.unsure, V.rsOn ? V.rspec : null);
       scroll.innerHTML = V.view.svg; svg = scroll.firstElementChild; head = svg.querySelector('.tl-head'); cueG = svg.querySelector('.tl-cue');
       showCue();
       if (V.head != null) place(V.head, false);
@@ -4743,6 +4766,12 @@
     if (o.fitShort && tl.dur > 0) V.pxs = clamp(Math.max(V.pxs, (scroll.clientWidth - 50) / (tl.dur / 1000)), TL_ZOOM[0], TL_ZOOM[1]);
     draw();
     const themed = () => { if (!live()) { tlRedraws.delete(themed); return; } redraw(); };
+    const rb = el.querySelector('#tl-rsp');
+    if (rb) rb.onclick = () => {
+      V.rsOn = !V.rsOn; rspOn(V.rsOn);
+      rb.setAttribute('aria-pressed', String(V.rsOn)); rb.textContent = (V.rsOn ? '✓ ' : '') + 'Reference spectrogram';
+      redraw();
+    };
     tlRedraws.add(themed);
     el.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => {
       const z = b.dataset.z;
@@ -4994,6 +5023,10 @@
       fo: readingFoSum(rec), breath: rec.breath, sib: { s: rec.sibS, sh: rec.sibSh } });
   }
   const REF_KEY = 'voicetrainer.refcompare';
+  // Reference spectrogram lane on the reading timeline: off unless switched on, remembered in this browser
+  function rspOn(set) {
+    try { if (set != null) localStorage.setItem('voicetrainer.refspec', set ? '1' : '0'); return localStorage.getItem('voicetrainer.refspec') === '1'; } catch (e) { return !!set; }
+  }
   const refOn = () => { try { return localStorage.getItem(REF_KEY) === '1'; } catch (e) { return false; } };
   // A reading's result, or (rec.ref) the demo voice's measured reading of a passage. opt.ref: the demo voice's
   // measured reading of the same words, drawn as a dashed reference; opt.keep: redrawn in place (no scroll).

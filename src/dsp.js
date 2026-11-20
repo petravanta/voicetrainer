@@ -1919,6 +1919,34 @@
     }
     return out;
   }
+  // The reference's spectrogram laid on your reading's clock, word by word, the way warpTimeline lays its pitch and
+  // resonance: each of your words gets the reference's same word stretched (0.4-2.5x) onto its span; where the
+  // reference ran out of word, or between words, the column is blank. spec: D.spectrogram of the reference audio;
+  // ref: its timeline (ws word starts, dur, bin, fm per bin); ws/dur/we: your words and length. Returns a spectrogram
+  // at the reference's hop on your clock, plus fm: [[ms, [F1, F2, F3]]] for its formant marks.
+  function warpSpectrogram(spec, ref, ws, dur, we) {
+    const rsp = wordSpans(ref.ws, ref.dur), usp = wordSpans(ws, dur, we), hop = spec.hop, rows = spec.rows;
+    const cols = Math.max(0, Math.ceil(dur / hop)), v = new Uint8Array(cols * rows), fm = [];
+    for (let k = 0; k < rsp.length; k++) {
+      const a = rsp[k], b = usp[k]; if (!a || !b) continue;
+      const g = Math.max(0.4, Math.min(2.5, (b[1] - b[0]) / Math.max(1, a[1] - a[0])));
+      for (let c = Math.max(0, Math.floor(b[0] / hop)); c < cols && c * hop < b[1]; c++) {
+        const ms = c * hop; if (ms < b[0]) continue;
+        const rc = Math.round((a[0] + (ms - b[0]) / g) / hop);
+        if (rc * hop >= a[1] || rc < 0 || rc >= spec.cols) continue;
+        v.set(spec.v.subarray(rc * rows, rc * rows + rows), c * rows);
+      }
+      if (ref.fm) {
+        const i0 = Math.max(0, Math.floor(a[0] / ref.bin)), i1 = Math.min(ref.fm.length - 1, Math.ceil(a[1] / ref.bin) - 1);
+        for (let i = i0; i <= i1; i++) {
+          const ms = (i + 0.5) * ref.bin; if (ms < a[0] || ms >= a[1] || !ref.fm[i]) continue;
+          const at = b[0] + (ms - a[0]) * g; if (at > b[1]) break;
+          fm.push([Math.round(at), ref.fm[i]]);
+        }
+      }
+    }
+    return { hop, rows, cols, fmax: spec.fmax, v, fm };
+  }
   // A spectrogram of a whole recording, for drawing under the reading timeline: the sound brought down to about
   // 11 kHz, 23 ms Hann windows every hopMs (wider for long recordings, so a column count stays under maxCols),
   // rows from 0 Hz up to fmax, each cell 0..255 over the loudest 65 dB. v[col * rows + row], row 0 = 0 Hz.
@@ -3096,7 +3124,7 @@
   const api = {
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
-    voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, readingVowels, READ_VMAP_MIN, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
+    voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, readingVowels, READ_VMAP_MIN, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, warpSpectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
     whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT, SIB_SPLIT, sibBursts, glideTurns, GLIDE_STEP, sibScore, glideCheck, ladderCheck, pairsCheck, RUNG_MIN,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
