@@ -1,9 +1,9 @@
 [
   {
     "id": "b-dog",
-    "title": "Big dog, little dog",
-    "cue": "Big dog, little dog",
-    "sub": "larynx height and airflow",
+    "title": "Big dog, little dog panting",
+    "cue": "Dog panting",
+    "sub": "feel the larynx move · warm-up",
     "aim": "explore",
     "why": "A panting game for feeling your larynx move and noticing your airflow. A big dog pants low and slow with a lowered larynx and an open throat; a little dog pants high and quick with a raised larynx and a small throat. It mainly trains larynx height (resonance); because it starts as pure breath, it also makes airflow easy to feel.",
     "steps": [

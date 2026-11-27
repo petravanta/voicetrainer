@@ -190,6 +190,17 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .tabs > button { flex: none; }
 .tabs button { border: 0; background: none; color: var(--muted); font-weight: 600; padding: 8px 12px 9px; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.ptabs { display: flex; flex-wrap: wrap; column-gap: 18px; row-gap: 6px; border-bottom: 0; overflow: visible; }
+.ptab-group { display: inline-flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line); max-width: 100%; }
+.ptab-group > button { flex: none; }
+.ptab-label { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0 6px 12px 0; opacity: 0.8; }
+.drill-pick { display: grid; gap: 8px; min-width: 0; }
+.tab-note { margin: 0; }
+@media (max-width: 520px) {
+  .ptab-group { width: 100%; }
+  .ptab-group > button { padding: 8px 8px 9px; }
+  .ptab-label { min-width: 3.7em; }
+}
 /* the sound picker sits on top and the drill gets the full width under it */
 .practice-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; }
