@@ -33,6 +33,7 @@ jobs:
       - run: node test/reading.test.js
       - run: node test/whisper.test.js
       - run: node test/sibex.test.js
+      - run: node test/reso.test.js
       - run: node test/vowelmap.test.js
       - run: node test/focus.test.js
       - run: node test/follow.test.js

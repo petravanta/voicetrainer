@@ -5,7 +5,7 @@ const src = (f) => fs.readFileSync(path.join(__dirname, 'src', f), 'utf8');
 let page = src('index.html');
 // Catalog content from data/*.json (see CONTRIBUTING.md), inlined so the page works as one file
 const data = {};
-for (const n of ['texts', 'words', 'breath', 'control', 'whisper', 'sibex', 'embody', 'emotions', 'pron']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
+for (const n of ['texts', 'words', 'breath', 'control', 'whisper', 'sibex', 'reso', 'embody', 'emotions', 'pron']) data[n] = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', n + '.json'), 'utf8'));
 page = page.split('/*DATA*/').join(JSON.stringify(data).replace(/<\/script/gi, '<\\/script'));
 // Version stamp: build = date of the build and the commit (sent to LRCLIB in the Lrclib-Client header),
 // built = UTC time of the build (the footer shows it in the viewer's time zone, UTC alongside). Both show in the footer; a page that wasn't built (src/ as is) says 'dev'.

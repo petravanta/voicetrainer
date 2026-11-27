@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Resonance exercises",
+  "description": "Practice > Resonance exercises scored on the resonance score: big dog / little dog contrasts and resonance chains. Shown in file order, before the dark-to-bright slide and the whispers.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "title", "cue", "sub", "kind", "why", "steps"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^rs-[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable id starting with rs-. Practice history refers to it, so never change or reuse one that has shipped."},
+      "title": {"type": "string", "description": "Heading on the exercise."},
+      "cue": {"type": "string", "description": "Short name on the exercise card."},
+      "sub": {"type": "string", "description": "A few words under the name on the card."},
+      "kind": {"enum": ["dog", "chain"], "description": "dog: dark and bright holds of one vowel in pairs on one note (needs vowel). chain: vowels one after another, each scored on its own (needs vowels and say). Each kind has its own check in src/dsp.js, so a new kind is a code change."},
+      "vowel": {"enum": ["i", "I", "e", "E", "ae", "a", "c", "V", "o", "U", "u", "r"], "description": "dog: the vowel held, from the formant table in src/dsp.js."},
+      "vowels": {"type": "array", "minItems": 2, "items": {"enum": ["i", "I", "e", "E", "ae", "a", "c", "V", "o", "U", "u", "r"]}, "description": "chain: the vowels scored, each on its own. Write the stressed vowels the words in say really have; others are not scored."},
+      "held": {"type": "boolean", "description": "chain: true when the vowels are held on one breath (the demo glides between them) rather than said as words."},
+      "say": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "chain: what to say, one line each, shown and read by the demo voice."},
+      "why": {"type": "string", "description": "What the exercise is for; the first sentence shows, the rest is behind an info badge."},
+      "steps": {
+        "type": "array", "minItems": 1,
+        "items": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object", "additionalProperties": false, "required": ["feminine", "masculine"],
+             "properties": {"feminine": {"type": "string"}, "masculine": {"type": "string"}},
+             "description": "A step that depends on the training goal."}
+          ]
+        },
+        "description": "Steps shown in order. Use an object with feminine and masculine for a step that differs by goal."
+      }
+    }
+  }
+}
