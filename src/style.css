@@ -198,8 +198,8 @@ button:focus-visible, .btn:focus-visible, label.btn:focus-within { outline: 2px 
 .tab-note { margin: 0; }
 @media (max-width: 520px) {
   .ptab-group { width: 100%; }
-  .ptab-group > button { padding: 8px 8px 9px; }
-  .ptab-label { min-width: 3.7em; }
+  .ptab-group > button { padding: 8px 7px 9px; }
+  .ptab-label { min-width: 3.4em; padding-right: 4px; }
 }
 /* the sound picker sits on top and the drill gets the full width under it */
 .practice-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -427,6 +427,7 @@ body.goal-masc .tract-key .ln.goal { background: repeating-linear-gradient(90deg
 .iso-row.main .g-label { font-weight: 600; }
 .tract-key .ln.start { border: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--muted) 0 5px, transparent 5px 9px); }
 .iso-row:not(.main) .g-mark { background: var(--muted); }
+.g-mark.away { background: var(--muted); }
 
 .tract-lead { margin: 0; font-size: 0.86rem; }
 .tract-read { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; font-size: 0.84rem; }

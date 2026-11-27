@@ -1052,6 +1052,66 @@
     return takes;
   }
 
+  // ---------- resonance exercises (Practice > Resonance, data/reso.json) ----------
+  // What a resonance exercise keeps of one analyzer frame, or null. Only steady voiced frames count (a drill's
+  // held vowel, or the looser steadiness of running speech, so a word chain's short vowels count too).
+  //   dog: the exercise's vowel however dark or bright it is said: any plausible reading of it gives {res, f0}
+  //        (a vowel drill would also want it close to the typical vowel, which a big dog deliberately isn't).
+  //   chain: a frame that matches one of the chain's vowels, the way a reading word's vowels are matched
+  //        (see matchWordVowel), gives {key, res}; anything else (a consonant, a glide, another vowel) is null.
+  function resoFrame(def, fr) {
+    if (!fr || fr.kind !== 'voiced' || !fr.formants || !(fr.stable || fr.steady)) return null;
+    const F = fr.formants, res = (a) => Math.max(0, Math.min(100, resScore(a)));
+    if (def.kind === 'dog') {
+      const fit = scoreVowel(F, VOWEL_BY_KEY[def.vowel], fr.f0);
+      return fit.ok ? { res: res(fit.alpha), f0: fr.f0 } : null;
+    }
+    const m = matchWordVowel(F, def.vowels, classifyVowel(F, VOWELS, fr.f0), fr.f0);
+    if (!m) return null;
+    const key = def.vowels.includes(m.vowel.key) ? m.vowel.key : def.vowels.find(k => (VOWEL_ALT[k] || []).includes(m.vowel.key));
+    return key ? { key, res: res(m.alpha) } : null;
+  }
+  // Big dog, little dog: held sounds separated by short pauses, read in pairs. A hold is a run of kept frames
+  // (gaps up to DOG.gap frames join, so a wobble doesn't split it) of at least DOG.min frames (half a second).
+  // In each pair the darker hold is the big dog and the brighter the little dog, whichever came first.
+  // A pair passes when they are DOG.contrast points apart on the resonance score and within DOG.drift semitones
+  // of each other in pitch: the point is changing resonance, not dragging the pitch along with it.
+  // score: the median of the goal's side (little dogs for a feminine goal, big dogs for a masculine one).
+  const DOG = { gap: 10, min: 30, contrast: 12, drift: 2, pairs: 2 };
+  function dogHolds(frames) {
+    const out = []; let cur = null, gap = 0;
+    frames.forEach((f, i) => {
+      if (f) { if (!cur) cur = { a: i, fr: [] }; cur.fr.push(f); cur.b = i; gap = 0; }
+      else if (cur && ++gap > DOG.gap) { out.push(cur); cur = null; gap = 0; }
+    });
+    if (cur) out.push(cur);
+    return out.filter(h => h.fr.length >= DOG.min)
+      .map(h => ({ a: h.a, b: h.b, n: h.fr.length, res: median(h.fr.map(f => f.res)), f0: median(h.fr.map(f => f.f0)) }));
+  }
+  function dogCheck(frames, goal) {
+    const holds = dogHolds(frames), pairs = [];
+    for (let i = 0; i + 1 < holds.length; i += 2) {
+      const x = holds[i], y = holds[i + 1], big = x.res <= y.res ? x : y, little = big === x ? y : x;
+      const contrast = little.res - big.res, drift = Math.abs(12 * Math.log2(little.f0 / big.f0));
+      pairs.push({ big, little, contrast, drift, ok: contrast >= DOG.contrast && drift <= DOG.drift });
+    }
+    const side = pairs.map(p => (goal === 'fem' ? p.little.res : p.big.res));
+    return { holds, pairs, good: pairs.filter(p => p.ok).length, score: side.length ? median(side) : NaN };
+  }
+  // Resonance chains: vowels said one after another (held, in words or in phrases), each scored on its own.
+  // A vowel counts once it has CHAIN_MIN kept frames (about an eighth of a second, gathered over every time it
+  // comes round). score: the median of the vowels' own scores, so one vowel can't carry the rest; lo and hi
+  // are the darkest and brightest vowel, and their gap is how evenly the chain held its resonance.
+  const CHAIN_MIN = 8;
+  function chainCheck(frames, keys) {
+    const by = Object.fromEntries(keys.map(k => [k, []]));
+    for (const f of frames) if (f && by[f.key]) by[f.key].push(f.res);
+    const per = keys.map(k => ({ key: k, n: by[k].length, res: by[k].length >= CHAIN_MIN ? median(by[k]) : NaN, recent: by[k].slice(-30) }));
+    const got = per.filter(p => Number.isFinite(p.res)), r = got.map(p => p.res);
+    return { per, done: got.length, all: got.length === keys.length,
+      score: got.length === keys.length ? median(r) : NaN, lo: r.length ? Math.min(...r) : NaN, hi: r.length ? Math.max(...r) : NaN };
+  }
+
   // ---------- streaming analyzer ----------
   // Formant gates for real running speech, measured on a real reader (8 LJSpeech clips, a woman, median 229 Hz):
   // with poles up to 500 Hz wide and the drill's 0.06 steadiness, only 26% of voiced frames held still and 5% got
@@ -3125,7 +3185,7 @@
     VOWELS, VOWEL_BY_KEY, SIBILANTS, PITCH_BANDS,
     median, quantile, hzToNote, fft, powerSpectrum, lowpassFIR, decimate,
     voiceDims, DIMS_NOT_MEASURED, textHash, soundOnset, yin, lpc, polyRoots, formants, fitVowel, scoreVowel, pitchLimited, pitchLimitHz, scoreSpread, plausible, F1_PITCH_RATIO, SCORE_RANGE, RES_SCALE, RES_PER_ALPHA, resScore, resAlpha, RES_AVG, RES_BANDS, fromScale1, migrateRecord, classifyVowel, heldVowelFit, HOLD_RMS, pronIndex, wordVowels, wordVowelSeq, matchWordVowel, lineVowels, FUNCTION_WORDS, sibilantAlpha, coachVowel, formantOffsets, formantSummary, coachSibilant, COACH_BAND, F1_SLACK, tractShape, isolation, ISO_RULES, voiceQuality, breathiness, BREATH_BAND, BREATH_SCALE, breathFromScale1, breathWindowUneven, BREATH_EVEN, countSyllables, speechStretches, edgeCues, alignWords, soundClasses, alignByClass, retagFrames, readingVowels, READ_VMAP_MIN, placeWords, wordReport, missedWords, MISS_VOICED, MISS_MAX_SHARE, matchScript, normWord, MATCH_MIN, readingTimeline, wordSpans, heardWords, HEARD_SURE, spectrogram, warpSpectrogram, specStrip, stripReads, compareStrips, wideColumn, WIDE_HZ, analyzeReading, analyzeReadingSteps, warpTimeline, timelineAt, spanFormants, REF_LAG, readingPhrases, focusSpots, spotStats, compareTries, wordShortfall, clipStats, mergeWordReports, vowelMap, prosodyStats, micVoiceCheck, readingsCheck, RC_STEPS, pooledResonance, LOOSE_WORD_MIN, READ_RES_SOLID, VOICED_MAX_BW, SPEECH_SPREAD, WIDE_F1_BW, F1_OFF_RMS, pickFormants, f1OnPitch, F1_ON_PITCH, tameH1, H1_KEEP, NucleusTracker, Analyzer, PITCH_MIN, PITCH_MAX, SING_PITCH_MAX,
-    whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT, SIB_SPLIT, sibBursts, glideTurns, GLIDE_STEP, sibScore, glideCheck, ladderCheck, pairsCheck, RUNG_MIN,
+    whisperFormants, whisperFit, whisperBrightness, sirenLegs, SIREN_STEP, WHISPER_SHIFT, SIB_SPLIT, sibBursts, glideTurns, GLIDE_STEP, sibScore, glideCheck, ladderCheck, pairsCheck, RUNG_MIN, resoFrame, dogHolds, dogCheck, DOG, chainCheck, CHAIN_MIN,
     dealFeeling, voicedTakes,
     parseLyrics, parseNotes, melodyMatch, nearestNote, lyricLineAt, singSummary, SING_WHY, instrumentalLine, SING_RES_SOLID, SING_RES_MIN, heldNotes, midiName, lineSyllables, SingFollower, lrcSync, lyricsSearchUrl, lyricsResults, LYRICS_API,
     LYRICS_OVH, LYRICS_SOURCES, LRCLIB_CLIENT, APP_BUILD, APP_BUILT, buildLabel, newerBuild, ovhSearchUrl, ovhLyricsUrl, ovhResults, ovhLyrics, lyricsWebUrl, getJson, getJsonRetry, findLyrics, loadLyricsText,

@@ -20,7 +20,7 @@ for (const rd of [0.3, 0.95, 1.6, 2.7]) {
   S.setStyle('classic');
 }
 const dir = __dirname, pre = path.join(dir, 'natural-preload.js');
-for (const t of ['examples', 'dsp', 'reading', 'readres', 'embody', 'wordvowels', 'vowelmap', 'coach', 'readcheck', 'sing', 'singread', 'focus', 'follow', 'rigor', 'whisper']) {
+for (const t of ['examples', 'dsp', 'reading', 'readres', 'embody', 'wordvowels', 'vowelmap', 'coach', 'readcheck', 'sing', 'singread', 'focus', 'follow', 'rigor', 'whisper', 'reso']) {
   const r = spawnSync(process.execPath, ['-r', pre, path.join(dir, t + '.test.js')], { encoding: 'utf8' });
   const bad = (r.stdout || '').split('\n').filter(l => l.startsWith('FAIL'));
   check(r.status === 0, `${t} with the natural voice${bad.length ? ': ' + bad.join('; ') : ''}`);

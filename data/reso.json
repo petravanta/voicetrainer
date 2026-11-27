@@ -1,0 +1,74 @@
+[
+  {
+    "id": "rs-dog",
+    "title": "Big dog, little dog",
+    "cue": "Big dog, little dog",
+    "sub": "dark, then bright · one note",
+    "kind": "dog",
+    "vowel": "V",
+    "why": "The classic resonance contrast: a big dog's deep, hollow \"huh\" with a low larynx and a wide throat, then a little dog's small, bright \"huh\" with the larynx up and the space small, both on the same note. Feeling both ends makes the middle (and your goal) easier to find. Each pair is scored on how far apart the two sit on the resonance score and on whether the pitch stayed put; your goal's end is the score that is kept.",
+    "steps": [
+      "Warm up: pant like a big dog (slow, low, open throat), then like a little dog (quick, light, small). Feel the larynx drop and rise.",
+      "Pick a comfortable note. Big dog: say a held, deep \"huuuh\" for about a second, larynx low, throat wide.",
+      "Pause, then little dog on the same note: a held, small, bright \"huuuh\", larynx up, as if the sound sits behind your front teeth.",
+      "Pause, and do the pair again: big, little, big, little. Change the size of the space, not the pitch.",
+      {
+        "feminine": "Finish on the little dog and notice where it sits: that is the direction your everyday voice goes.",
+        "masculine": "Finish on the big dog and notice where it sits: that is the direction your everyday voice goes."
+      }
+    ]
+  },
+  {
+    "id": "rs-chain-vowels",
+    "title": "Vowel chain on one breath",
+    "cue": "Vowel chain",
+    "sub": "ee ay ah oh oo · hold the resonance",
+    "kind": "chain",
+    "held": true,
+    "vowels": ["i", "e", "a", "o", "u"],
+    "say": ["ee – ay – ah – oh – oo"],
+    "why": "Resonance tends to drop as the vowels move from the front of the mouth (ee) to the back (oh, oo), because the tongue pulls back and the lips round. Gliding through all five on one breath, each one scored on its own, trains keeping the same small, bright (or big, dark) space while only the vowel changes.",
+    "steps": [
+      {
+        "feminine": "Start on a bright, light \"ee\" in your goal voice.",
+        "masculine": "Start on a full, relaxed \"ee\" in your goal voice."
+      },
+      "Glide on one breath: ee – ay – ah – oh – oo, about half a second each, on one comfortable note.",
+      {
+        "feminine": "Keep the larynx up and the sound forward as you reach \"oh\" and \"oo\": round the lips only a little.",
+        "masculine": "Keep the throat open and the larynx settled as you reach \"ee\" and \"ay\": don't let them go thin."
+      },
+      "Breathe, and do it again. Each vowel's bar shows where it sits; aim for all five inside the band."
+    ]
+  },
+  {
+    "id": "rs-chain-words",
+    "title": "Word chain",
+    "cue": "Word chain",
+    "sub": "me, may, ma, mow, moo",
+    "kind": "chain",
+    "vowels": ["i", "e", "a", "o", "u"],
+    "say": ["me, may, ma, mow, moo"],
+    "why": "The same front-to-back vowel sweep as the vowel chain, now as short words. The \"m\" hum before each vowel helps place the sound forward, and short vowels are closer to how you really speak.",
+    "steps": [
+      "Say the chain at an easy pace, with a short gap between the words.",
+      "Let each \"m\" buzz on the lips, then open into the vowel without changing the space behind it.",
+      "Pause after the chain: once every vowel has a score, that is one take. Go again and watch the bars."
+    ]
+  },
+  {
+    "id": "rs-chain-phrases",
+    "title": "Phrase chain",
+    "cue": "Phrase chain",
+    "sub": "Lee may walk home soon",
+    "kind": "chain",
+    "vowels": ["i", "e", "c", "o", "u"],
+    "say": ["Lee may walk home soon.", "Eve made all those shoes."],
+    "why": "Two everyday sentences that sweep the same vowels from front to back, so you practise holding resonance in running speech. Only the five main vowels are scored; small linking words and consonants are left out.",
+    "steps": [
+      "Read both sentences at a natural pace, in your goal voice.",
+      "Watch the last words (\"home soon\", \"those shoes\"): that is where resonance usually slips.",
+      "Pause after both. If a vowel still has no score, say them again; once all five have one, that is one take."
+    ]
+  }
+]

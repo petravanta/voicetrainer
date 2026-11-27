@@ -72,10 +72,12 @@
   // Resonance gathers what moves the whole tract: the dark-to-bright slide (a control exercise underneath)
   // and the whispers. Expression joins intonation (prosody) and the embodied-voice game.
   const fromList = (list, ids) => ids.map(id => list.find(x => x.id === id)).filter(Boolean);
-  DRILLS.resonance = [...fromList(DRILLS.control, ['c-slide']), ...DRILLS.whisper];
+  // big dog / little dog and the resonance chains (data/reso.json) lead the Resonance tab
+  DRILLS.reso = DATA.reso.map(x => ({ ...x, type: 'reso', steps: (fem) => x.steps.map(st => (typeof st === 'string' ? st : fem ? st.feminine : st.masculine)) }));
+  DRILLS.resonance = [...DRILLS.reso, ...fromList(DRILLS.control, ['c-slide']), ...DRILLS.whisper];
   DRILLS.control = DRILLS.control.filter(x => !DRILLS.resonance.includes(x));
   DRILLS.expression = [...DRILLS.prosody, ...DRILLS.embody];
-  delete DRILLS.whisper; delete DRILLS.prosody; delete DRILLS.embody;
+  delete DRILLS.reso; delete DRILLS.whisper; delete DRILLS.prosody; delete DRILLS.embody;
   const TAB_GROUPS = [
     { label: 'Sounds', tabs: ['vowels', 'sibilants', 'words'] },
     { label: 'Skills', tabs: ['resonance', 'control', 'breath', 'expression'] },
@@ -86,7 +88,7 @@
     vowels: ['Hold one vowel. It is scored against typical voices for that vowel.', 'Each vowel has its own typical masculine and feminine formants (Hillenbrand 1995), so an "ee" is never judged against an "ah". Start here: the vowels are what the resonance score is made of, in readings too.'],
     sibilants: ['Hold "sss" or "shh", then work on their brightness.', 'The first two hold one hiss and score where its energy sits. The glide, the two ladders and the word pairs train moving the hiss brighter or darker on purpose.'],
     words: ['Say a short word a few times. Its hiss and its vowel are each scored.', 'A bridge from held sounds to speech: the hiss and the vowel straight after it, the way they meet in real words.'],
-    resonance: ['Move your resonance on purpose, and hold it while other things change.', 'These train the size of the whole tract rather than one sound: sliding dark to bright on one note, and whispering, which takes pitch out of the picture altogether.'],
+    resonance: ['Move your resonance on purpose, and hold it while other things change.', 'These train the size of the whole tract rather than one sound: big dog and little dog, dark and bright on one note; chains that hold resonance while the vowels change; the dark-to-bright slide; and whispering, which takes pitch out of the picture altogether.'],
     control: ['Move one part at a time and see which reading follows it.', 'Jaw, tongue, lips and larynx each move a different formant. These build trust that the meter tracks what you do, and show you where each knob is. Pitch on its own should leave resonance alone.'],
     breath: ['Airflow: from breathy to clear to pressed. The gauge here is breathiness.', 'A light, clear tone carries resonance best. Most are free practice with the breathiness gauge; the dog panting is a warm-up for feeling the larynx move.'],
     expression: ['Melody and feeling: intonation patterns, and one sound said many ways.', 'Pitch patterns are checked on each phrase around your own middle pitch, so they work at any voice pitch. The embodied game is not scored.'],
@@ -777,6 +779,7 @@
     const fem = state.goal === 'fem';
     if (def.type === 'embody') return playSamples(Synth.uwu(fs, state.goal, D.VOWELS), mode, `plain "${def.say}", typical ${fem ? 'feminine' : 'masculine'}`);
     if (def.type === 'sibex') return playSamples(Synth.sibExercise(fs, def, state.goal, D.VOWELS, D.SIBILANTS), mode, SX_DEMO[def.kind]);
+    if (def.type === 'reso') return playSamples(resoExample(fs, def), mode, RS_DEMO(def));
     if (def.type === 'whisper') return playSamples(Synth.whisperExample(fs, def, state.goal, D.VOWELS, D.WHISPER_SHIFT), mode, def.kind === 'siren' ? 'whisper sliding up and down' : `typical ${fem ? 'feminine' : 'masculine'} whisper`);
     const x = def.type === 'prosody' ? prosodyExample(fs, def, fem) : mode === 'compare' ? Synth.comparison(fs, def, D.VOWELS, D.SIBILANTS) : Synth.example(fs, def, state.goal, D.VOWELS, D.SIBILANTS);
     playSamples(x, mode, def.type === 'prosody' ? 'as intended' : mode === 'compare' ? 'masculine, then feminine' : `typical ${fem ? 'feminine' : 'masculine'}`);
@@ -864,7 +867,7 @@
   function startDemoView(d, label) {
     if (!d) return;
     demoLabel = label ? label[0].toLowerCase() + label.slice(1) : 'demo';
-    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
+    d.demoOn = true; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoRs = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null; d.demoStep = 0;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     resetCoachBuf(state.coach); if (state.coach) state.coach.demo = true;
     d.offTarget = null; // a "sounds closer to..." note from before the demo no longer applies
@@ -876,7 +879,7 @@
     const m = $('drill-msg');
     if (m && m.classList.contains('demo-msg')) { m.classList.remove('demo-msg'); m.textContent = d.result ? (d.msgBefore || '') : state.running ? 'Listening...' : ''; }
     d.offTarget = null;
-    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
+    d.demoOn = false; d.demoBr = []; d.demoIso = []; d.demoWh = []; d.demoSx = []; d.demoRs = []; d.demoEmb = []; d.demoBase = null; d.demoPts = []; d.demoLast = null;
     d.eased = {}; if (d.cue) { d.cue.eased = {}; d.cue.key = null; }
     if (d.def.type === 'prosody' && $('pr-cue')) { $('pr-cue').textContent = ''; $('pr-state').textContent = ''; drawProsody(d); }
   }
@@ -886,6 +889,7 @@
     else if (t === 'iso') updateIso(d, force);
     else if (t === 'whisper') updateWhisper(d, force);
     else if (t === 'sibex') updateSibex(d, force);
+    else if (t === 'reso') updateReso(d, force);
     else if (t === 'embody') updateEmbody(d, force);
     else if (t === 'prosody' && !force) updateProsody(d);
   }
@@ -1126,6 +1130,8 @@
     if (dd && dd.def.type === 'whisper' && dd.demoWh) dd.demoWh.push({ F: fr.whisperF || null, voiced: fr.kind === 'voiced', n: frameCount });
     if (d && d.def.type === 'sibex' && d.sxFr) { d.sxFr.push({ cog: fr.kind === 'fricative' ? fr.cog : null, voiced: fr.kind === 'voiced' }); if (d.sxFr.length > 7200) d.sxFr.shift(); }
     if (dd && dd.def.type === 'sibex' && dd.demoSx) dd.demoSx.push({ cog: fr.kind === 'fricative' ? fr.cog : null, voiced: fr.kind === 'voiced' });
+    if (d && d.def.type === 'reso' && d.rsFr) { d.rsFr.push(D.resoFrame(d.def, fr)); if (d.rsFr.length > 7200) d.rsFr.shift(); }
+    if (dd && dd.def.type === 'reso' && dd.demoRs) dd.demoRs.push(D.resoFrame(dd.def, fr));
     if ((d || dd) && (d || dd).def.type === 'embody') {
       const e = d ? d.emb : dd.demoEmb;
       if (e) { e.push({ n: frameCount, v: fr.kind === 'voiced', f0: fr.kind === 'voiced' ? fr.f0 : 0, res: frAny }); if (e.length > 900) e.shift(); }
@@ -1304,7 +1310,7 @@
     const d = state.drill;
     if (!d) return;
     const t = d.def.type;
-    (t === 'breath' ? renderBreathPanel : t === 'iso' ? renderIsoPanel : t === 'whisper' ? renderWhisperPanel : t === 'sibex' ? renderSibexPanel
+    (t === 'breath' ? renderBreathPanel : t === 'iso' ? renderIsoPanel : t === 'whisper' ? renderWhisperPanel : t === 'sibex' ? renderSibexPanel : t === 'reso' ? renderResoPanel
       : t === 'embody' ? renderEmbodyPanel : t === 'prosody' ? renderProsodyPanel : renderSoundPanel)(d);
     arrangeDrillPanel($('drill-panel'));
   }
@@ -1967,6 +1973,7 @@
     if (def.type === 'iso') return updateIso(d);
     if (def.type === 'whisper') return updateWhisper(d);
     if (def.type === 'sibex') return updateSibex(d);
+    if (def.type === 'reso') return updateReso(d);
     if (def.type === 'embody') return updateEmbody(d);
     if (def.type === 'prosody') return updateProsody(d);
     let prog;
@@ -2187,6 +2194,7 @@
     ];
     if (def.type === 'whisper') return whisperProofItems(def);
     if (def.type === 'sibex') return sibexProofItems(def);
+    if (def.type === 'reso') return resoProofItems(def);
     if (def.type === 'iso') return [
       { label: 'Right movement', make: (fs) => isoExample(fs, def, fem, true), grade: (fr) => gradeIso(def, fr) },
       { label: ISO_WRONG[def.kind].label, make: (fs) => isoExample(fs, def, fem, false), grade: (fr) => gradeIso(def, fr) },
@@ -2895,6 +2903,175 @@
     return [
       { label: `Typical ${fem ? 'feminine' : 'masculine'}`, make: mk({}), grade },
       { label: `${fem ? 'Dark' : 'Bright'} "sh"`, make: mk({ sh: other.sh, s: D.SIBILANTS.s[g] }), grade },
+    ];
+  }
+
+  // ---------------- resonance exercises (data/reso.json) ----------------
+  // Big dog, little dog: dark and bright holds of one vowel in pairs on one note (D.dogCheck). Chains: vowels one
+  // after another, held, in words or in phrases, each scored on its own (D.chainCheck). Both read frames through
+  // D.resoFrame, live and in Check the checker alike, and keep their score on the resonance scale.
+  const RS_DEMO = (def) => def.kind === 'dog' ? 'big, little, big, little on one note' : def.held ? 'the chain on one breath' : 'the chain, read aloud';
+  const resoExample = (fs, def, o = {}) => Synth.resoExample(fs, def, state.goal, D.VOWELS, { vowelsOf: (w) => D.wordVowelSeq(w, PRON), ...o });
+  const vowelCue = (k) => D.VOWEL_BY_KEY[k].cue.split(' ')[0];
+  // what to change on a vowel that sits off the goal band (dir as sxDir: 1 = needs brighter, -1 = needs darker)
+  const RS_TIP = { 1: 'lighter and more forward: larynx up, a little less lip rounding', '-1': 'fuller: open the throat and let the larynx settle' };
+  function renderResoPanel(d) {
+    const p = $('drill-panel'), def = d.def, fem = state.goal === 'fem', dog = def.kind === 'dog';
+    const rows = dog ? sxGauge('rs-now', 'Now', '') + sxGauge('rs-big', 'Big dog', 'darker') + sxGauge('rs-little', 'Little dog', 'brighter')
+      : def.vowels.map(k => sxGauge('rs-v-' + k, vowelCue(k), `as in ${D.VOWEL_BY_KEY[k].word}`)).join('');
+    const why = dog ? `Rows are the resonance score (left darker, right brighter); the shaded band is your goal. Dots: each held "${vowelCue(def.vowel)}". Pitch should stay within ${D.DOG.drift} semitones across a pair.`
+      : 'One row per vowel of the chain, scored on its own over every time it comes round; the shaded band is your goal. Dots: its latest readings.';
+    p.innerHTML = `
+      <p class="eyebrow"><span>Resonance exercise</span><span>${dog ? 'dark and bright, one note' : def.held ? 'vowels on one breath' : 'say it a few times'}</span></p>
+      <p class="drill-title"></p>
+      <p class="drill-help"></p>
+      ${dog ? '' : '<ul class="sx-say rs-say"></ul>'}
+      <ol class="breath-steps"></ol>
+      <div class="btn-row"><button type="button" class="btn" id="ex-play">Play example</button></div>
+      <div class="coach" aria-live="polite">
+        <p class="eyebrow"><span>${dog ? 'Big and little' : 'Your chain'}</span><span id="rs-num" class="trend"></span></p>
+        <p class="coach-cue" id="rs-cue"></p>
+        <div class="gauges">${rows}</div>
+        <p class="coach-why" id="rs-why"></p>
+      </div>
+      <figure class="tvy" id="tvy"></figure>
+      <div class="progress" aria-hidden="true"><div id="drill-prog"></div></div>
+      <p class="drill-msg" id="drill-msg"></p>
+      <div id="drill-actions"></div>
+      <div class="proof" id="proof" hidden></div>`;
+    p.querySelector('.drill-title').textContent = def.title;
+    shortWithInfo(p.querySelector('.drill-help'), def.why, 'More about this exercise');
+    const ol = p.querySelector('.breath-steps');
+    for (const t of def.steps(fem)) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+    const say = p.querySelector('.rs-say');
+    if (say) for (const t of def.say) { const li = document.createElement('li'); li.textContent = t; say.appendChild(li); }
+    const w = $('rs-why'); w.textContent = why;
+    w.append(infoBadge('About this score', dog
+      ? `Each held "${vowelCue(def.vowel)}" is read against that vowel's typical masculine and feminine formants, however dark or bright you make it, and placed on the resonance score (0 typical masculine ${D.RES_AVG.masc}, typical feminine ${D.RES_AVG.fem}). Holds go in pairs, and in each pair the darker one is the big dog. A pair counts when the two are at least ${D.DOG.contrast} points apart and their pitch within ${D.DOG.drift} semitones. The score kept is your ${fem ? 'little' : 'big'} dog, the end your goal is on. Pause briefly between holds so the app can tell them apart.`
+      : `Each steady moment is matched to one of the chain's vowels, the way a reading matches the vowels of a word, and scored against that vowel's typical values. A vowel needs about an eighth of a second of steady sound in total before it gets a score. The score kept is the middle of the vowels' scores, so one strong vowel can't carry a weak one; the result also names the vowel furthest from your goal. Linking words and consonants are left out.`));
+    $('ex-play').addEventListener('click', () => (exSrc ? stopExample() : playExample(def, 'play')));
+    d.rsFr = []; d.demoRs = [];
+    renderProof($('proof'), def);
+    // Target vs you: the goal's end of the dog (typical goal vowel; Sustain works on it). Chains move through
+    // vowels, which one steady target can't stand for, so they have their own rows instead.
+    tvyMountDrill($('tvy'), dog ? { id: def.id, type: 'vowel', vowel: def.vowel, cue: def.cue } : def);
+    $('drill-msg').textContent = '';
+    updateReso(d, true);
+  }
+  // the hold going on now: kept frames since the last real gap
+  function rsCurrent(fr) {
+    const out = []; let gap = 0;
+    for (let i = fr.length - 1; i >= 0; i--) { if (fr[i]) { out.push(fr[i]); gap = 0; } else if (++gap > D.DOG.gap) break; }
+    return out;
+  }
+  function updateReso(d, force) {
+    if (!force && frameCount % 6) return;
+    const def = d.def, cue = $('rs-cue'); if (!cue) return;
+    const demo = !!d.demoOn, fr = (demo ? d.demoRs : d.rsFr) || [], fem = state.goal === 'fem', goal = state.goal;
+    const who = demo ? `Demo voice, ${demoLabel}: ` : '';
+    let text = '', ok = false, num = '', prog = 0, ready = null;
+    if (!state.running && !demo && !fr.length) text = 'Start the microphone to begin.';
+    if (def.kind === 'dog') {
+      const r = D.dogCheck(fr, goal), cur = rsCurrent(fr), live = fr.slice(-D.DOG.gap).some(Boolean);
+      const now = live && cur.length >= 6 ? D.median(cur.slice(0, 20).map(f => f.res)) : NaN;
+      sxPaint($('rs-now'), now);
+      const bigs = r.pairs.map(q => q.big.res), littles = r.pairs.map(q => q.little.res);
+      sxPaint($('rs-big'), bigs.length ? D.median(bigs) : NaN, bigs);
+      sxPaint($('rs-little'), littles.length ? D.median(littles) : NaN, littles);
+      // the other end isn't meant to be in the goal band: its number, no verdict
+      const away = $(fem ? 'rs-big' : 'rs-little'), an = away && away.querySelector('.g-need'), am = away && away.querySelector('.g-mark');
+      if (an && an.textContent) { an.textContent = an.textContent.replace(/ [→←✓]$/, ''); an.className = 'g-need'; am.classList.remove('ok'); am.classList.add('away'); }
+      const n = r.holds.length - (live && r.holds.length && r.holds[r.holds.length - 1].b >= fr.length - D.DOG.gap - 1 ? 1 : 0); // finished holds
+      const last = r.pairs.length && n >= 2 * r.pairs.length ? r.pairs[r.pairs.length - 1] : null;
+      if (!text) {
+        if (live && cur.length) text = cur.length >= D.DOG.min ? 'Got it. Pause, then the other dog on the same note.' : 'Hold it about a second.';
+        else if (!n) text = 'Big dog first: a deep, held "huuuh", larynx low, throat wide.';
+        else if (n % 2) text = 'Now the other dog, on the same note, then pause.';
+        else if (last) {
+          const pitch = last.drift > D.DOG.drift ? ` but the pitch moved ${last.drift.toFixed(1)} semitones: keep the note and change only the space.` : '';
+          text = last.contrast < D.DOG.contrast ? `${Math.round(last.big.res)} and ${Math.round(last.little.res)}: only ${Math.round(last.contrast)} points apart. Make the big dog bigger and the little dog smaller.${pitch}`
+            : pitch ? `${Math.round(last.big.res)} and ${Math.round(last.little.res)}, a clear difference,${pitch}` : `${Math.round(last.big.res)} and ${Math.round(last.little.res)}: ${Math.round(last.contrast)} points apart on one note.${r.pairs.length < D.DOG.pairs ? ' Again: big, then little.' : ''}`;
+          ok = last.ok;
+        }
+      }
+      const pd = Math.min(r.pairs.length, D.DOG.pairs);
+      num = `${pd} of ${D.DOG.pairs} pairs`;
+      prog = (Math.min(n, 2 * D.DOG.pairs)) / (2 * D.DOG.pairs);
+      if (r.pairs.length >= D.DOG.pairs) ready = () => {
+        const q = D.dogCheck(d.rsFr, goal), sc = Math.round(q.score), side = fem ? 'little' : 'big';
+        const con = Math.round(D.median(q.pairs.map(x => x.contrast))), dr = Math.max(...q.pairs.map(x => x.drift));
+        finishReso(d, sc, `Done: big dog ${q.pairs.map(x => Math.round(x.big.res)).join(', ')}, little dog ${q.pairs.map(x => Math.round(x.little.res)).join(', ')} (goal ${target().join('-')}). `
+          + `${q.good === q.pairs.length ? `Every pair changed clearly (${con} points) on one note.` : q.good ? `${q.good} of ${q.pairs.length} pairs changed clearly on one note.` : con < D.DOG.contrast ? `They were only about ${con} points apart: exaggerate both dogs.` : `The pitch moved up to ${dr.toFixed(1)} semitones: change the space, not the note.`} `
+          + `Your ${side} dog ${sxDir(sc) === 0 ? 'lands in your goal band: that is the space to speak from.' : `sits at ${sc}, outside the goal band: make it ${fem ? 'smaller and brighter' : 'bigger and darker'} still.`}`);
+      };
+    } else {
+      const r = D.chainCheck(fr, def.vowels);
+      r.per.forEach(v => sxPaint($('rs-v-' + v.key), v.res, v.recent.slice(-12)));
+      const missing = r.per.filter(v => !Number.isFinite(v.res)).map(v => `"${vowelCue(v.key)}"`);
+      const offs = r.per.filter(v => Number.isFinite(v.res) && sxDir(v.res)), worst = offs.sort((a, b) => Math.abs(b.res - (fem ? target()[0] : target()[1])) - Math.abs(a.res - (fem ? target()[0] : target()[1])))[0];
+      if (!text) {
+        if (!fr.some(Boolean)) text = def.held ? 'Glide through the vowels on one breath, about half a second each.' : `Say ${def.say.length > 1 ? 'the sentences' : 'the chain'} below at an easy pace.`;
+        else if (worst) text = `"${vowelCue(worst.key)}" sits at ${Math.round(worst.res)}, outside the band: make it ${RS_TIP[sxDir(worst.res)]}.`;
+        else if (missing.length) text = `So far so good. Still listening for ${missing.join(', ')}.`;
+        else { text = 'Every vowel in your goal band. Keep going, or pause to finish.'; ok = true; }
+      }
+      num = `${r.done} of ${def.vowels.length} vowels`;
+      prog = r.done / def.vowels.length;
+      if (r.all) ready = () => {
+        const q = D.chainCheck(d.rsFr, def.vowels), sc = Math.round(q.score), off = q.per.filter(v => sxDir(v.res));
+        const far = off.sort((a, b) => Math.abs(b.res - sc) - Math.abs(a.res - sc))[0];
+        finishReso(d, sc, `Done: ${q.per.map(v => `${vowelCue(v.key)} ${Math.round(v.res)}`).join(', ')} (goal ${target().join('-')}; middle ${sc}, spread ${Math.round(q.hi - q.lo)} points). `
+          + (off.length ? `${off.length === 1 ? 'One vowel' : `${off.length} vowels`} outside the band; "${vowelCue(far.key)}" is the one to work on: make it ${RS_TIP[sxDir(far.res)]}.` : 'Every vowel in your goal band: the resonance held while the vowels changed.'));
+      };
+    }
+    cue.textContent = who + (demo && !text ? 'playing.' : text);
+    cue.classList.toggle('ok', ok);
+    $('rs-num').textContent = (demo ? 'demo voice · ' : '') + num;
+    if (demo || d.result) return;
+    const bar = $('drill-prog'); if (bar) bar.style.width = clamp(prog * 100, 0, 100) + '%';
+    d.rsFinish = ready; // worked out afresh on every update, so a take that keeps going is scored on all of it
+    if (ready) { takeReady(d, () => d.rsFinish && d.rsFinish()); const m = $('drill-msg'); if (m) m.textContent = TAKE_READY_MSG; }
+  }
+  function finishReso(d, score, text) {
+    const def = d.def, ok = Number.isFinite(score);
+    d.result = { id: def.id, score: ok ? score : null, at: Date.now() };
+    tvyFreeze(TvY.drill);
+    $('drill-msg').textContent = text;
+    $('drill-msg').append(againNote());
+    if (!ok) return;
+    state.lastScores[def.id] = score;
+    session.drills.push({ id: def.id, label: def.cue, score, at: d.result.at, kind: 'sound' });
+    renderDrillGrid(); renderSession();
+    recordPractice(session.drills[session.drills.length - 1]);
+  }
+  function gradeReso(def, frames) {
+    const fr = frames.map(f => D.resoFrame(def, f));
+    if (def.kind === 'dog') {
+      const r = D.dogCheck(fr, state.goal);
+      if (r.pairs.length < D.DOG.pairs) return { ok: false, big: '✗', text: `${r.pairs.length} of ${D.DOG.pairs} pairs heard` };
+      const sc = Math.round(r.score);
+      return { ok: r.good === r.pairs.length && sxDir(sc) === 0, big: sc, text: `${r.pairs.map(q => `${Math.round(q.big.res)}/${Math.round(q.little.res)}`).join(', ')} · ${r.good === r.pairs.length ? 'clear change on one note' : r.pairs.some(q => q.drift > D.DOG.drift) ? 'the pitch moved' : 'too little change'}` };
+    }
+    const r = D.chainCheck(fr, def.vowels);
+    if (!r.all) return { ok: false, big: '✗', text: `${r.done} of ${def.vowels.length} vowels heard` };
+    const off = r.per.filter(v => sxDir(v.res)).map(v => vowelCue(v.key));
+    return { ok: !off.length, big: Math.round(r.score), text: off.length ? `outside the band: ${off.join(', ')}` : 'every vowel in the band' };
+  }
+  function resoProofItems(def) {
+    const fem = state.goal === 'fem', grade = (fr) => gradeReso(def, fr), mk = (o) => (fs) => {
+      const x = resoExample(fs, def, o);
+      return def.kind === 'chain' && !def.held ? Synth.concat([x, x]) : x; // words and phrases said twice, as you would
+    };
+    if (def.kind === 'dog') return [
+      { label: 'Big and little on one note', make: mk({}), grade },
+      { label: 'Hardly any change', make: mk({ big: 0.45, little: 0.6 }), grade },
+      { label: 'Pitch jumps with it', make: mk({ jump: 5 }), grade },
+    ];
+    const t = fem ? 1 : 0, back = def.vowels.slice(-2);
+    return [
+      { label: `Typical ${fem ? 'feminine' : 'masculine'} all the way`, make: mk({}), grade },
+      def.held ? { label: `"${back.map(vowelCue).join('" and "')}" slip ${fem ? 'darker' : 'brighter'}`, make: mk({ resOf: (k) => (back.includes(k) ? 1 - t : t) }), grade }
+        : { label: `Typical ${fem ? 'masculine' : 'feminine'}`, make: mk({ res: 1 - t }), grade },
     ];
   }
 

@@ -643,7 +643,39 @@
     return concat(parts);
   }
 
-  const api = { soundVals, canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu, sibilantGlide, sibExercise };
+  // ---------- resonance exercises (data/reso.json) ----------
+  // A resonance exercise said by the demo voice. Resonance is set like the demo voice's: 0 typical masculine,
+  // 1 typical feminine (formants mixed on a log scale), past either end allowed.
+  //   dog: big, little, big, little, each held about a second on one note. o.big / o.little set their
+  //        resonance (defaults: a bit darker than typical masculine, a bit brighter than typical feminine);
+  //        o.jump lifts the little dog's pitch by that many semitones (a demo of dragging the pitch along).
+  //   chain with held vowels (def.held): the vowels in one breath, gliding from each into the next.
+  //   chain of words or phrases: def.say read aloud. o.res overrides the resonance; o.vowelsOf as in readText.
+  function resoExample(fs, def, goal, VOWELS, o = {}) {
+    const fem = goal === 'fem', f0 = o.pitch || (fem ? 200 : 112), V = (k) => VOWELS.find(v => v.key === k);
+    const mix = (v, t) => v.M.map((m, i) => Math.exp(Math.log(m) + t * Math.log(v.W[i] / m)));
+    const lead = silence(fs, 0.15);
+    if (def.kind === 'dog') {
+      const v = V(def.vowel), big = o.big ?? -0.25, little = o.little ?? 1.2, up = Math.pow(2, (o.jump || 0) / 12), parts = [lead];
+      [big, little, big, little].forEach((t, i) => {
+        const p = f0 * (i % 2 ? up : 1);
+        parts.push(voiced(fs, 1.0, p * 1.01, p * 0.99, mix(v, t), { ramp: 0.06, seed: 21 + i, bright: t > 0.5 ? 0.65 : 0.35 }), silence(fs, 0.4));
+      });
+      return concat(parts);
+    }
+    const t = o.res ?? (fem ? 1 : 0);
+    if (def.held) {
+      const segs = def.vowels.map((k, i) => ({ dur: 0.6, f0a: f0 * (1.03 - 0.02 * i), f0b: f0 * (1.01 - 0.02 * i), F: mix(V(k), o.resOf ? o.resOf(k) : t), trans: 0.12 }));
+      const x = STYLE === 'natural' ? voicedRun(fs, segs, { seed: 9, ramp: 0.06 })
+        : concat(segs.map((sg, i) => voiced(fs, sg.dur, sg.f0a, sg.f0b, sg.F, { from: segs[i - 1] ? segs[i - 1].F : sg.F, to: segs[i + 1] ? segs[i + 1].F : sg.F, trans: 0.1, ramp: i === 0 || i === segs.length - 1 ? 0.06 : 0.001, seed: 9 + i })));
+      return concat([lead, x, lead]);
+    }
+    const parts = [lead];
+    for (const line of def.say) parts.push(readText(fs, line.replace(/[–—]/g, ' ').split(/\s+/).filter(Boolean), VOWELS, { pitch: f0, res: t * 100, bright: fem ? 65 : 40, rate: 0.85, vowelsOf: o.vowelsOf }).x, silence(fs, 0.35));
+    return concat(parts);
+  }
+
+  const api = { resoExample, soundVals, canSustain, sustain, setStyle, getStyle, voicedRun, demoWords, lfTable, vowel, sibilant, silence, concat, demo, demoVoice, readText, wordUnits, voiced, example, comparison, whispered, whisperExample, uwu, sibilantGlide, sibExercise };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VTSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
