@@ -186,20 +186,24 @@
   <section class="practice" data-for="practice" aria-labelledby="h-practice">
     <div class="section-head">
       <h2 id="h-practice">Practice</h2>
-      <div class="tabs" role="tablist">
-        <button type="button" role="tab" id="tab-vowels" aria-selected="true">Vowels</button>
-        <button type="button" role="tab" id="tab-sibilants" aria-selected="false">Sibilants</button>
-        <button type="button" role="tab" id="tab-words" aria-selected="false">Words</button>
-        <button type="button" role="tab" id="tab-breath" aria-selected="false">Breath</button>
-        <button type="button" role="tab" id="tab-control" aria-selected="false">Control</button>
-        <button type="button" role="tab" id="tab-whisper" aria-selected="false">Whisper</button>
-        <button type="button" role="tab" id="tab-embody" aria-selected="false">Embody</button>
-        <button type="button" role="tab" id="tab-prosody" aria-selected="false">Prosody</button>
+      <div class="tabs ptabs" role="tablist" aria-label="Practice exercises">
+        <span class="ptab-group" role="presentation"><span class="ptab-label" aria-hidden="true">Sounds</span>
+          <button type="button" role="tab" id="tab-vowels" aria-selected="true">Vowels</button>
+          <button type="button" role="tab" id="tab-sibilants" aria-selected="false">Sibilants</button>
+          <button type="button" role="tab" id="tab-words" aria-selected="false">Words</button></span>
+        <span class="ptab-group" role="presentation"><span class="ptab-label" aria-hidden="true">Skills</span>
+          <button type="button" role="tab" id="tab-resonance" aria-selected="false">Resonance</button>
+          <button type="button" role="tab" id="tab-control" aria-selected="false">Control</button>
+          <button type="button" role="tab" id="tab-breath" aria-selected="false">Breath</button>
+          <button type="button" role="tab" id="tab-expression" aria-selected="false">Expression</button></span>
       </div>
     </div>
     <div id="plan" class="plan" hidden></div>
     <div class="practice-body">
-      <div id="drill-grid" class="drill-grid" role="tabpanel"></div>
+      <div class="drill-pick">
+        <p class="tab-note muted small" id="tab-note"></p>
+        <div id="drill-grid" class="drill-grid" role="tabpanel"></div>
+      </div>
       <div id="drill-panel" class="drill-panel">
         <p class="drill-help">Pick a sound to start.<button type="button" class="info-btn inline" data-info aria-controls="info-drills" aria-describedby="info-drills" aria-expanded="false" aria-label="How drills work">i</button><span class="info-pop" id="info-drills" role="note" hidden>Pick a sound, start the microphone, then hold the sound steadily (or say the word a few times). The drill collects about a second of clean audio, scores it against typical values for that exact sound, and tells you which part of the sound to adjust.</span></p>
       </div>

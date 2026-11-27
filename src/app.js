@@ -66,6 +66,31 @@
   DRILLS.whisper = DATA.whisper.map(w => ({ ...w, type: 'whisper', steps: (fem) => w.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
   // Embodied voice: say one sound while conveying a feeling dealt from data/emotions.json. Not scored.
   DRILLS.embody = DATA.embody.map(e => ({ ...e, type: 'embody', steps: (fem) => e.steps.map(s => (typeof s === 'string' ? s : fem ? s.feminine : s.masculine)) }));
+  // The Practice tabs, by what you train. Sounds: one sound at a time, scored against typical voices for that exact
+  // sound. Skills: moving and holding resonance across sounds, checking the meter part by part, airflow, and
+  // melody and feeling. An exercise's id (what history stores) never depends on its tab, so moving one is safe.
+  // Resonance gathers what moves the whole tract: the dark-to-bright slide (a control exercise underneath)
+  // and the whispers. Expression joins intonation (prosody) and the embodied-voice game.
+  const fromList = (list, ids) => ids.map(id => list.find(x => x.id === id)).filter(Boolean);
+  DRILLS.resonance = [...fromList(DRILLS.control, ['c-slide']), ...DRILLS.whisper];
+  DRILLS.control = DRILLS.control.filter(x => !DRILLS.resonance.includes(x));
+  DRILLS.expression = [...DRILLS.prosody, ...DRILLS.embody];
+  delete DRILLS.whisper; delete DRILLS.prosody; delete DRILLS.embody;
+  const TAB_GROUPS = [
+    { label: 'Sounds', tabs: ['vowels', 'sibilants', 'words'] },
+    { label: 'Skills', tabs: ['resonance', 'control', 'breath', 'expression'] },
+  ];
+  const TABS = TAB_GROUPS.flatMap(g => g.tabs);
+  // one line under the tabs on what the tab trains, with the longer story behind an info badge
+  const TAB_NOTES = {
+    vowels: ['Hold one vowel. It is scored against typical voices for that vowel.', 'Each vowel has its own typical masculine and feminine formants (Hillenbrand 1995), so an "ee" is never judged against an "ah". Start here: the vowels are what the resonance score is made of, in readings too.'],
+    sibilants: ['Hold "sss" or "shh", then work on their brightness.', 'The first two hold one hiss and score where its energy sits. The glide, the two ladders and the word pairs train moving the hiss brighter or darker on purpose.'],
+    words: ['Say a short word a few times. Its hiss and its vowel are each scored.', 'A bridge from held sounds to speech: the hiss and the vowel straight after it, the way they meet in real words.'],
+    resonance: ['Move your resonance on purpose, and hold it while other things change.', 'These train the size of the whole tract rather than one sound: sliding dark to bright on one note, and whispering, which takes pitch out of the picture altogether.'],
+    control: ['Move one part at a time and see which reading follows it.', 'Jaw, tongue, lips and larynx each move a different formant. These build trust that the meter tracks what you do, and show you where each knob is. Pitch on its own should leave resonance alone.'],
+    breath: ['Airflow: from breathy to clear to pressed. The gauge here is breathiness.', 'A light, clear tone carries resonance best. Most are free practice with the breathiness gauge; the dog panting is a warm-up for feeling the larynx move.'],
+    expression: ['Melody and feeling: intonation patterns, and one sound said many ways.', 'Pitch patterns are checked on each phrase around your own middle pitch, so they work at any voice pitch. The embodied game is not scored.'],
+  };
   const ALL_DRILLS = [...DRILLS.vowels, ...DRILLS.sibilants, ...DRILLS.words];
   const NEED = { vowel: 50, sib: 24, wordVowel: 24, wordSib: 10, breathIn: 180, isoBase: 40, isoIn: 90, whIn: 120 }; // frames at ~60 per second
 
@@ -1213,7 +1238,9 @@
       b.addEventListener('click', () => selectDrill(def));
       grid.appendChild(b);
     }
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    for (const t of TABS) $('tab-' + t).setAttribute('aria-selected', String(state.tab === t));
+    const note = $('tab-note'), tn = TAB_NOTES[state.tab];
+    if (note && tn && note.dataset.tab !== state.tab) { note.dataset.tab = state.tab; note.textContent = tn[0]; note.append(infoBadge('About this tab', tn[1])); }
   }
   function selectDrill(def, fromPlan) {
     if (!fromPlan && state.plan && state.plan.status === 'active' && planStep() && planStep().def.id !== def.id) {
@@ -7512,7 +7539,7 @@
     $('file-in').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) playFile(f); e.target.value = ''; });
     $('btn-reset').addEventListener('click', () => { session = newSession(); resetSessionViews(); });
     $('sess-vmap').addEventListener('click', (e) => { const g = e.target.closest('[data-vm]'); const def = g && DRILLS.vowels.find(d => d.vowel === g.dataset.vm); if (def) openDrill(def); });
-    for (const t of ['vowels', 'sibilants', 'words', 'breath', 'control', 'whisper', 'embody', 'prosody']) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
+    for (const t of TABS) $('tab-' + t).addEventListener('click', () => { state.tab = t; renderDrillGrid(); });
     initSpecHelp(); initTractHelp(); initInfoBadges(); initBuildLine();
     { const h = $('info-fo-live'); if (h) h.textContent = FO_HELP; }
     document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-fo]'); if (b) setFoFocus(b.dataset.fo); });
